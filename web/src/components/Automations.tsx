@@ -15,6 +15,8 @@ import { cn } from "cn";
 import {
   automations,
   describeSchedule,
+  discordUserId,
+  isDiscordWebhook,
   live,
   weekdayName,
   type Automation,
@@ -48,12 +50,13 @@ function emptyBody(): AutomationBody {
     stages: [...STAGES],
     profile: null,
     wake: false,
+    notify: { enabled: false, webhook_url: "", mention: "" },
   };
 }
 
 function bodyOf(automation: Automation): AutomationBody {
-  const { name, enabled, schedule, target, stages, profile, wake } = automation;
-  return structuredClone({ name, enabled, schedule, target, stages, profile, wake });
+  const { name, enabled, schedule, target, stages, profile, wake, notify } = automation;
+  return structuredClone({ name, enabled, schedule, target, stages, profile, wake, notify: notify ?? emptyBody().notify });
 }
 
 // ---- header button ---------------------------------------------------------------------------
@@ -405,6 +408,11 @@ function RunRow({ run, onStop }: { run: RunRecord; onStop: () => void }) {
       <span className={cn("truncate pl-5.5 text-xs", run.error ? "text-danger" : "text-fg-3")} title={summary}>
         {summary}
       </span>
+      {run.notified && run.notified !== "sent" && (
+        <span className="truncate pl-5.5 text-xs text-[var(--warning)]" title={run.notified}>
+          Discord message {run.notified}
+        </span>
+      )}
       {run.status === "running" && progress && progress.total > 0 && (
         <Progress className="mt-2 pl-5.5" value={((progress.phase - 1 + progress.done / progress.total) / Math.max(progress.phases, 1)) * 100} aria-label="Run progress" />
       )}
@@ -491,11 +499,21 @@ function AutomationEditor({
   const set = (patch: Partial<AutomationBody>) => setBody((b) => ({ ...b, ...patch }));
   const setSchedule = (patch: Partial<AutomationBody["schedule"]>) => setBody((b) => ({ ...b, schedule: { ...b.schedule, ...patch } }));
   const setTarget = (patch: Partial<AutomationBody["target"]>) => setBody((b) => ({ ...b, target: { ...b.target, ...patch } }));
+  const setNotify = (patch: Partial<AutomationBody["notify"]>) => {
+    setTested(null);
+    setBody((b) => ({ ...b, notify: { ...b.notify, ...patch } }));
+  };
+  // The test message's outcome, shown beside the button.
+  const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
   const linked = !!ws.link;
   const chapters = project.chapters.filter((c) => c.pageIds.length > 0);
   const profileOptions: Option[] = [{ value: CURRENT, label: "Current settings" }, ...profiles.map((p) => ({ value: p.id, label: p.name }))];
-  const { schedule, target } = body;
+  const { schedule, target, notify } = body;
+  const webhookOk = isDiscordWebhook(notify.webhook_url);
+  const mentionId = discordUserId(notify.mention);
   const invalid =
+    (notify.enabled && (!webhookOk || mentionId === null)) ||
     !body.name.trim() ||
     body.stages.length === 0 ||
     (target.kind === "chapters" && target.chapter_ids.length === 0) ||
@@ -618,6 +636,54 @@ function AutomationEditor({
             </div>
           </Row>
         )}
+        <Row title="Discord" description="Post to a channel when a run finishes. Runs that find nothing new stay quiet.">
+          <label className="flex items-center gap-2 text-sm">
+            <Switch label="Post to Discord when a run finishes" checked={notify.enabled} onChange={(enabled) => setNotify({ enabled })} />
+            Post to Discord when a run finishes
+          </label>
+          {notify.enabled && (
+            <>
+              <Input
+                aria-label="Discord webhook URL"
+                placeholder="https://discord.com/api/webhooks/…"
+                value={notify.webhook_url}
+                aria-invalid={notify.webhook_url !== "" && !webhookOk}
+                onChange={(event) => setNotify({ webhook_url: event.target.value })}
+              />
+              <span className="text-xs text-fg-3">In Discord: the channel's settings, Integrations, Webhooks, New Webhook, then Copy Webhook URL.</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  aria-label="Discord user ID to mention"
+                  className="w-60"
+                  placeholder="User ID to mention (optional)"
+                  value={notify.mention}
+                  aria-invalid={mentionId === null}
+                  onChange={(event) => setNotify({ mention: event.target.value })}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!webhookOk || mentionId === null || testing}
+                  onClick={async () => {
+                    setTesting(true);
+                    try {
+                      await automations.testNotify({ ...notify, mention: mentionId ?? "" });
+                      setTested({ ok: true, text: "Sent: check the channel." });
+                    } catch (error) {
+                      setTested({ ok: false, text: describeError(error) });
+                    } finally {
+                      setTesting(false);
+                    }
+                  }}
+                >
+                  Send a test
+                </Button>
+                {tested && <span className={cn("text-xs", tested.ok ? "text-fg-2" : "text-danger")}>{tested.text}</span>}
+              </div>
+              <span className="text-xs text-fg-3">To get a user ID: turn on Developer Mode (Settings, Advanced), then right-click the user and Copy User ID.</span>
+            </>
+          )}
+        </Row>
       </ScrollArea>
       <DialogFooter className="px-5 py-4 shadow-[inset_0_1px_0_var(--border-soft)]">
         <Button variant="ghost" onClick={onCancel}>
@@ -627,7 +693,7 @@ function AutomationEditor({
           disabled={invalid || saving}
           onClick={async () => {
             setSaving(true);
-            await onSave({ ...body, name: body.name.trim() });
+            await onSave({ ...body, name: body.name.trim(), notify: { ...notify, webhook_url: notify.webhook_url.trim(), mention: mentionId ?? "" } });
             setSaving(false);
           }}
         >

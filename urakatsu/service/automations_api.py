@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from .automations import AutomationBody, ModelProfile
+from .automations import AutomationBody, ModelProfile, Notify, post_discord
 from .workspace import Workspace
 
 
@@ -39,6 +39,22 @@ def automations_router(workspace: Workspace) -> APIRouter:
     async def stop(run_id: str):
         guard(automations.stop, run_id)
         return automations.status()
+
+    @router.post("/automations/notify/test")
+    async def test_notify(body: Notify):
+        """Sends a test message to the webhook, so the menu can show whether it is set up right."""
+        guard(body.check)
+        mention = f"<@{body.mention}> " if body.mention else ""
+        payload = {
+            "username": "Urakatsu",
+            "content": f"{mention}Urakatsu automations will post here when a run finishes.",
+            "allowed_mentions": {"users": [body.mention]} if body.mention else {"parse": []},
+        }
+        try:
+            await post_discord(body.webhook_url, payload)
+        except Exception as error:  # noqa: BLE001 - reported to the menu
+            raise HTTPException(502, str(error) or error.__class__.__name__) from error
+        return {"ok": True}
 
     @router.get("/automations/profiles")
     async def profiles():

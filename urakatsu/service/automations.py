@@ -13,6 +13,8 @@ one batch runs at a time, since there is one accelerator. A batch runs stage by 
 - While a batch runs the computer is kept awake, interactive runs wait their turn
   (``Workspace.start_run`` refuses them), and settings saved meanwhile apply afterwards.
 - An automation with ``wake`` set has the computer woken for it (``core.power.WakeTask``).
+- An automation with ``notify`` on posts to a Discord webhook when a run finishes, mentioning a
+  user if one is set. A run that found nothing to do sends nothing (no message every night).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from collections import deque
@@ -28,6 +31,7 @@ from datetime import time as clock
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Optional
 
+import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from urakatsu.core import files
@@ -52,6 +56,10 @@ MAX_RUNS = 30
 DOWNLOAD_POLL_SECONDS = 3.0
 DOWNLOAD_TIMEOUT_SECONDS = 3 * 3600.0
 FILE = "automations.json"
+NOTIFY_TIMEOUT_SECONDS = 10.0
+# Only Discord's own webhook endpoints: the service posts nowhere else on a client's say-so.
+DISCORD_WEBHOOK = re.compile(r"^https://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/api(?:/v\d+)?/webhooks/\d+/[\w-]+/?$")
+DISCORD_ID = re.compile(r"^\d{15,22}$")
 
 
 # ---- models ----------------------------------------------------------------------------------
@@ -132,6 +140,30 @@ class Target(BaseModel):
     download: bool = False  # "pending": first download the source's chapters the project lacks
 
 
+class Notify(BaseModel):
+    """A Discord message when a run finishes: a channel webhook, optionally mentioning a user."""
+
+    enabled: bool = False
+    webhook_url: str = ""
+    mention: str = ""  # a Discord user ID (a "<@id>" pasted from Discord is reduced to the ID)
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("mention")
+    @classmethod
+    def _mention(cls, value: str) -> str:
+        return value.strip().removeprefix("<@").removeprefix("!").removesuffix(">").strip()
+
+    def check(self) -> None:
+        if not DISCORD_WEBHOOK.match(self.webhook_url):
+            raise ValueError("the webhook URL must be a Discord webhook (https://discord.com/api/webhooks/...)")
+        if self.mention and not DISCORD_ID.match(self.mention):
+            raise ValueError("the mention must be a Discord user ID (a long number: Developer Mode, then Copy User ID)")
+
+
 class Automation(BaseModel):
     id: str = ""
     name: str = "Overnight"
@@ -141,6 +173,7 @@ class Automation(BaseModel):
     stages: list[Stage] = Field(default_factory=Stage.all)
     profile: Optional[str] = None  # a ModelProfile id; None runs the current settings
     wake: bool = False
+    notify: Notify = Field(default_factory=Notify)
     next_run: Optional[float] = None
     created_at: float = 0.0
     # Chapters a run finished without failures; "pending" leaves them out afterwards.
@@ -157,6 +190,7 @@ class AutomationBody(BaseModel):
     stages: list[Stage] = Field(default_factory=Stage.all)
     profile: Optional[str] = None
     wake: bool = False
+    notify: Notify = Field(default_factory=Notify)
 
 
 class ChapterResult(BaseModel):
@@ -200,6 +234,7 @@ class RunRecord(BaseModel):
     chapters: list[ChapterResult] = Field(default_factory=list)
     progress: Optional[RunProgress] = None
     error: Optional[str] = None
+    notified: Optional[str] = None  # "sent", or why the Discord message was not
 
 
 class ProjectAutomations(BaseModel):
@@ -343,6 +378,8 @@ class Automations:
             raise ValueError("the chapter limit must be at least 1")
         if body.target.download and self.workspace.links.get(project_id) is None:
             raise ValueError("this project is not linked to a source, so there is nothing to download")
+        if body.notify.enabled:
+            body.notify.check()
 
     def create(self, project_id: str, body: AutomationBody) -> Automation:
         self._check(project_id, body)
@@ -515,6 +552,7 @@ class Automations:
                 self._active = None
                 self._stop = None
                 self._record(run)
+                self._notify(run)
 
     def _record(self, run: RunRecord) -> None:
         try:
@@ -523,6 +561,33 @@ class Automations:
             return  # the project was deleted
         data.runs.insert(0, run)
         del data.runs[MAX_RUNS:]
+        self._save(run.project_id)
+
+    # -- notifications -----------------------------------------------------------------------------
+
+    def _notify(self, run: RunRecord) -> None:
+        """Posts the finished run to the automation's Discord webhook, if it has one, in the background."""
+        try:
+            automation = self._find(run.project_id, run.automation_id)
+        except KeyError:
+            return
+        notify = automation.notify
+        if not notify.enabled or not notify.webhook_url:
+            return
+        if run.status == "completed" and not run.chapters and not run.downloaded:
+            return  # nothing new to process: no message every night
+        try:
+            asyncio.get_running_loop().create_task(self._send(run, notify))
+        except RuntimeError:  # no event loop (a synchronous caller)
+            pass
+
+    async def _send(self, run: RunRecord, notify: Notify) -> None:
+        try:
+            await post_discord(notify.webhook_url, discord_message(run, notify.mention))
+            run.notified = "sent"
+        except Exception as error:  # noqa: BLE001 - recorded on the run
+            log.warning("could not post automation run %s to Discord: %s", run.id, error)
+            run.notified = f"not sent: {error}"
         self._save(run.project_id)
 
     async def close(self) -> None:
@@ -680,12 +745,68 @@ class Automations:
         return sum(1 for c in (view.chapters if view else []) if c.id in picked and c.chapter_id)
 
 
+# ---- Discord ---------------------------------------------------------------------------------------
+
+_OUTCOME = {
+    "completed": ("finished", 0x30A46C),
+    "stopped": ("was stopped", 0xF5A524),
+    "failed": ("failed", 0xE5484D),
+}
+
+
+def _duration(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes} min" if hours else f"{minutes} min {secs} s" if minutes else f"{secs} s"
+
+
+def discord_message(run: RunRecord, mention: str = "") -> dict:
+    """The webhook body for a finished run: a line (with the mention) and an embed of what it did.
+    Only the mentioned user can be pinged, whatever chapter names or errors contain."""
+    verb, color = _OUTCOME.get(run.status, ("finished", 0x30A46C))
+    title = f"{run.automation_name} {verb}"
+    fields = [{"name": "Project", "value": run.project_name or run.project_id, "inline": True}]
+    if run.chapters:
+        done = sum(1 for chapter in run.chapters if chapter.status == "done")
+        problems = len(run.chapters) - done
+        summary = f"{done} done" + (f", {problems} with problems" if problems else "")
+        names = ", ".join(chapter.name for chapter in run.chapters[:10]) + (", ..." if len(run.chapters) > 10 else "")
+        fields.append({"name": "Chapters", "value": f"{summary}\n{names}"[:1024], "inline": False})
+        fields.append({"name": "Pages", "value": str(sum(chapter.pages for chapter in run.chapters)), "inline": True})
+    if run.downloaded:
+        fields.append({"name": "Downloaded", "value": f"{run.downloaded} chapter{'s' if run.downloaded != 1 else ''}", "inline": True})
+    if run.started_at and run.finished_at:
+        fields.append({"name": "Took", "value": _duration(run.finished_at - run.started_at), "inline": True})
+    if run.error:
+        fields.append({"name": "Error", "value": run.error[:1024], "inline": False})
+    embed = {"title": title[:256], "color": color, "fields": fields, "footer": {"text": "Urakatsu automation"}}
+    if run.finished_at:
+        embed["timestamp"] = datetime.fromtimestamp(run.finished_at).astimezone().isoformat()
+    return {
+        "username": "Urakatsu",
+        "content": (f"<@{mention}> {title}" if mention else title)[:2000],
+        "allowed_mentions": {"users": [mention]} if mention else {"parse": []},
+        "embeds": [embed],
+    }
+
+
+async def post_discord(webhook_url: str, payload: dict) -> None:
+    """Posts to a Discord webhook; raises with Discord's answer when it refuses."""
+    if not DISCORD_WEBHOOK.match(webhook_url):
+        raise ValueError("not a Discord webhook URL")
+    async with httpx.AsyncClient(timeout=NOTIFY_TIMEOUT_SECONDS) as client:
+        response = await client.post(webhook_url, json=payload)
+    if response.status_code >= 400:
+        raise RuntimeError(f"Discord answered {response.status_code}: {response.text[:200]}")
+
+
 __all__ = [
     "Automation",
     "AutomationBody",
     "Automations",
     "ChapterResult",
     "ModelProfile",
+    "Notify",
     "RunRecord",
     "Schedule",
     "Target",

@@ -25,6 +25,14 @@ export interface Target {
   download: boolean;
 }
 
+/** A Discord message when a run finishes: a channel webhook, optionally mentioning a user. */
+export interface Notify {
+  enabled: boolean;
+  webhook_url: string;
+  /** A Discord user ID; "" mentions nobody. */
+  mention: string;
+}
+
 export interface AutomationBody {
   name: string;
   enabled: boolean;
@@ -34,6 +42,7 @@ export interface AutomationBody {
   /** A model profile id; null runs the current settings. */
   profile: string | null;
   wake: boolean;
+  notify: Notify;
 }
 
 export interface Automation extends AutomationBody {
@@ -100,6 +109,8 @@ export interface RunRecord {
   chapters: ChapterResult[];
   progress: RunProgress | null;
   error: string | null;
+  /** "sent", or why the Discord message was not; null when there was none to send. */
+  notified: string | null;
 }
 
 export interface ProjectAutomations {
@@ -130,7 +141,20 @@ export const automations = {
   remove: (projectId: string, id: string) => call<ProjectAutomations>(one(projectId, id), { method: "DELETE" }),
   run: (projectId: string, id: string) => call<ProjectAutomations>(`${one(projectId, id)}/run`, { method: "POST" }),
   reset: (projectId: string, id: string) => call<ProjectAutomations>(`${one(projectId, id)}/reset`, { method: "POST" }),
+  /** Posts a test message to the webhook (the service refuses anything but Discord webhooks). */
+  testNotify: (notify: Notify) => call<{ ok: boolean }>("/automations/notify/test", json("POST", notify)),
 };
+
+const DISCORD_WEBHOOK = /^https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d+\/[\w-]+\/?$/;
+
+/** Whether `url` is a Discord webhook, as the service checks it. */
+export const isDiscordWebhook = (url: string) => DISCORD_WEBHOOK.test(url.trim());
+
+/** A user ID from what was typed or pasted ("<@123…>" from Discord), or null when it is not one. */
+export function discordUserId(text: string): string | null {
+  const id = text.trim().replace(/^<@!?/, "").replace(/>$/, "").trim();
+  return id === "" || /^\d{15,22}$/.test(id) ? id : null;
+}
 
 /** A run that has not finished yet. */
 export function live(run: RunRecord): boolean {

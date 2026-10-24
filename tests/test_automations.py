@@ -362,3 +362,85 @@ async def test_json_routes(workspace):
         assert (await client.get(f"/projects/{project_id}/automations")).json()["automations"][0]["profile"] is None
         deleted = (await client.delete(f"/projects/{project_id}/automations/{automation['id']}")).json()
         assert deleted["automations"] == []
+
+
+HOOK = "https://discord.com/api/webhooks/123456789012345678/abc-DEF_123"
+USER = "234567890123456789"
+
+
+def test_discord_notify_settings_are_checked(workspace):
+    from urakatsu.service.automations import Notify
+
+    ws = workspace
+    project_id, _ = chaptered(ws)
+    with pytest.raises(ValueError):
+        ws.automations.create(project_id, AutomationBody(notify=Notify(enabled=True, webhook_url="https://example.com/hook")))
+    with pytest.raises(ValueError):
+        ws.automations.create(project_id, AutomationBody(notify=Notify(enabled=True, webhook_url=HOOK, mention="bob")))
+    automation = ws.automations.create(project_id, AutomationBody(notify=Notify(enabled=True, webhook_url=f" {HOOK} ", mention=f"<@!{USER}>")))
+    assert (automation.notify.webhook_url, automation.notify.mention) == (HOOK, USER)  # as pasted from Discord
+    ws.automations.create(project_id, AutomationBody(notify=Notify(enabled=False, webhook_url="unfinished")))  # off: not checked
+
+
+async def test_a_finished_run_is_posted_to_discord_with_its_mention(workspace, monkeypatch):
+    from urakatsu.service.automations import Notify
+
+    ws = workspace
+    project_id, chapters = chaptered(ws)
+    sent = []
+
+    async def post(url, payload):
+        sent.append((url, payload))
+
+    monkeypatch.setattr(automations_module, "post_discord", post)
+    notify = Notify(enabled=True, webhook_url=HOOK, mention=USER)
+    automation = ws.automations.create(project_id, AutomationBody(name="Nightly", schedule=Schedule(kind="manual"), notify=notify))
+
+    ws.automations.run_now(project_id, automation.id)
+    await drain(ws)
+    await asyncio.sleep(0.05)  # the post goes out in the background
+    ((url, payload),) = sent
+    assert url == HOOK and payload["content"] == f"<@{USER}> Nightly finished"
+    assert payload["allowed_mentions"] == {"users": [USER]}  # nobody else can be pinged
+    fields = {field["name"]: field["value"] for field in payload["embeds"][0]["fields"]}
+    assert fields["Project"] == "Series" and fields["Chapters"].startswith("3 done") and fields["Pages"] == "6"
+    assert ws.automations.runs(project_id)[0].notified == "sent"
+
+    # A run that finds nothing to do stays quiet.
+    ws.automations.run_now(project_id, automation.id)
+    await drain(ws)
+    await asyncio.sleep(0.05)
+    assert len(sent) == 1
+
+    # A refused post is recorded on the run.
+    async def refuse(url, payload):
+        raise RuntimeError("Discord answered 404: Unknown Webhook")
+
+    monkeypatch.setattr(automations_module, "post_discord", refuse)
+    again = ws.automations.create(project_id, AutomationBody(name="Again", schedule=Schedule(kind="manual"), target=Target(kind="chapters", chapter_ids=chapters[:1]), notify=notify))
+    ws.automations.run_now(project_id, again.id)
+    await drain(ws)
+    await asyncio.sleep(0.05)
+    assert ws.automations.runs(project_id)[0].notified == "not sent: Discord answered 404: Unknown Webhook"
+
+
+async def test_the_notify_test_route(workspace, monkeypatch):
+    ws = workspace
+    sent = []
+
+    async def post(url, payload):
+        sent.append(payload)
+
+    monkeypatch.setattr("urakatsu.service.automations_api.post_discord", post)
+    app = build_app(ws, UrakatsuServicer(ws), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test/api/v1") as client:
+        assert (await client.post("/automations/notify/test", json={"webhook_url": "https://example.com/x"})).status_code == 400
+        ok = await client.post("/automations/notify/test", json={"webhook_url": HOOK, "mention": USER})
+        assert ok.status_code == 200 and sent[0]["content"].startswith(f"<@{USER}>")
+
+        async def refuse(url, payload):
+            raise RuntimeError("Discord answered 401")
+
+        monkeypatch.setattr("urakatsu.service.automations_api.post_discord", refuse)
+        failed = await client.post("/automations/notify/test", json={"webhook_url": HOOK})
+        assert failed.status_code == 502 and "401" in failed.json()["detail"]
