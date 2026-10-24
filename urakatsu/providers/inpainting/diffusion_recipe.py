@@ -232,14 +232,17 @@ class DiffusionRecipeProvider(InpaintingProvider):
         # When the components do not fit the GPU together, keep them in RAM and move each one
         # in only while it runs (text encoder, then diffusion model, then VAE), as the model
         # docs do: the GPU is shared with the other stages' models and other programs, and
-        # placement alone leaves no room for the compute buffers.
-        offload = device.is_accelerator and total > 0.8 * (device.memory_free or device.memory_total)
+        # placement alone leaves no room for the compute buffers. ``--offload-to-cpu`` pins every
+        # weight in RAM and turns ``--auto-fit`` off, so when RAM cannot hold them either (Qwen
+        # Image on 16 GB) leave placement to ``--auto-fit``: GPU, then RAM, then disk.
+        ram_available = system_profile().ram_available
+        offload = device.is_accelerator and total > 0.8 * (device.memory_free or device.memory_total) and total <= 0.9 * ram_available
         if offload:
             args.append("--offload-to-cpu")
         # Memory-mapping only speeds up loading. With offload the weights then live in mapped
         # pages that Windows evicts and re-reads from disk for every image: on a hard drive that
         # was ~5 MB/s and minutes per crop. Read them into RAM once when it fits.
-        if not offload or system_profile().ram_available < 1.2 * total:
+        if not offload or ram_available < 1.2 * total:
             args.append("--mmap")
         _release_torch_cache()
         name = re.sub(r"[^A-Za-z0-9_.-]+", "-", installed.id)[:60]

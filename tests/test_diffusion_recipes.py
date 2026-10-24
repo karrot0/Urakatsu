@@ -94,12 +94,19 @@ def test_companions_are_picked_sensibly():
     assert pick("llm_vision", slot_candidates("llm_vision", "q", gguf_repo)).path.startswith("mmproj-Qwen3VL-8B-Instruct-F16")
 
 
-def test_diffusion_fit_counts_the_largest_part_on_the_gpu_and_the_total_in_ram():
+def test_diffusion_fit_streams_parts_and_keeps_the_diffusion_model_off_disk():
     gpu = [Device.gpu(Backend.CUDA, 0, "RTX", memory_total=12 * GB), Device.cpu()]
     system = SystemProfile(ram_total=32 * GB, ram_available=8 * GB)
     assert fitting.fit_diffusion([4 * GB, 9 * GB, GB], gpu, system).level == "offload"  # runs one part at a time
     assert fitting.fit_diffusion([3 * GB, 2 * GB, GB], gpu, system).level == "gpu"
-    assert fitting.fit_diffusion([14 * GB, 9 * GB], gpu, system).level == "cpu"
+    assert fitting.fit_diffusion([14 * GB, 9 * GB], gpu, system).level == "offload"  # streamed in segments
+    # Qwen Image Q4_0 with its 8.7 GB text encoder on an 8 GB GPU and 16 GB of RAM.
+    small = [Device.gpu(Backend.CUDA, 0, "RTX 3060 Ti", memory_total=8 * GB), Device.cpu()]
+    laptop = SystemProfile(ram_total=16 * GB, ram_available=4 * GB)
+    assert fitting.fit_diffusion([int(3.9 * GB), int(8.7 * GB), int(0.6 * GB)], small, laptop).level == "offload"
+    big = fitting.fit_diffusion([12 * GB, 16 * GB], small, laptop)  # the text encoder spills to disk
+    assert big.level == "offload" and len(big.notes) == 2
+    assert fitting.fit_diffusion([24 * GB, GB], small, laptop).level == "too_large"  # the model itself would stream from disk
 
 
 # ---- the catalog with a fake Hub -----------------------------------------------------------------

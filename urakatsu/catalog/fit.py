@@ -7,8 +7,8 @@ hardware-compatibility badges and LM Studio's offload hints:
   The KV cache comes from the GGUF header (layers, KV heads, key/value width; only
   full-attention layers for hybrid models).
 - Diffusion models: the sum of the components (diffusion model, text encoder, VAE) plus
-  activations; stable-diffusion.cpp can keep weights in RAM and stream the active one to
-  the GPU (``--offload-to-cpu``), which is the ``offload`` level.
+  activations; stable-diffusion.cpp can keep weights in RAM or on disk and stream them to
+  the GPU segment by segment (``--auto-fit``), which is the ``offload`` level.
 - PyTorch / ONNX models: weights + a fixed runtime overhead; there is no partial offload.
 """
 
@@ -78,21 +78,28 @@ def fit_llm(weights: int, kv: int, devices: list[Device], system: SystemProfile)
 
 
 def fit_diffusion(components: list[int], devices: list[Device], system: SystemProfile) -> Fit:
-    """stable-diffusion.cpp runs the text encoder, the diffusion model and the VAE one after
-    another, memory-maps their weights and fits each onto the GPU as it runs (``--auto-fit``):
-    the largest component must fit in VRAM, and all of them in installed RAM (mapped weights
-    are paged in from disk, so free RAM is not the limit)."""
+    """``components[0]`` is the diffusion model, the rest its companions (text encoder, VAE).
+
+    stable-diffusion.cpp runs the text encoder, the diffusion model and the VAE one after another,
+    and ``--auto-fit`` places their weights on the GPU, then in RAM, then on disk (diffusion model
+    first), streaming each segment to the GPU as it runs: no component has to fit in VRAM whole.
+    The diffusion model runs at every step, so it must fit in VRAM and installed RAM together;
+    the text encoder and VAE run once per image and may be read back from disk."""
     total = sum(components)
-    largest = max(components, default=0)
+    model = components[0] if components else 0
+    required = total + DIFFUSION_ACTIVATIONS
     vram = usable_vram(devices, system)
     ram = int(system.ram_total * RAM_SHARE)
-    if vram and total + DIFFUSION_ACTIVATIONS <= vram:
-        return Fit("gpu", total + DIFFUSION_ACTIVATIONS, total, 0, 1.0)
-    if vram and largest + DIFFUSION_ACTIVATIONS <= vram and total <= ram:
-        return Fit("offload", total + DIFFUSION_ACTIVATIONS, total, 0, (largest + DIFFUSION_ACTIVATIONS) / (total + DIFFUSION_ACTIVATIONS), ["Weights stay in RAM and move to the GPU as each part runs (slower)."])
-    if total + DIFFUSION_ACTIVATIONS <= ram:
-        return Fit("cpu", total + DIFFUSION_ACTIVATIONS, total, 0, 0.0, ["Runs on the CPU; diffusion on a CPU takes minutes per page."] + _cpu_notes(system))
-    return Fit("too_large", total + DIFFUSION_ACTIVATIONS, total, 0, 0.0, ["Needs more memory than this machine has free."])
+    if vram and required <= vram:
+        return Fit("gpu", required, total, 0, 1.0)
+    if vram > DIFFUSION_ACTIVATIONS and model + DIFFUSION_ACTIVATIONS <= vram + ram:
+        notes = ["Weights stay in RAM and move to the GPU as each part runs (slower)."]
+        if total > vram + ram:
+            notes.append("The text encoder does not fit in RAM as well, so it is read from disk for each image.")
+        return Fit("offload", required, total, 0, min(1.0, vram / required), notes)
+    if required <= ram:
+        return Fit("cpu", required, total, 0, 0.0, ["Runs on the CPU; diffusion on a CPU takes minutes per page."] + _cpu_notes(system))
+    return Fit("too_large", required, total, 0, 0.0, ["Needs more memory than this machine has free."])
 
 
 def fit_dense(weights: int, devices: list[Device], system: SystemProfile) -> Fit:
