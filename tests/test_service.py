@@ -453,6 +453,12 @@ def test_text_gradients_round_trip_and_clear(workspace):
     assert message.fill_gradient.stops[1].color == "#f09819ff" and message.stroke_gradient.kind == "radial"
     assert convert.typography_from_proto(message)["fill_gradient"]["angle"] == 45
 
+    # A gradient can also belong to a run of the translation.
+    view = workspace.update_text_block(project, page, block.layer_id, {"translation": "hot words", "translation_styles": [{"start": 0, "end": 3, "gradient": sunset}]})
+    [style] = view.blocks[0].translation_styles
+    assert (style.start, style.end, style.gradient.angle) == (0, 3, 45)
+    assert convert.page_to_proto(view).blocks[0].translation_styles[0].gradient.stops[0].color == "#ff512fff"
+
     # Another property keeps them; unset or a single stop clears one.
     view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"size": 30, "auto_fit": False}})
     assert view.blocks[0].typography.fill_gradient is not None

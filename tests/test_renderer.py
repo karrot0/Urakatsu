@@ -720,3 +720,24 @@ def test_text_gradients_are_laid_over_the_text_like_photoshop():
     assert border and all(r.gradient is not None and r.gradient.kind == "radial" for r in border)  # drawn though its colour is clear
     assert any(r.gradient is not None and r.gradient.kind == "linear" for r in fills)
     assert any(r.gradient is None and r.color == (0, 160, 0, 255) for r in fills)  # the green run keeps its colour
+
+
+def test_a_run_gradient_spans_only_its_own_words():
+    from urakatsu.renderer.text_renderer import GlyphRun, GradientSpec, TextRenderer, TextStyleRun
+
+    fonts = Fonts()
+    fire = GradientSpec("linear", 0.0, ((0.0, (255, 0, 0, 255)), (1.0, (255, 255, 0, 255))))
+    text = "plain hot words and hot again"
+    first, second = text.index("hot"), text.rindex("hot")
+    styles = [TextStyleRun(start=first, end=first + 3, gradient=fire), TextStyleRun(start=second, end=second + 3, gradient=fire)]
+    node = TextRenderer().render_descriptor(_rich_descriptor(text, styles), fonts)
+    painted = [r for r in node.scene.runs if isinstance(r, GlyphRun) and r.gradient is not None]
+    plain = [r for r in node.scene.runs if isinstance(r, GlyphRun) and r.gradient is None]
+    assert len(painted) == 2 and plain  # each "hot" has its own gradient; the rest is the layer's colour
+    a, b = sorted(painted, key=lambda r: r.gradient.start[0])
+    for run in (a, b):
+        xs = [x for _, x, _ in run.glyphs]
+        # 0 degrees runs left to right across the word itself, not the whole line.
+        # (It spans the ink, so it can start a side bearing after the first glyph's origin.)
+        assert run.gradient.start[0] <= min(xs) + 6 and run.gradient.end[0] >= max(xs) and run.gradient.end[0] - run.gradient.start[0] < 120
+    assert a.gradient.end[0] < b.gradient.start[0]

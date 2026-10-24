@@ -47,6 +47,8 @@ def text_style_to_proto(style) -> pb.TextStyle:
         message.font = style.font
     if style.scale is not None:
         message.scale = style.scale
+    if style.gradient is not None:
+        message.gradient.CopyFrom(_gradient_to_proto(style.gradient))
     return message
 
 
@@ -61,6 +63,7 @@ def text_style_from_proto(message: pb.TextStyle) -> dict[str, Any]:
         "color": message.color if message.HasField("color") else None,
         "font": message.font or None,
         "scale": message.scale if message.HasField("scale") else None,
+        "gradient": _gradient_dict(message.gradient) if message.HasField("gradient") else None,
     }
 
 
@@ -83,17 +86,22 @@ def typography_to_proto(view: Optional[TypographyView]) -> Optional[pb.Typograph
     for key in ("fill_gradient", "stroke_gradient"):
         gradient = getattr(view, key)
         if gradient is not None:
-            getattr(message, key).CopyFrom(
-                pb.Gradient(kind=gradient.kind, angle=gradient.angle, stops=[pb.GradientStop(offset=s.offset, color=s.color) for s in gradient.stops])
-            )
+            getattr(message, key).CopyFrom(_gradient_to_proto(gradient))
     return message
+
+
+def _gradient_to_proto(gradient) -> pb.Gradient:
+    return pb.Gradient(kind=gradient.kind, angle=gradient.angle, stops=[pb.GradientStop(offset=s.offset, color=s.color) for s in gradient.stops])
+
+
+def _gradient_dict(gradient: pb.Gradient) -> dict[str, Any]:
+    return {"kind": gradient.kind or "linear", "angle": gradient.angle, "stops": [{"offset": s.offset, "color": s.color} for s in gradient.stops]}
 
 
 def _gradient_from_proto(message: pb.Typography, key: str) -> Optional[dict[str, Any]]:
     if not message.HasField(key):
         return None
-    gradient = getattr(message, key)
-    return {"kind": gradient.kind or "linear", "angle": gradient.angle, "stops": [{"offset": s.offset, "color": s.color} for s in gradient.stops]}
+    return _gradient_dict(getattr(message, key))
 
 
 def typography_from_proto(message: pb.Typography) -> dict[str, Any]:

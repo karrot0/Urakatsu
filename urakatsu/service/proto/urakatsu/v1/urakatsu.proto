@@ -202,6 +202,7 @@ message TextStyle {
   optional string color = 7;        // #rrggbbaa
   string font = 8;                  // a family of its own, or "" for the layer's
   optional double scale = 9;        // size relative to the layer's; unset is 1
+  Gradient gradient = 10;           // a fill gradient over these characters alone
 }
 
 // A text layer with its semantic content and analysis region (document view).

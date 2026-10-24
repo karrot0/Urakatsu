@@ -426,7 +426,7 @@ class Workspace:
             text = patch["translation"] or ""
             # Rich text comes with the text it formats; a translation without styles is plain.
             styles = [
-                c.TextStyle(**{**style, "color": parse_rgba(style.get("color"))})
+                c.TextStyle(**{**style, "color": parse_rgba(style.get("color")), "gradient": _gradient(style.get("gradient"))})
                 for style in patch.get("translation_styles") or []
             ]
             styles = c.normalize_text_styles(styles, len(text))
@@ -820,6 +820,16 @@ def _png(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def _gradient(data: Optional[dict[str, Any]]) -> Optional[c.Gradient]:
+    """A gradient from the client's form (hex colours); fewer than two stops is no gradient."""
+    if not data:
+        return None
+    stops = [c.GradientStop(offset=float(stop["offset"]), color=parse_rgba(stop["color"])) for stop in data.get("stops", []) if parse_rgba(stop.get("color"))]
+    if len(stops) < 2:
+        return None
+    return c.Gradient(kind=c.GradientKind(data.get("kind") or "linear"), angle=float(data.get("angle", 90.0)), stops=stops)
+
+
 def _typography(data: dict[str, Any], current: Optional[c.Typography]) -> c.Typography:
     """Merges ``data`` (the properties the user set) into the layer's style, which becomes user-authored.
 
@@ -850,10 +860,7 @@ def _typography(data: dict[str, Any], current: Optional[c.Typography]) -> c.Typo
             value[key] = parse_rgba(data[key])
     for key in ("fill_gradient", "stroke_gradient"):
         if key in data:
-            gradient = data[key]
-            stops = [c.GradientStop(offset=float(stop["offset"]), color=parse_rgba(stop["color"])) for stop in (gradient or {}).get("stops", []) if parse_rgba(stop.get("color"))]
-            # Fewer than two stops is no gradient.
-            value[key] = c.Gradient(kind=c.GradientKind(gradient.get("kind") or "linear"), angle=float(gradient.get("angle", 90.0)), stops=stops) if len(stops) >= 2 else None
+            value[key] = _gradient(data[key])
     if not value.get("auto_fit", True) and value.get("size") is None:
         raise ValueError("a fixed-size typography needs a size")
     return c.Typography(**value)

@@ -520,6 +520,7 @@ class _Traversal:
                     color=tuple(style.color) if style.color else None,
                     font=style.font,
                     scale=style.scale or 1.0,
+                    gradient=_gradient_spec(style.gradient),
                 )
                 for style in c.normalize_text_styles(translation.styles, len(text))
             ],

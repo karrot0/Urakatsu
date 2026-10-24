@@ -279,7 +279,7 @@ class Typography(_message.Message):
     def __init__(self, preferred_font: _Optional[str] = ..., font_weight: _Optional[int] = ..., font_style: _Optional[str] = ..., size: _Optional[float] = ..., auto_fit: _Optional[bool] = ..., color: _Optional[str] = ..., stroke_color: _Optional[str] = ..., stroke_width: _Optional[float] = ..., alignment: _Optional[str] = ..., writing_mode: _Optional[str] = ..., authored: _Optional[bool] = ..., fill_gradient: _Optional[_Union[Gradient, _Mapping]] = ..., stroke_gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
 
 class TextStyle(_message.Message):
-    __slots__ = ("start", "end", "bold", "italic", "underline", "strikethrough", "color", "font", "scale")
+    __slots__ = ("start", "end", "bold", "italic", "underline", "strikethrough", "color", "font", "scale", "gradient")
     START_FIELD_NUMBER: _ClassVar[int]
     END_FIELD_NUMBER: _ClassVar[int]
     BOLD_FIELD_NUMBER: _ClassVar[int]
@@ -289,6 +289,7 @@ class TextStyle(_message.Message):
     COLOR_FIELD_NUMBER: _ClassVar[int]
     FONT_FIELD_NUMBER: _ClassVar[int]
     SCALE_FIELD_NUMBER: _ClassVar[int]
+    GRADIENT_FIELD_NUMBER: _ClassVar[int]
     start: int
     end: int
     bold: bool
@@ -298,7 +299,8 @@ class TextStyle(_message.Message):
     color: str
     font: str
     scale: float
-    def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., bold: _Optional[bool] = ..., italic: _Optional[bool] = ..., underline: _Optional[bool] = ..., strikethrough: _Optional[bool] = ..., color: _Optional[str] = ..., font: _Optional[str] = ..., scale: _Optional[float] = ...) -> None: ...
+    gradient: Gradient
+    def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., bold: _Optional[bool] = ..., italic: _Optional[bool] = ..., underline: _Optional[bool] = ..., strikethrough: _Optional[bool] = ..., color: _Optional[str] = ..., font: _Optional[str] = ..., scale: _Optional[float] = ..., gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
 
 class TextBlock(_message.Message):
     __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles")

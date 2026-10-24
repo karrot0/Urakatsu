@@ -95,6 +95,7 @@ class TextStyleRun:
     color: Optional[Rgba] = None
     font: Optional[str] = None  # a family of its own
     scale: float = 1.0  # size relative to the layer's
+    gradient: Optional["GradientSpec"] = None  # over these characters' own bounds
 
 
 @dataclass
@@ -231,6 +232,7 @@ class TextRenderer:
                 _GlyphPaint(color=options.stroke.color, dilation_px=options.stroke.width_px, gradient=stroke_gradient),
                 styles,
             )
+        run_gradients = _run_gradients(layout, styles, options) if styles else {}
         _draw_layout(
             scene,
             layout,
@@ -239,6 +241,7 @@ class TextRenderer:
             transform,
             _GlyphPaint(color=options.color, dilation_px=0.0, gradient=fill_gradient),
             styles,
+            run_gradients,
         )
 
     def render_descriptor(self, descriptor: TextNodeDescriptor, fonts: Fonts) -> RenderedTextNode:
@@ -413,6 +416,30 @@ def _placement(rect, width: float, height: float) -> tuple[float, float]:
     return x, y
 
 
+def _run_gradients(layout: LayoutRun, styles: list[Optional[TextStyleRun]], options: TextRenderOptions) -> dict[int, GradientPaint]:
+    """Each run with a gradient of its own, laid over the ink bounds of its glyphs (across lines when it
+    wraps), keyed by the run (``id``: two runs with the same formatting keep their own bounds)."""
+    bounds: dict[int, list[float]] = {}
+    specs: dict[int, GradientSpec] = {}
+    for line in layout.lines:
+        baseline_x, baseline_y = line.baseline
+        pen_x = pen_y = 0.0
+        for glyph in line.glyphs:
+            style = styles[min(max(glyph.cluster, 0), len(styles) - 1)]
+            if style is not None and style.gradient is not None:
+                ink = glyph.font.glyph_bounds(glyph.glyph_id, layout.font_size * glyph.scale)
+                if ink is not None:
+                    x = options.padding + baseline_x + pen_x + glyph.x_offset
+                    y = options.padding + baseline_y + pen_y - glyph.y_offset - options.baseline_shift
+                    x0, y0, x1, y1 = x + ink[0], y - ink[3], x + ink[2], y - ink[1]  # glyph bounds are y-up
+                    box = bounds.setdefault(id(style), [x0, y0, x1, y1])
+                    box[:] = [min(box[0], x0), min(box[1], y0), max(box[2], x1), max(box[3], y1)]
+                    specs[id(style)] = style.gradient
+            pen_x += glyph.x_advance
+            pen_y -= glyph.y_advance
+    return {key: place_gradient(specs[key], x0, y0, x1 - x0, y1 - y0) for key, (x0, y0, x1, y1) in bounds.items()}
+
+
 def _styles_per_character(styles: list[TextStyleRun], length: int) -> list[Optional[TextStyleRun]]:
     per_char: list[Optional[TextStyleRun]] = [None] * length
     for style in styles:
@@ -429,6 +456,7 @@ def _draw_layout(
     transform: Affine,
     paint: _GlyphPaint,
     styles: Optional[list[Optional[TextStyleRun]]] = None,
+    run_gradients: Optional[dict[int, GradientPaint]] = None,
 ) -> None:
     """``draw_layout``: groups consecutive glyphs by font (and rich text colour) and records one run
     per group, then the line's underline and strikethrough bars."""
@@ -440,9 +468,13 @@ def _draw_layout(
         return styles[min(max(cluster, 0), len(styles) - 1)]
 
     def gradient_of(cluster: int) -> Optional[GradientPaint]:
-        # A run's own colour wins over the fill gradient; the border's gradient covers everything.
+        # A run's own gradient, then its colour, win over the fill gradient; the border's covers everything.
         style = style_of(cluster)
-        return paint.gradient if border or style is None or style.color is None else None
+        if border or style is None:
+            return paint.gradient
+        if style.gradient is not None and run_gradients:
+            return run_gradients.get(id(style), paint.gradient)
+        return paint.gradient if style.color is None else None
 
     def color_of(cluster: int) -> Rgba:
         style = style_of(cluster)

@@ -9,7 +9,9 @@ import { Bold, Italic, RemoveFormatting, Strikethrough, Underline, type LucideIc
 import { cn } from "cn";
 
 import { fieldChrome } from "@/components/ui/input";
-import { fromDom, sameStyles, toHtml, type RichStyle } from "../richText";
+import type { Gradient } from "../gen/urakatsu/v1/urakatsu_pb";
+import { cssGradient, fromDom, gradientData, gradientFrom, sameStyles, toHtml, type RichStyle } from "../richText";
+import { GradientField } from "./GradientField";
 import { FontPicker } from "./FontPicker";
 import { ColorWell, Select, Tooltip } from "./primitives";
 
@@ -50,18 +52,31 @@ function pointAt(root: HTMLElement, index: number): [Node, number] {
 const SIZES = ["0.5", "0.75", "0.9", "1", "1.25", "1.5", "2", "3"] as const;
 const SIZE_OPTIONS = SIZES.map((value) => ({ value, label: value === "1" ? "100% (layer size)" : `${Math.round(Number(value) * 100)}%` }));
 
-/** The family and size the editor set at a node (em sizes nest, so they multiply). */
-function explicitAt(root: HTMLElement, node: Node | null): { font: string; scale: number } {
+/** The family, size and gradient the editor set at a node (em sizes nest, so they multiply). */
+function explicitAt(root: HTMLElement, node: Node | null): { font: string; scale: number; gradient?: Gradient } {
   let font = "";
   let scale = 1;
+  let gradient: Gradient | undefined;
+  let gradientDone = false;
   for (let el = node instanceof Element ? node : (node?.parentElement ?? null); el && el !== root; el = el.parentElement) {
     if (!(el instanceof HTMLElement)) continue;
     if (!font && el.style.fontFamily && el.style.fontFamily !== "inherit") font = el.style.fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
     const size = el.style.fontSize.match(/^([\d.]+)em$/);
     if (size) scale *= Number(size[1]);
+    if (!gradientDone && el.dataset.gradient !== undefined) {
+      gradientDone = true;
+      try {
+        gradient = el.dataset.gradient === "none" ? undefined : gradientFrom(JSON.parse(el.dataset.gradient));
+      } catch {
+        gradient = undefined;
+      }
+    }
   }
-  return { font, scale };
+  return { font, scale, gradient };
 }
+
+// The colour that marks a selection while it becomes a gradient (never left in the text).
+const GRADIENT_MARK = "#010203";
 
 const TOOL_BUTTON =
   "grid size-6 cursor-pointer place-items-center rounded-control text-icon-2 transition-colors duration-[20ms] ease-in hover:bg-hover hover:text-icon focus-visible:shadow-focus focus-visible:outline-none aria-pressed:bg-selected aria-pressed:text-fg";
@@ -82,7 +97,18 @@ export function RichTextField({
   onCommit: (text: string, styles: RichStyle[]) => void;
   /** On the canvas: the editable area sits in its box with this look (soft line breaks where the
    * render's lines start), the toolbar floats above it. */
-  overlay?: { style?: CSSProperties; className?: string; boxClassName?: string; softBreaks?: readonly number[] };
+  overlay?: {
+    /** The text's look, shared by the editable text and the border behind it. */
+    style?: CSSProperties;
+    /** The fill, on the editable text only. */
+    fillStyle?: CSSProperties;
+    /** The border, drawn by a copy of the text behind it; none without a border. */
+    underlayStyle?: CSSProperties;
+    className?: string;
+    boxClassName?: string;
+    vertical?: boolean;
+    softBreaks?: readonly number[];
+  };
   /** Esc or Ctrl+Enter in the on-canvas editor: saved, now close it. */
   onDone?: () => void;
 }) {
@@ -91,7 +117,21 @@ export function RichTextField({
   // commits, and the editor is drawn again from the saved text), then formats it.
   const selected = useRef<[number, number] | null>(null);
   const [active, setActive] = useState<Record<string, boolean>>({});
-  const [at, setAt] = useState({ font: "", scale: 1 });
+  const [at, setAt] = useState<{ font: string; scale: number; gradient?: Gradient }>({ font: "", scale: 1 });
+  // On the canvas: an exact copy behind the editable text that draws only the border, as the renderer
+  // draws it under the fill (a text stroke on the editable text would cover a gradient fill).
+  const underlay = useRef<HTMLDivElement>(null);
+  const syncUnderlay = () => {
+    const copy = underlay.current;
+    const el = editor.current;
+    if (!copy || !el) return;
+    copy.innerHTML = el.innerHTML;
+    // The border is one paint: runs' colours and gradients belong to the fill.
+    for (const node of Array.from(copy.querySelectorAll<HTMLElement>("[style], font"))) {
+      for (const property of ["color", "background-image", "background-clip", "-webkit-background-clip"]) node.style.removeProperty(property);
+      node.removeAttribute("color");
+    }
+  };
   const value = useRef({ text, styles });
   value.current = { text, styles };
 
@@ -101,6 +141,7 @@ export function RichTextField({
   useEffect(() => {
     const el = editor.current;
     if (el && document.activeElement !== el) el.innerHTML = toHtml(text, styles, softBreaks);
+    syncUnderlay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown]);
 
@@ -157,6 +198,7 @@ export function RichTextField({
     document.execCommand("styleWithCSS", false, "true");
     document.execCommand(command, false, argument);
     after?.(el);
+    syncUnderlay();
     refresh();
     if (!focused) {
       commit();
@@ -181,6 +223,31 @@ export function RichTextField({
       }
     });
 
+  // The browser has no gradient command: colour the selection with a marker, then turn what it marked
+  // into gradient spans (or, for none, spans that keep out the gradient around them).
+  const paintGradient = (gradient: Gradient | undefined) =>
+    format("foreColor", GRADIENT_MARK, (el) => {
+      const plain = getComputedStyle(el).color;
+      for (const marked of Array.from(el.querySelectorAll<HTMLElement>("[style*='rgb(1, 2, 3)'], font[color='#010203']"))) {
+        const span = marked.tagName === "FONT" ? document.createElement("span") : marked;
+        if (span !== marked) {
+          span.append(...Array.from(marked.childNodes));
+          marked.replaceWith(span);
+        }
+        if (gradient) {
+          span.dataset.gradient = gradientData(gradient);
+          span.style.backgroundImage = cssGradient(gradient);
+          span.style.setProperty("-webkit-background-clip", "text");
+          span.style.backgroundClip = "text";
+          span.style.color = "transparent";
+        } else {
+          span.dataset.gradient = "none";
+          span.style.backgroundImage = "none";
+          span.style.color = plain;
+        }
+      }
+    });
+
   const toolbar = (
     <>
       <div className="flex items-center gap-0.5" role="toolbar" aria-label={`${label} formatting`}>
@@ -201,6 +268,7 @@ export function RichTextField({
           </Tooltip>
         ))}
         <ColorWell size="sm" label="Text colour" value={null} onChange={(color) => color && format("foreColor", color)} />
+        <GradientField label="Selection gradient" value={at.gradient} startColor="#000000ff" onChange={paintGradient} />
         <Tooltip content="Clear formatting">
           <button type="button" className={TOOL_BUTTON} aria-label="Clear formatting" onMouseDown={(event) => event.preventDefault()} onClick={() => format("removeFormat")}>
             <RemoveFormatting size={13} />
@@ -238,10 +306,11 @@ export function RichTextField({
       autoCorrect={overlay ? "off" : undefined}
       className={
         overlay
-          ? cn("overflow-hidden whitespace-pre-wrap break-words outline-none", overlay.className)
+          ? cn("relative overflow-hidden whitespace-pre-wrap break-words outline-none", overlay.vertical ? "h-full" : "w-full")
           : cn(fieldChrome, "max-h-[120px] min-h-11 overflow-y-auto whitespace-pre-wrap break-words p-1 text-xs leading-4 shadow-[inset_0_0_0_1px_var(--brand-line)] focus:shadow-focus")
       }
-      style={overlay?.style}
+      style={overlay ? { ...overlay.style, ...overlay.fillStyle } : undefined}
+      onInput={syncUnderlay}
       onBlur={commit}
       onKeyUp={refresh}
       onKeyDown={(event) => {
@@ -269,7 +338,17 @@ export function RichTextField({
     return (
       <div className={cn("relative h-full w-full", overlay.boxClassName)}>
         <div className="absolute bottom-full left-0 mb-1.5 flex w-[264px] flex-col gap-1 rounded-[12px] bg-surface-over p-1 shadow-floating">{toolbar}</div>
-        {field}
+        <div className={cn("relative", overlay.className)}>
+          {overlay.underlayStyle && (
+            <div
+              ref={underlay}
+              aria-hidden
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words select-none"
+              style={{ ...overlay.style, ...overlay.underlayStyle }}
+            />
+          )}
+          {field}
+        </div>
       </div>
     );
   }

@@ -24,6 +24,7 @@ import { matches } from "../shortcuts";
 import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, currentPage, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
 import { Slider } from "./primitives";
 import { useLayerFonts } from "../fontFaces";
+import { cssGradient } from "../richText";
 import { useDefaultFont } from "./FontPicker";
 import { RichTextField } from "./RichTextField";
 import { ToolBelt, isBrushTool, maxBrush } from "./ToolBelt";
@@ -1299,12 +1300,6 @@ function useTextLayout(projectId: string, page: Page): Record<string, BlockLayou
   return layouts?.key === key ? layouts.value : (layouts?.value ?? null);
 }
 
-/** A gradient as CSS (Photoshop's angle: 90 runs bottom to top, CSS's 0deg does). */
-function cssGradient(gradient: { kind: string; angle: number; stops: { offset: number; color: string }[] }): string {
-  const stops = [...gradient.stops].sort((a, b) => a.offset - b.offset).map((s) => `${s.color} ${Math.round(s.offset * 100)}%`).join(", ");
-  return gradient.kind === "radial" ? `radial-gradient(circle farthest-side, ${stops})` : `linear-gradient(${90 - gradient.angle}deg, ${stops})`;
-}
-
 /**
  * Editing a text block on the page, as Photoshop's text tool does: the text shows as the render laid it
  * out (the size auto-fit chose, the same line breaks, the layer's font, colour and border, centred), over
@@ -1374,6 +1369,7 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
         overlay={{
           boxClassName: "flex items-center justify-center",
           className: vertical ? "h-full max-w-full" : "w-full max-h-full",
+          vertical,
           softBreaks: layout?.line_starts,
           style: {
             padding: 4 * zoom,
@@ -1384,11 +1380,18 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
             fontStyle: typography?.fontStyle === "italic" ? "italic" : undefined,
             textAlign: align as CSSProperties["textAlign"],
             writingMode: vertical ? "vertical-rl" : undefined,
+          },
+          fillStyle: {
             caretColor: fill ? fill.stops[0].color : color,
             ...(fill ? { backgroundImage: cssGradient(fill), WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" } : { color }),
-            // The border as an outline behind the fill; CSS strokes one colour, so a gradient border shows its first stop.
-            ...(stroke ? { WebkitTextStroke: `${2 * strokeWidth * zoom}px ${typography?.strokeGradient?.stops[0]?.color ?? strokeColor}`, paintOrder: "stroke fill" } : {}),
           },
+          // The border behind the fill, outward by its width (a centred stroke twice as wide); a gradient
+          // border is the gradient clipped to the text and its stroke.
+          underlayStyle: stroke
+            ? typography?.strokeGradient && typography.strokeGradient.stops.length >= 2
+              ? { backgroundImage: cssGradient(typography.strokeGradient), WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", WebkitTextStroke: `${2 * strokeWidth * zoom}px transparent` }
+              : { color: strokeColor, WebkitTextStroke: `${2 * strokeWidth * zoom}px ${strokeColor}` }
+            : undefined,
         }}
       />
     </div>

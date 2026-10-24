@@ -104,6 +104,7 @@ class TextStyleView(BaseModel):
     color: Optional[str] = None  # #rrggbbaa
     font: Optional[str] = None
     scale: Optional[float] = None
+    gradient: Optional[GradientView] = None
 
 
 class StageStatusView(BaseModel):
@@ -238,6 +239,7 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
                         color=rgba_hex(style.color),
                         font=style.font,
                         scale=style.scale,
+                        gradient=gradient_view(style.gradient),
                     )
                     for style in c.normalize_text_styles(translation.styles, len(translation.text.value))
                 ]

@@ -339,10 +339,13 @@ class TextStyle(BaseModel):
     # A family of its own, and a size relative to the layer's (which auto-fit may choose).
     font: Optional[str] = None
     scale: Optional[float] = None
+    # A gradient over these characters alone (instead of the layer's fill or ``color``).
+    gradient: Optional[Gradient] = None
 
     def formatting(self) -> tuple:
         scale = None if self.scale is None or abs(self.scale - 1.0) < 1e-6 else min(max(self.scale, MIN_TEXT_SCALE), MAX_TEXT_SCALE)
-        return (self.bold, self.italic, self.underline, self.strikethrough, self.color, self.font or None, scale)
+        gradient = self.gradient.model_dump_json() if self.gradient is not None and len(self.gradient.stops) >= 2 else None
+        return (self.bold, self.italic, self.underline, self.strikethrough, self.color, self.font or None, scale, gradient)
 
 
 def normalize_text_styles(styles: list[TextStyle], length: int) -> list[TextStyle]:
@@ -363,9 +366,20 @@ def normalize_text_styles(styles: list[TextStyle], length: int) -> list[TextStyl
         while end < length and per_char[end] == formatting:
             end += 1
         if formatting is not None and formatting != plain:
-            bold, italic, underline, strikethrough, color, font, scale = formatting
+            bold, italic, underline, strikethrough, color, font, scale, gradient = formatting
             result.append(
-                TextStyle(start=index, end=end, bold=bold, italic=italic, underline=underline, strikethrough=strikethrough, color=color, font=font, scale=scale)
+                TextStyle(
+                    start=index,
+                    end=end,
+                    bold=bold,
+                    italic=italic,
+                    underline=underline,
+                    strikethrough=strikethrough,
+                    color=color,
+                    font=font,
+                    scale=scale,
+                    gradient=Gradient.model_validate_json(gradient) if gradient else None,
+                )
             )
         index = end
     return result
