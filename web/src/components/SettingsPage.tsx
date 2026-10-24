@@ -1,7 +1,7 @@
 // Settings: a left nav of sections and rows of label + control. Changes save
 // automatically a moment after you stop editing.
 
-import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cpu, Eye, EyeOff, KeyRound, Keyboard, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, Type, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cpu, Eye, EyeOff, Info, KeyRound, Keyboard, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, Type, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { catalog, RUNTIME_LABEL, type InstalledModel, type Release, type Runtimes as RuntimeList } from "../api/catalog";
@@ -15,6 +15,7 @@ import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./RightPanel";
 import { SourcesSettings } from "./SourcesSettings";
+import { AboutSettings } from "./Updates";
 import { TOOL_INFO } from "./ToolBelt";
 import { ACCENTS, NEUTRALS } from "../theme";
 import { Badge, Segmented } from "./ui";
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TitleBarInset } from "./WindowControls";
 
 const TABS = [
   ["appearance", "Appearance", Palette],
@@ -33,6 +35,7 @@ const TABS = [
   ["runtimes", "Runtimes", Server],
   ["sources", "Sources", Library],
   ["shortcuts", "Shortcuts", Keyboard],
+  ["about", "About", Info],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -83,7 +86,7 @@ export function SettingsPage() {
   return (
     <InstalledContext.Provider value={installed}>
     <div className="settings grid h-screen grid-cols-[256px_minmax(0,1fr)] bg-surface-sunk">
-      <nav className="flex flex-col gap-0.5 px-2 py-3" aria-label="Settings sections">
+      <nav className="flex flex-col gap-0.5 px-2 pt-[calc(--spacing(3)+var(--window-controls-top))] pb-3" aria-label="Settings sections" data-titlebar>
         <Button variant="ghost" className="mb-4 justify-start font-normal" onClick={() => ws.setSettingsOpen(false)}>
           <ArrowLeft size={16} /> {ws.settingsFromModels ? "Back to models" : ws.settingsFromSources ? "Back to sources" : ws.project ? "Back to editor" : "Back to projects"}
         </Button>
@@ -103,16 +106,17 @@ export function SettingsPage() {
         ))}
       </nav>
       <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-tl-modal bg-surface shadow-raised">
-        <header className="flex flex-none items-center justify-between h-14 px-8 shadow-[inset_0_-1px_0_var(--border-soft)]">
+        <header className="flex h-12 flex-none items-center justify-between pl-8 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
           <h1 className="text-sm font-semibold">Settings</h1>
-          <span className="text-xs leading-4 tracking-[0.005em] text-fg-3" role="status">
+          <span className="flex h-full items-center pr-8 text-xs leading-4 tracking-[0.005em] text-fg-3" role="status">
             {status === "saving" ? "Saving" : status === "saved" ? "All changes saved" : ""}
+            <TitleBarInset side="right" />
           </span>
         </header>
         <ScrollArea className="flex-1">
           <div className="mx-auto w-full max-w-[820px] px-8 pt-10 pb-16">
             {tab === "appearance" && <Appearance />}
-            {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && !draft && <p className="text-fg-2">Loading settings.</p>}
+            {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
             {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
             {tab === "providers" && draft && <Providers draft={draft} update={update} />}
             {tab === "translation" && draft && <Translation draft={draft} update={update} />}
@@ -120,6 +124,7 @@ export function SettingsPage() {
             {tab === "shortcuts" && <Shortcuts />}
             {tab === "runtimes" && <Runtimes />}
             {tab === "sources" && <SourcesSettings />}
+            {tab === "about" && <AboutSettings />}
           </div>
         </ScrollArea>
       </main>

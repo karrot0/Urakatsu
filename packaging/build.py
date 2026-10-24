@@ -23,11 +23,13 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 UI_IN_PACKAGE = ROOT / "urakatsu" / "service" / "ui"
+BUILD_INFO = ROOT / "urakatsu" / "_build.py"
 LAUNCHER = ROOT / "packaging" / "launcher"
 BUILD = ROOT / "build" / "desktop"
 DIST = ROOT / "dist"
@@ -43,6 +45,29 @@ def arch() -> str:
     return {"amd64": "x86_64", "x64": "x86_64", "aarch64": "arm64"}.get(machine, machine)
 
 
+def build_info() -> str:
+    """``urakatsu/_build.py``: the update channel and commit this build is (see urakatsu/updates.py).
+
+    The channel comes from URAKATSU_CHANNEL (release.yml passes stable or nightly), else "dev".
+    """
+    channel = os.environ.get("URAKATSU_CHANNEL") or "dev"
+    commit = os.environ.get("GITHUB_SHA") or ""
+    if not commit:
+        try:
+            commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip()
+        except OSError:
+            commit = ""
+    built = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = [
+        '"""Written by packaging/build.py: which build this is, for update checks."""',
+        "",
+        f"CHANNEL = {channel!r}",
+        f"COMMIT = {commit!r}",
+        f"BUILT = {built!r}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def build_wheel(skip_ui: bool) -> Path:
     if not skip_ui:
         run("npm", "run", "build", cwd=WEB)
@@ -52,10 +77,12 @@ def build_wheel(skip_ui: bool) -> Path:
     shutil.rmtree(wheels, ignore_errors=True)
     shutil.rmtree(UI_IN_PACKAGE, ignore_errors=True)
     shutil.copytree(WEB / "dist", UI_IN_PACKAGE)
+    BUILD_INFO.write_text(build_info(), encoding="utf-8")
     try:
         run("uv", "build", "--wheel", "--out-dir", str(wheels))
     finally:
         shutil.rmtree(UI_IN_PACKAGE, ignore_errors=True)
+        BUILD_INFO.unlink(missing_ok=True)
         shutil.rmtree(ROOT / "build" / "lib", ignore_errors=True)
     (wheel,) = wheels.glob("urakatsu-*.whl")
     return wheel
@@ -84,8 +111,6 @@ def package_macos(binary: Path, version: str) -> Path:
     shutil.copy2(LAUNCHER / "urakatsu.icns", app / "Resources" / "urakatsu.icns")
     plist = (LAUNCHER / "Info.plist").read_text(encoding="utf-8").replace("{version}", version)
     (app / "Info.plist").write_text(plist, encoding="utf-8")
-    # Ad-hoc signed, so the bundle is intact: without a signature a downloaded app reads as
-    # damaged. It is not notarized, so Gatekeeper asks once before the first start.
     run("codesign", "--force", "--deep", "--sign", "-", str(stage / "Urakatsu.app"))
     target = DIST / f"Urakatsu-{version}-macos-{arch()}.dmg"
     target.unlink(missing_ok=True)

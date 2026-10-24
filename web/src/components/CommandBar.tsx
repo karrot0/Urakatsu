@@ -60,7 +60,7 @@ export function CommandBar() {
   const hasLayers = !!page && page.rasterLayers.length > 0;
 
   return (
-    <header className="flex h-12 items-center gap-2 py-0 pr-2 pl-3 shadow-[inset_0_-1px_0_var(--border-soft)]">
+    <header className="flex h-12 items-center gap-2 py-0 pr-2 pl-3 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
       <nav className="flex min-w-0 flex-1 items-center gap-1 text-fg-2 [&_svg]:shrink-0 [&_svg]:text-icon-2" aria-label="Location">
         {chapter && page ? (
           <>

@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import time
+import types
 
 import httpx
 import pytest
@@ -882,3 +883,16 @@ async def test_slash_command_runs_the_tool_without_a_model(workspace, project, m
     assert messages[0]["content"] == "/translate-sfx keep it red" and "image edit layer" in messages[-1]["content"]
     assert [b.visible for b in workspace.page(project_id, page_id).blocks] == [True, False]
 
+
+
+async def test_a_stream_of_only_keep_alives_fails_as_transient(monkeypatch):
+    from urakatsu.agents.backends import base
+
+    ticks = iter(range(0, 10_000, 200))
+    monkeypatch.setattr(base, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
+    stalled = httpx.Response(200, text=": ping\n\n: ping\n\n", headers={"content-type": "text/event-stream"})
+    backend = OpenAiChatBackend("openai", "https://api.test/chat", "m", "key")
+    backend.transport = httpx.MockTransport(lambda request: stalled)
+    with pytest.raises(AgentError, match="keep-alives") as caught:
+        await collect(backend)
+    assert failure_kind(caught.value) == "transient"

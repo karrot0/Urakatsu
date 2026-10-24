@@ -12,6 +12,7 @@ overflow).
 from __future__ import annotations
 
 import json
+import time
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, Literal, Mapping, Optional
 
@@ -23,6 +24,7 @@ from urakatsu.providers.translation.remote.base import decode_response
 from ..messages import BackendEvent, Message, ToolSpec
 
 STREAM_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+STREAM_IDLE = 300.0
 TRANSIENT_STATUSES = frozenset({408, 409, 425, 500, 502, 503, 504, 529})
 # A 429 whose body says one of these will not pass by waiting.
 SPENT_QUOTA_MARKERS = ("insufficient_quota", "exceeded your current quota", "credit balance is too low", "billing", "usage_limit_reached")
@@ -110,9 +112,14 @@ async def sse_events(
                     decode_response(provider, response.status_code, text)
                 event = "message"
                 data: list[str] = []
+                last = time.monotonic()
                 async for line in response.aiter_lines():
                     if line.startswith(":"):
+                        if time.monotonic() - last > STREAM_IDLE:
+                            raise AgentError(f"{provider} sent nothing but keep-alives for {STREAM_IDLE:.0f} seconds", transient=True)
                         continue
+                    if line:  # not the blank line that ends each keep-alive too
+                        last = time.monotonic()
                     if line.startswith("event:"):
                         event = line[6:].strip()
                     elif line.startswith("data:"):

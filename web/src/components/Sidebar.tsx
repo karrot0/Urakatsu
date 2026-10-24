@@ -57,6 +57,7 @@ import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TitleBarInset } from "./WindowControls";
 
 const CHAPTER = "c:";
 const PAGE = "p:";
@@ -406,7 +407,8 @@ function ProjectHead() {
   const project = ws.project!;
   const [editing, setEditing] = useState(false);
   return (
-    <div className="flex h-12 items-center gap-1 px-2">
+    <div className="flex h-12 items-center gap-1 px-2" data-titlebar>
+      <TitleBarInset side="left" />
       <Button variant="ghost" size="icon-sm" title="All projects" aria-label="All projects" onClick={ws.closeProject}>
         <ArrowLeft size={16} />
       </Button>

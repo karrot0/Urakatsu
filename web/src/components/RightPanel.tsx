@@ -34,29 +34,33 @@ import { AgentPanel } from "./AgentPanel";
 import { ColorWell, NumberField, Popover, RadioMenu, Select, Slider, Tooltip, type Option } from "./primitives";
 import { Badge } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TitleBarInset } from "./WindowControls";
 
 const PANEL_TAB = "inline-flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1 rounded-control text-fg-2 transition-colors duration-[20ms] ease-in focus-visible:outline-none focus-visible:shadow-focus";
+const TAB_LABEL = "in-data-[shell=windows]:@max-[26rem]:sr-only";
 const panelTab = (active: boolean) => cn(PANEL_TAB, active ? "bg-surface font-medium text-fg shadow-raised" : "hover:bg-hover hover:text-fg");
 
 export function RightPanel() {
   const ws = useWorkspace();
   const [tab, setTab] = useState<"properties" | "activity" | "agent">("properties");
   useEffect(() => {
-    // A run started from the UI shows its progress; the agent tab reports its own runs.
     if (ws.job?.status === "running") setTab((current) => (current === "agent" ? current : "activity"));
   }, [ws.job?.status]);
   return (
     <aside className="flex min-h-0 flex-1 flex-col bg-surface-sunk shadow-[inset_1px_0_0_var(--border-soft)]">
-      <div className="flex h-12 items-center gap-0.5 px-2 shadow-[inset_0_-1px_0_var(--border-soft)]" role="tablist">
-        <button role="tab" aria-selected={tab === "properties"} className={panelTab(tab === "properties")} onClick={() => setTab("properties")}>
-          <SlidersHorizontal size={14} /> Properties
+      <div className="@container flex h-12 items-center gap-0.5 px-2 shadow-[inset_0_-1px_0_var(--border-soft)]" role="tablist" data-titlebar>
+        <button role="tab" aria-selected={tab === "properties"} className={panelTab(tab === "properties")} title="Properties" onClick={() => setTab("properties")}>
+          <SlidersHorizontal size={14} /> <span className={TAB_LABEL}>Properties</span>
         </button>
-        <button role="tab" aria-selected={tab === "activity"} className={panelTab(tab === "activity")} onClick={() => setTab("activity")}>
-          <ActivityIcon size={14} /> Activity {ws.job?.status === "running" && <span className="size-1.5 animate-[soft-pulse_1s_ease-in-out_infinite_alternate] rounded-full bg-brand" aria-label="Running" />}
+        <button role="tab" aria-selected={tab === "activity"} className={panelTab(tab === "activity")} title="Activity" onClick={() => setTab("activity")}>
+          <ActivityIcon size={14} /> <span className={TAB_LABEL}>Activity</span>{" "}
+          {ws.job?.status === "running" && <span className="size-1.5 animate-[soft-pulse_1s_ease-in-out_infinite_alternate] rounded-full bg-brand" aria-label="Running" />}
         </button>
-        <button role="tab" aria-selected={tab === "agent"} className={panelTab(tab === "agent")} onClick={() => setTab("agent")}>
-          <Sparkles size={14} /> Agent
+        <button role="tab" aria-selected={tab === "agent"} className={panelTab(tab === "agent")} title="Agent" onClick={() => setTab("agent")}>
+          <Sparkles size={14} /> <span className={TAB_LABEL}>Agent</span>
         </button>
+        <span aria-hidden className="flex-1" />
+        <TitleBarInset side="right" />
       </div>
       {tab === "properties" ? (
         <div className="flex min-h-0 flex-1 flex-col">

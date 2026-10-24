@@ -27,7 +27,7 @@ import httpx
 from urakatsu import __version__
 from urakatsu.core.config import home
 
-from . import gpu_setup
+from . import chrome, gpu_setup
 
 log = logging.getLogger("urakatsu.desktop")
 
@@ -196,11 +196,34 @@ def _set_icon() -> None:
 
 
 class Bridge:
-    """Methods the setup page's buttons call (``window.pywebview.api``)."""
+    """Methods the pages call (``window.pywebview.api``): the setup page's buttons, and the window
+    controls of the title bar the pages draw (chrome.py)."""
 
     def __init__(self) -> None:
         self.choice = threading.Event()
         self.skip_setup = False
+        self._window: Any = None  # private: pywebview exposes only public attributes to the page
+
+    def minimize(self) -> None:
+        chrome.minimize(self._window)
+
+    def toggle_maximize(self) -> None:
+        chrome.toggle_maximize(self._window)
+
+    def close(self) -> None:
+        chrome.close(self._window)
+
+    def drag(self, x: Optional[int] = None, y: Optional[int] = None) -> None:
+        chrome.drag(self._window, x, y)
+
+    def resize(self, edge: str, x: Optional[int] = None, y: Optional[int] = None) -> None:
+        chrome.resize(self._window, edge, x, y)
+
+    def system_menu(self) -> None:
+        chrome.system_menu(self._window)
+
+    def window_state(self) -> dict:
+        return {"maximized": chrome.maximized(self._window), "double_click_ms": chrome.double_click_ms()}
 
     def retry(self) -> None:
         self.skip_setup = False
@@ -223,9 +246,20 @@ class Desktop:
         except Exception:  # noqa: BLE001 - the window may be closing
             pass
 
+    def window_changed(self, *_: Any) -> None:
+        """Tells the page whether the window is maximized, for the maximize button's icon."""
+        try:
+            state = json.dumps({"maximized": chrome.maximized(self.window)})
+            self.window.evaluate_js(f"window.dispatchEvent(new CustomEvent('urakatsu:window', {{ detail: {state} }}))")
+        except Exception:  # noqa: BLE001 - the window may be closing
+            pass
+
     def boot(self) -> None:
         """Runs on pywebview's worker thread once the window exists."""
         _set_icon()
+        self.window.events.loaded.wait(30)
+        chrome.attach(self.window)
+        self.window.events.resized += self.window_changed
         try:
             if gpu_setup.needs_setup():
                 self.setup_gpu()
@@ -235,8 +269,12 @@ class Desktop:
             self.server.start()
             self.server.wait_ready()
             _claim_instance(port)
+            if _windows():
+                from urakatsu.updates import updater
+
+                updater.installer = self.run_installer
             log.info("workspace ready at %s", self.server.url)
-            self.window.load_url(self.server.url)
+            self.window.load_url(f"{self.server.url}/?shell={chrome.SHELL}")
         except Exception as error:  # noqa: BLE001 - shown in the window
             log.exception("startup failed")
             self.render(title="Urakatsu could not start", message=f"Details are in {gpu_setup.default_log_path()}.", error=str(error))
@@ -282,6 +320,22 @@ class Desktop:
                 if self.bridge.skip_setup:
                     return
 
+    def run_installer(self, installer: Path) -> None:
+        """Updates the app: the new installer runs once this process has exited (an open app is
+        never updated underneath, see the launcher), then starts the updated app itself."""
+        quoted = str(installer).replace("'", "''")  # PowerShell single-quoted string
+        script = f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue; Start-Process -FilePath '{quoted}' -ArgumentList '--quiet'"
+        import subprocess
+
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+            creationflags=flags,
+            close_fds=True,
+        )
+        log.info("installing %s once the app quits", installer.name)
+        self.window.destroy()
+
     def closed(self) -> None:
         log.info("window closed")
         if self.server is not None:
@@ -311,8 +365,9 @@ def main() -> int:
 
     import webview
 
+    page = (resources.files("urakatsu.desktop") / "setup.html").read_text(encoding="utf-8").replace("{shell}", chrome.SHELL)
     desktop = Desktop()
-    page = (resources.files("urakatsu.desktop") / "setup.html").read_text(encoding="utf-8")
+    webview.settings.update(chrome.settings())
     desktop.window = webview.create_window(
         TITLE,
         html=page,
@@ -321,15 +376,13 @@ def main() -> int:
         height=900,
         min_size=(960, 640),
         text_select=True,
+        **chrome.window_options(),
     )
+    desktop.bridge._window = desktop.window
     desktop.window.events.closed += desktop.closed
     storage = home() / "app" / "webview"
     storage.mkdir(parents=True, exist_ok=True)
-    # Chapter exports (.cbz, .zip) arrive as browser downloads; WebView2 asks where to save them.
     webview.settings["ALLOW_DOWNLOADS"] = True
-    # Not private: the UI keeps its theme, shortcuts and brush in localStorage.
-    # The window icon: Windows sets it from the .ico (_set_icon), macOS shows the app bundle's,
-    # and GTK and Qt on Linux take a PNG.
     icon = str(resources.files("urakatsu.desktop") / "urakatsu.png") if sys.platform.startswith("linux") else None
     webview.start(desktop.boot, private_mode=False, storage_path=str(storage), icon=icon)
     return 0

@@ -5,6 +5,11 @@ name: Build
 
 on:
   workflow_call:
+    inputs:
+      channel:
+        description: Update channel baked into the app (stable, nightly, or dev for CI builds)
+        type: string
+        default: dev
 
 permissions:
   contents: read
@@ -30,6 +35,7 @@ jobs:
             runner: ubuntu-22.04
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+      URAKATSU_CHANNEL: ${{ inputs.channel }}
     steps:
       - uses: actions/checkout@v7
 

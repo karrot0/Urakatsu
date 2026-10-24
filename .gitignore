@@ -10,6 +10,7 @@ dist/
 target/
 # packaging/build.py copies web/dist here while it builds the wheel, then removes it
 urakatsu/service/ui/
+urakatsu/_build.py
 
 # Web UI
 web/node_modules/

@@ -14,6 +14,8 @@ import { SourcesPage } from "./components/SourcesPage";
 import { BrowserPanel } from "./components/BrowserPanel";
 import { Sidebar } from "./components/Sidebar";
 import { Start } from "./components/Start";
+import { WindowControls } from "./components/WindowControls";
+import { UpdatePopup } from "./components/Updates";
 import { useWorkspace } from "./state/workspace";
 
 export function App() {
@@ -31,7 +33,9 @@ export function App() {
       ) : (
         <Start />
       )}
+      <UpdatePopup />
       {ws.browser && <BrowserPanel key={`${ws.browser.system}:${ws.browser.url}`} />}
+      <WindowControls />
       {ws.error && (
         <div
           className="fixed bottom-5 left-1/2 z-50 flex max-w-[min(560px,calc(100vw_-_32px))] -translate-x-1/2 animate-[fade-in_var(--t-in)] items-center gap-2 rounded-card bg-surface-over py-2 pr-2 pl-3 shadow-overlay"

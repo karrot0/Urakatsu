@@ -14,6 +14,7 @@ import { cn } from "cn";
 import { Select, type Option } from "./primitives";
 import { Badge } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TitleBarInset } from "./WindowControls";
 
 const SEARCH_DELAY = 350;
 const ALL = "all";
@@ -153,7 +154,8 @@ export function SourcesPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex h-12 flex-none items-center gap-3 pr-4 pl-2 shadow-[inset_0_-1px_0_var(--border-soft)]">
+      <header className="flex h-12 flex-none items-center gap-3 pr-4 pl-2 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
+        <TitleBarInset side="left" />
         <Button variant="ghost" size="sm" onClick={() => ws.setSourcesOpen(false)}>
           <ArrowLeft size={14} /> {ws.project ? "Back to editor" : "Back to projects"}
         </Button>
@@ -165,6 +167,7 @@ export function SourcesPage() {
         <Button variant="ghost" size="sm" onClick={() => ws.setSettingsOpen(true, "sources")}>
           <Settings2 size={14} /> Manage sources
         </Button>
+        <TitleBarInset side="right" />
       </header>
       <div className="grid flex-1 min-h-0 grid-cols-[280px_minmax(0,1fr)_380px]">
         <aside className="flex min-h-0 flex-col bg-surface-sunk shadow-[inset_-1px_0_0_var(--border-soft)]" aria-label="Sources">

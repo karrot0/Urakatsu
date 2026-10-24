@@ -7,6 +7,7 @@ import { sources } from "../api/sources";
 import { formatDay, formatTimestamp, plural } from "../format";
 import { useWorkspace } from "../state/workspace";
 import { ThemeSwitch } from "./CommandBar";
+import { TitleBarInset } from "./WindowControls";
 import { Select } from "./primitives";
 import { Badge } from "./ui";
 import { cn } from "cn";
@@ -39,7 +40,8 @@ export function Start() {
 
   return (
     <div className="flex min-h-screen flex-col bg-surface">
-      <header className="flex h-12 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--border-soft)]">
+      <header className="flex h-12 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
+        <TitleBarInset side="left" />
         <div className="flex items-center gap-2 font-semibold">
           <img className="size-[22px]" src="/icon.png" alt="" width={22} height={22} />
           <span>Urakatsu</span>
@@ -60,6 +62,7 @@ export function Start() {
           <Settings size={14} /> Settings
         </Button>
         <ThemeSwitch value={ws.theme} onChange={ws.setTheme} />
+        <TitleBarInset side="right" />
       </header>
 
       <main className="mx-auto w-full max-w-[1120px] px-5 py-12">

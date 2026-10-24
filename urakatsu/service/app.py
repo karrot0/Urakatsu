@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,7 @@ from .grpc_web import GrpcWebBridge
 from .http_api import api_router
 from .servicer import UrakatsuServicer
 from .sources_api import sources_router
+from .updates_api import updates_router
 from .workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ def build_app(
     app.include_router(api_router(workspace), prefix="/api/v1")
     app.include_router(catalog_router(), prefix="/api/v1")
     app.include_router(sources_router(workspace), prefix="/api/v1")
+    app.include_router(updates_router(), prefix="/api/v1")
     app.state.agents = AgentService(workspace)
     app.include_router(agent_router(app.state.agents), prefix="/api/v1")
 
@@ -108,6 +111,10 @@ async def serve(
     """Runs until SIGINT / SIGTERM, or until ``shutdown`` is set (the desktop app runs this on a thread)."""
     servicer = UrakatsuServicer(workspace)
     workspace.systems.start_enabled()
+    if not os.environ.get("URAKATSU_NO_UPDATE_CHECK"):
+        from urakatsu.updates import updater
+
+        updater.start()  # checks GitHub for a newer release now and every hour
     app = build_app(workspace, servicer, ui_dir, serve_ui, cors_origins)
 
     grpc_server = None

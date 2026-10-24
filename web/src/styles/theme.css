@@ -9,10 +9,10 @@
    class on <html>. shadcn's roles (index.css) are derived from these tokens. */
 
 :root {
-  --nh: 85; /* neutral hue */
-  --nc: 1; /* neutral chroma scale */
-  --bh: 250; /* accent (brand) hue */
-  --bc: 1; /* accent chroma scale */
+  --nh: 85;
+  --nc: 1;
+  --bh: 250;
+  --bc: 1;
 }
 
 [data-neutral="cool"] {
@@ -67,7 +67,7 @@
   --surface-sunk: var(--n-50);
   --surface-fill: var(--n-100);
   --surface-over: var(--n-0);
-  --canvas: var(--n-100); /* behind the page image */
+  --canvas: var(--n-100);
 
   /* ---- text ---- */
   --text: var(--n-900);
@@ -222,4 +222,21 @@
   --shadow-md: 0 0 0 1px var(--surface-fill), 0 4px 12px -2px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 0 0 1px var(--surface-fill), 0 14px 28px -6px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.118);
   --shadow-modal: 0 24px 48px rgba(0, 0, 0, 0.64), 0 4px 12px rgba(0, 0, 0, 0.56);
+}
+
+:root {
+  --window-controls-left: 0px;
+  --window-controls-right: 0px;
+  --window-controls-top: 0px;
+  --window-close: oklch(0.53 0.2 27);
+  /* Windows' close-button red */
+}
+
+[data-shell="windows"] {
+  --window-controls-right: 138px;
+}
+
+[data-shell="macos"] {
+  --window-controls-left: 78px;
+  --window-controls-top: 28px;
 }

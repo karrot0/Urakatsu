@@ -52,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TitleBarInset } from "./WindowControls";
 
 const RUNTIMES: { value: CatalogRuntime; label: string; title: string }[] = [
   { value: "llama", label: "LLM", title: "GGUF language and vision models for llama.cpp" },
@@ -197,7 +198,8 @@ export function ModelsPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex h-12 flex-none items-center gap-3 pr-4 pl-2 shadow-[inset_0_-1px_0_var(--border-soft)]">
+      <header className="flex h-12 flex-none items-center gap-3 pr-4 pl-2 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
+        <TitleBarInset side="left" />
         <Button variant="ghost" size="sm" onClick={() => ws.setModelsOpen(false)}>
           <ArrowLeft size={14} /> {ws.project ? "Back to editor" : "Back to projects"}
         </Button>
@@ -218,6 +220,7 @@ export function ModelsPage() {
         <Button variant="ghost" size="sm" onClick={() => ws.setSettingsOpen(true, "runtimes")}>
           <Cpu size={14} /> Runtimes
         </Button>
+        <TitleBarInset side="right" />
       </header>
       {tab === "discover" ? <Discover state={state} /> : <Installed state={state} onDiscover={() => setTab("discover")} />}
       {active.length > 0 && <DownloadTray downloads={active} onCancel={state.cancel} />}
