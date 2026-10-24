@@ -168,6 +168,7 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
             patch["source_text"] = request.source_text
         if "translation" in fields:
             patch["translation"] = request.translation
+            patch["translation_styles"] = [convert.text_style_from_proto(style) for style in request.translation_styles]
         if "typography" in fields:
             typography = convert.typography_from_proto(request.typography)
             # "typography.<key>" entries name the properties the user changed; only those merge.
@@ -217,6 +218,11 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
             bytes(request.png),
             (request.x, request.y) if request.patch else None,
         )
+        return convert.page_to_proto(page)
+
+    @guarded
+    async def AddRasterLayer(self, request, context):
+        page = self.workspace.add_empty_layer(request.project_id, request.page_id, request.name or None, request.above_layer_id or None)
         return convert.page_to_proto(page)
 
     @guarded

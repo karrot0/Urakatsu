@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   Layers3,
   Lock,
+  Plus,
   Sparkles,
   SlidersHorizontal,
   Trash2,
@@ -23,15 +24,16 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "cn";
 
-import { client } from "../api/client";
 import type { RasterLayer, TextBlock, Typography } from "../gen/urakatsu/v1/urakatsu_pb";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { currentBlock, currentPage, useWorkspace } from "../state/workspace";
 import { ActivityPanel } from "./ActivityTrace";
 import { AgentPanel } from "./AgentPanel";
-import { ColorWell, NumberField, Popover, RadioMenu, Select, Slider, Tooltip, type Option } from "./primitives";
+import { ColorWell, NumberField, RadioMenu, Select, Slider, Tooltip, type Option } from "./primitives";
+import { FontPicker, useDefaultFont } from "./FontPicker";
+import { GradientField } from "./GradientField";
+import { RichTextField } from "./RichTextField";
 import { Badge } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
@@ -131,12 +133,15 @@ function TypeInspector() {
 
   return (
     <section className="flex flex-none flex-col gap-2 px-3 pt-2 pb-3 shadow-[inset_0_-1px_0_var(--border-soft)] aria-disabled:opacity-[0.55]" aria-disabled={disabled}>
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px] gap-1">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px_52px] gap-1">
         <InspectorField label="Font">
           <FontPicker value={typography.preferredFont} disabled={disabled} defaultFont={defaultFont} onChange={(preferredFont) => apply({ preferredFont })} />
         </InspectorField>
         <InspectorField label="Color">
           <ColorWell size="sm" label="Text color" disabled={disabled} value={rgb(typography.color) ?? "#000000"} onChange={(color) => color && apply({ color: `${color}ff` })} />
+        </InspectorField>
+        <InspectorField label="Gradient">
+          <GradientField label="Text gradient" disabled={disabled} value={typography.fillGradient} startColor={`${rgb(typography.color) ?? "#000000"}ff`} onChange={(fillGradient) => apply({ fillGradient })} />
         </InspectorField>
       </div>
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_72px_84px] gap-1">
@@ -215,7 +220,7 @@ function TypeInspector() {
           />
         </InspectorField>
       </div>
-      <div className="grid min-w-0 grid-cols-[44px_minmax(0,1fr)] gap-1">
+      <div className="grid min-w-0 grid-cols-[44px_minmax(0,1fr)_52px] gap-1">
         <InspectorField label="Border">
           <ColorWell
             size="sm"
@@ -227,7 +232,7 @@ function TypeInspector() {
               apply(
                 color
                   ? { strokeColor: `${color}ff`, strokeWidth: (typography.strokeWidth ?? 0) > 0 ? typography.strokeWidth : 1.5 }
-                  : { strokeColor: `${rgb(typography.strokeColor) ?? "#ffffff"}00` },
+                  : { strokeColor: `${rgb(typography.strokeColor) ?? "#ffffff"}00`, strokeGradient: undefined },
               )
             }
           />
@@ -243,6 +248,16 @@ function TypeInspector() {
             onCommit={(width) => width !== null && apply({ strokeWidth: width })}
           />
         </InspectorField>
+        <InspectorField label="Gradient">
+          <GradientField
+            label="Border gradient"
+            disabled={disabled}
+            value={typography.strokeGradient}
+            startColor={`${rgb(typography.strokeColor) ?? "#ffffff"}ff`}
+            // A border gradient needs a border: one appears at the default width if there was none.
+            onChange={(strokeGradient) => apply(strokeGradient && !((typography.strokeWidth ?? 0) > 0) ? { strokeGradient, strokeWidth: 1.5 } : { strokeGradient })}
+          />
+        </InspectorField>
       </div>
     </section>
   );
@@ -256,117 +271,6 @@ function InspectorField({ label, children }: { label: string; children: ReactNod
       <span className={FIELD_LABEL}>{label}</span>
       {children}
     </div>
-  );
-}
-
-let fontCache: Promise<string[]> | null = null;
-function useFontFamilies(): string[] {
-  const [families, setFamilies] = useState<string[]>([]);
-  useEffect(() => {
-    fontCache ??= client.listFonts({}).then((list) => list.families.map((f) => f.name).sort((a, b) => a.localeCompare(b)));
-    void fontCache.then(setFamilies).catch(() => setFamilies([]));
-  }, []);
-  return families;
-}
-
-/** The font a block without its own font typesets in: the first of Settings > Typesetting's default fonts that is installed. */
-function useDefaultFont(): string | undefined {
-  const ws = useWorkspace();
-  const installed = useFontFamilies();
-  const preferred = ws.config?.fontFamilies ?? [];
-  const names = new Set(installed.map((family) => family.toLowerCase()));
-  return preferred.find((family) => names.has(family.toLowerCase())) ?? preferred[0];
-}
-
-const popupItem = (selected: boolean) =>
-  cn(
-    "flex w-full min-h-[30px] cursor-default items-center gap-2 rounded-control px-2 py-0.5 text-left text-sm text-fg outline-none transition-colors duration-[20ms] ease-in select-none",
-    selected ? "bg-selected" : "hover:bg-hover focus-visible:bg-hover",
-  );
-
-export function FontPicker({
-  value,
-  onChange,
-  disabled,
-  placeholder = "Typesetting default",
-  defaultFont,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
-  /** The font an empty value falls back to; shown by name instead of the placeholder. */
-  defaultFont?: string;
-}) {
-  const families = useFontFamilies();
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const shown = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return (needle ? families.filter((f) => f.toLowerCase().includes(needle)) : families).slice(0, 300);
-  }, [families, query]);
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setQuery("");
-      }}
-      align="start"
-      className="w-[280px] p-1"
-      trigger={
-        <button
-          type="button"
-          className="inline-flex h-[26px] w-full min-w-0 cursor-default items-center justify-between gap-1 rounded-control bg-surface py-0 pr-0.5 pl-1 text-left text-xs text-fg shadow-[inset_0_0_0_1px_var(--border)] [transition:background-color_20ms_ease-in,box-shadow_100ms_ease-out] hover:bg-[color-mix(in_oklab,var(--surface),var(--n-950)_3%)] focus-visible:shadow-focus focus-visible:outline-none data-[popup-open]:shadow-focus disabled:pointer-events-none disabled:opacity-50"
-          disabled={disabled}
-          aria-label="Font"
-        >
-          <span className="min-w-0 flex-1 truncate text-sm" style={value || defaultFont ? { fontFamily: `"${value || defaultFont}"` } : undefined}>
-            {value ||
-              (defaultFont ? (
-                <>
-                  {defaultFont}
-                  <span className="font-sans text-xs text-fg-3"> default</span>
-                </>
-              ) : (
-                <span className="text-fg-3">{placeholder}</span>
-              ))}
-          </span>
-          <ChevronDown size={14} className="flex-none text-icon-2" />
-        </button>
-      }
-    >
-      <Input className="mb-1 h-7" placeholder="Search fonts" aria-label="Search fonts" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-      <ScrollArea viewportClassName="max-h-[300px]" role="listbox" aria-label="Fonts">
-        <button
-          role="option"
-          aria-selected={!value}
-          className={popupItem(false)}
-          onClick={() => {
-            onChange("");
-            setOpen(false);
-          }}
-        >
-          <span className="text-fg-2">{defaultFont ? `Default (${defaultFont})` : placeholder}</span>
-        </button>
-        {shown.map((family) => (
-          <button
-            key={family}
-            role="option"
-            aria-selected={family === value}
-            className={popupItem(family === value)}
-            style={{ fontFamily: `"${family}"` }}
-            onClick={() => {
-              onChange(family);
-              setOpen(false);
-            }}
-          >
-            {family}
-          </button>
-        ))}
-        {families.length > 0 && shown.length === 0 && <p className="p-2 text-xs tracking-[0.005em] text-fg-2">No fonts match.</p>}
-      </ScrollArea>
-    </Popover>
   );
 }
 
@@ -411,6 +315,11 @@ function LayersInspector() {
         <Layers3 size={14} className="text-brand" />
         <h2 className="text-xs font-semibold">Layers</h2>
         <span className="text-xs text-fg-3 tabular-nums">{textCount + rasterCount + 1}</span>
+        <Tooltip content="New layer" side="left">
+          <Button type="button" variant="ghost" size="icon-xs" className="ml-auto" aria-label="New layer" onClick={() => void ws.addRasterLayer()}>
+            <Plus size={14} />
+          </Button>
+        </Tooltip>
       </header>
       <ScrollArea className="flex-1" contentClassName="px-1 pt-0.5 pb-3">
         {rows.map((row) => {
@@ -511,7 +420,13 @@ function LayerEditor({ row, name, opacity }: { row: Exclude<Row, { kind: "artwor
             {(block.sourceOrigin === "user" || block.translationOrigin === "user") && <Badge tone="warning">Edited</Badge>}
           </div>
           <CommitText label="Source" value={block.sourceText ?? ""} source onCommit={(text) => void ws.updateBlock(block.layerId, { sourceText: text })} />
-          <CommitText label="Translation" value={block.translation ?? ""} onCommit={(text) => void ws.updateBlock(block.layerId, { translation: text })} />
+          <RichTextField
+            label="Translation"
+            labelClassName={FIELD_LABEL}
+            text={block.translation ?? ""}
+            styles={block.translationStyles}
+            onCommit={(text, styles) => void ws.updateBlock(block.layerId, { translation: text, translationStyles: styles })}
+          />
         </>
       )}
     </div>

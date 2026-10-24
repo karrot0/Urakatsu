@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { client, describeError, forgetAssets } from "../api/client";
 import { challengeOf, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
+import type { RichStyle } from "../richText";
 import { applyPalette, loadPalette, type Palette } from "../theme";
 import { initialRoute, useHistorySync, type Route } from "./history";
 import type {
@@ -28,7 +29,8 @@ export const TOOLS = ["select", "text", "draw", "eraser", "color_picker", "remov
 export type Tool = (typeof TOOLS)[number];
 // Keyboard shortcuts (src/shortcuts.ts has the format: "v", "arrowleft", "mod+shift+z").
 export const NUDGES = ["nudge_left", "nudge_right", "nudge_up", "nudge_down"] as const;
-export type ShortcutAction = Tool | "fit" | "undo" | "redo" | (typeof NUDGES)[number];
+export const BRUSH_SIZES = ["brush_smaller", "brush_larger"] as const;
+export type ShortcutAction = Tool | "fit" | "undo" | "redo" | (typeof NUDGES)[number] | (typeof BRUSH_SIZES)[number];
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   select: "v",
   text: "t",
@@ -45,11 +47,17 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   nudge_right: "arrowright",
   nudge_up: "arrowup",
   nudge_down: "arrowdown",
+  // Photoshop's keys.
+  brush_smaller: "[",
+  brush_larger: "]",
 };
 export const MIN_BRUSH = 1;
 export interface Brush {
   color: string;
   diameter: number;
+  /** A drawing tablet's pen pressure scales the size, and the opacity (Photoshop's pen pressure dynamics). */
+  pressureSize: boolean;
+  pressureOpacity: boolean;
 }
 /** How the generative fill tool selects: a dragged rectangle or a freehand lasso. */
 export type FillShape = "rect" | "lasso";
@@ -85,6 +93,8 @@ export interface RunOptions {
 export interface BlockPatch {
   sourceText?: string;
   translation?: string;
+  /** Rich text over `translation`, sent with it; a translation without styles is plain. */
+  translationStyles?: RichStyle[];
   typography?: Typography;
   /** The typography properties the user changed (proto names); only these merge into the layer's style. */
   typographyFields?: string[];
@@ -188,6 +198,8 @@ interface Actions {
    */
   setRasterLayer(kind: "paint" | "cleanup", layerId: string | undefined, png: Uint8Array, at?: { x: number; y: number }): Promise<Page | undefined>;
   deleteLayer(layerId: string): Promise<void>;
+  /** A new, empty paint layer above the selected raster layer (or on top), which becomes the selected one. */
+  addRasterLayer(): Promise<void>;
   setTheme(theme: Theme): void;
   setPalette(palette: Palette): void;
   toggleOverlay(kind: "blocks" | "regions"): void;
@@ -250,7 +262,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     translationModels: [],
     view: "source",
     tool: "select",
-    brush: loadJson<Brush>(BRUSH_KEY, { color: "#000000", diameter: 24 }),
+    brush: loadJson<Brush>(BRUSH_KEY, { color: "#000000", diameter: 24, pressureSize: true, pressureOpacity: true }),
     fillShape: loadJson<{ shape: FillShape }>(FILL_KEY, { shape: "rect" }).shape,
     shortcuts: loadJson(SHORTCUTS_KEY, DEFAULT_SHORTCUTS),
     // The view the URL names (/settings, /models, /sources); a project opens once loaded.
@@ -625,6 +637,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           layerId,
           sourceText: patch.sourceText,
           translation: patch.translation,
+          translationStyles: patch.translationStyles ?? [],
           typography: patch.typography,
           frame: patch.frame ?? [],
           visible: patch.visible,
@@ -708,6 +721,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [pageCall],
   );
+
+  const addRasterLayer = useCallback(async () => {
+    const before = new Set(currentPage(state)?.rasterLayers.map((layer) => layer.id));
+    const above = state.rasterId && before.has(state.rasterId) ? state.rasterId : "";
+    let saved: Page | undefined;
+    await pageCall(async (projectId, pageId) => (saved = await client.addRasterLayer({ projectId, pageId, aboveLayerId: above })));
+    const created = saved?.rasterLayers.find((layer) => !before.has(layer.id));
+    if (created) setState((s) => ({ ...s, rasterId: created.id, blockId: undefined }));
+  }, [state, pageCall]);
 
   const deleteLayer = useCallback(
     async (layerId: string) => {
@@ -879,6 +901,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       moveLayer,
       setRasterLayer,
       deleteLayer,
+      addRasterLayer,
       setTheme: (theme) => setState((s) => ({ ...s, theme })),
       setPalette: (palette) => setState((s) => ({ ...s, palette })),
       toggleOverlay: (kind) => setState((s) => (kind === "blocks" ? { ...s, showBlocks: !s.showBlocks } : { ...s, showRegions: !s.showRegions })),
@@ -917,6 +940,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       moveLayer,
       setRasterLayer,
       deleteLayer,
+      addRasterLayer,
       linkSeries,
       unlinkSource,
       refreshSource,

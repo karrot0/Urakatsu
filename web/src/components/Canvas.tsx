@@ -8,7 +8,7 @@
 // floating prompt under it sends the selection as a mask with the prompt; the fill model paints
 // it into the Cleanup layer. The selection stays, so Generate again tries another result.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CornerDownLeft, LoaderCircle, WandSparkles, X } from "lucide-react";
 
@@ -21,8 +21,11 @@ import { catalog, type InstalledModel } from "../api/catalog";
 import { assetUrl, assetVersion } from "../api/client";
 import type { Page, RasterLayer, TextBlock } from "../gen/urakatsu/v1/urakatsu_pb";
 import { matches } from "../shortcuts";
-import { DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, currentPage, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
+import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, currentPage, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
 import { Slider } from "./primitives";
+import { useLayerFonts } from "../fontFaces";
+import { useDefaultFont } from "./FontPicker";
+import { RichTextField } from "./RichTextField";
 import { ToolBelt, isBrushTool, maxBrush } from "./ToolBelt";
 
 type Pt = { x: number; y: number };
@@ -280,6 +283,30 @@ function pixelsOf(canvas: HTMLCanvasElement): LayerPixels {
 
 const layerCanvasClass = "absolute inset-0 h-full w-full pointer-events-none rounded-[inherit]";
 
+// Dabs are stamped this fraction of the brush size apart: close enough that a hard edge stays smooth.
+const DAB_SPACING = 0.12;
+
+/** A point of a stroke and how hard the pen pressed there (0 to 1). */
+type Sample = Pt & { pressure: number };
+
+/** Pen pressure; a mouse or finger counts as pressing fully. A pen's first touch can read 0. */
+function pressureOf(event: PointerEvent): number {
+  return event.pointerType === "pen" ? clamp(event.pressure, 0.05, 1) : 1;
+}
+
+/**
+ * The opacity of one dab for a stroke of opacity `target`: about 1 / DAB_SPACING dabs overlap at any
+ * point of a line, so their opacities compound to the target (and going over it again builds it up).
+ */
+function dabAlpha(target: number): number {
+  return target >= 1 ? 1 : 1 - Math.pow(1 - target, DAB_SPACING);
+}
+
+/** One brush size step (Alt + wheel, [ and ]): about a tenth of the size, at least a pixel. */
+function stepBrush(diameter: number, direction: 1 | -1, max: number): number {
+  return clamp(diameter + direction * Math.max(1, Math.round(diameter * 0.1)), MIN_BRUSH, max);
+}
+
 /** Centers the brush ring on `point` (page pixels); hidden while the pointer is off the page. */
 function ringPlacement(point: Pt | null, diameter: number, zoom: number): { transform: string; visibility: "visible" | "hidden" } {
   if (!point) return { transform: "translate(0px, 0px)", visibility: "hidden" };
@@ -314,7 +341,9 @@ export function Canvas() {
   // The drawn brush ring follows the pointer by style writes, not renders; `cursor` keeps its spot across renders.
   const cursor = useRef<Pt | null>(null);
   const brushRing = useRef<HTMLDivElement>(null);
-  const strokeLast = useRef<Pt>({ x: 0, y: 0 });
+  const strokeLast = useRef<Sample>({ x: 0, y: 0, pressure: 1 });
+  // How far along the next segment the next dab goes.
+  const strokeCarry = useRef(0);
   // What the stroke in progress has painted over (page pixels): its save sends only that.
   const strokeBox = useRef<Rect | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -324,6 +353,11 @@ export function Canvas() {
   const [fillPrompt, setFillPrompt] = useState("");
   const [filling, setFilling] = useState(false);
   const [comparison, setComparison] = useState<Comparison | null>(null);
+  // The text block being edited on the canvas (Photoshop's text tool), and whether the next selected
+  // block is one the text tool just drew, which opens straight into editing.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editCreated = useRef(false);
+  const lastPress = useRef<{ id: string; at: number } | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const baseImage = useRef<HTMLImageElement>(null);
@@ -384,6 +418,17 @@ export function Canvas() {
     if ((isBrushTool(ws.tool) || ws.tool === "fill") && ws.view !== "cleanup") ws.setView("cleanup");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws.tool]);
+
+  useEffect(() => {
+    if (editCreated.current && ws.blockId) {
+      editCreated.current = false;
+      setEditing(ws.blockId);
+    }
+  }, [ws.blockId]);
+  const editingBlock = editing ? page?.blocks.find((block) => block.layerId === editing) : undefined;
+  useEffect(() => {
+    if (editing && !editingBlock) setEditing(null);
+  }, [editing, editingBlock]);
 
   // A selection belongs to the fill tool and its page.
   useEffect(() => {
@@ -550,6 +595,12 @@ export function Canvas() {
         }
         return;
       }
+      const resize = BRUSH_SIZES.find((a) => matches(shortcuts[a], event));
+      if (resize && isBrushTool(ws.tool) && page) {
+        event.preventDefault();
+        ws.setBrush({ ...ws.brush, diameter: stepBrush(ws.brush.diameter, resize === "brush_larger" ? 1 : -1, maxBrush(page.width, page.height)) });
+        return;
+      }
       const action = ([...TOOLS, "fit"] as ShortcutAction[]).find((a) => matches(shortcuts[a], event));
       if (action === "fit") {
         event.preventDefault();
@@ -562,6 +613,10 @@ export function Canvas() {
       if (mod || event.altKey) return;
       const key = event.key.toLowerCase();
       if ((event.key === "Delete" || event.key === "Backspace") && ws.blockId) void ws.deleteBlock(ws.blockId);
+      if (event.key === "Enter" && ws.blockId) {
+        event.preventDefault();
+        setEditing(ws.blockId);
+      }
       if (event.key === "Escape") {
         if (selection) setSelection(null);
         else ws.selectBlock(undefined);
@@ -576,7 +631,7 @@ export function Canvas() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKey);
     };
-  }, [ws, fit, nudgeBlock, selection]);
+  }, [ws, page, fit, nudgeBlock, selection]);
 
   // Ctrl + wheel zooms at the cursor, Alt + wheel sizes the brush; plain wheel scrolls.
   useEffect(() => {
@@ -585,9 +640,7 @@ export function Canvas() {
     const onWheel = (event: WheelEvent) => {
       if (event.altKey && isBrushTool(ws.tool)) {
         event.preventDefault();
-        const step = event.deltaY < 0 ? 1 : -1;
-        const next = clamp(ws.brush.diameter + step * Math.max(1, Math.round(ws.brush.diameter * 0.1)), MIN_BRUSH, maxBrush(page.width, page.height));
-        ws.setBrush({ ...ws.brush, diameter: next });
+        ws.setBrush({ ...ws.brush, diameter: stepBrush(ws.brush.diameter, event.deltaY < 0 ? 1 : -1, maxBrush(page.width, page.height)) });
         return;
       }
       if (!event.ctrlKey && !event.metaKey) return;
@@ -599,36 +652,49 @@ export function Canvas() {
     return () => el.removeEventListener("wheel", onWheel);
   }, [page, ws, toImage]);
 
-  const strokeTo = (canvas: HTMLCanvasElement, tool: "draw" | "eraser" | "remove", from: Pt, to: Pt) => {
+  // Strokes are stamped as round dabs, so pen pressure can set each dab's size and opacity (Photoshop's
+  // Shape Dynamics and Transfer). A mouse presses fully: solid strokes of the set size, as before.
+  const strokeTo = (canvas: HTMLCanvasElement, tool: "draw" | "eraser" | "remove", from: Sample, to: Sample) => {
     const context = canvas.getContext("2d");
     if (!context) return;
+    const { diameter, color, pressureSize, pressureOpacity } = ws.brush;
+    // The remove mask marks where to inpaint, so pressure leaves it solid.
+    const pen = tool !== "remove";
+    const sizeAt = (pressure: number) => Math.max(1, diameter * (pen && pressureSize ? pressure : 1));
+    const alphaAt = (pressure: number) => dabAlpha(pen && pressureOpacity ? pressure : 1);
     context.save();
     context.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
     // The remove mask is drawn opaque red for display; finishStroke turns its coverage white.
-    context.strokeStyle = tool === "draw" ? ws.brush.color : tool === "remove" ? "#e5484d" : "#ffffff";
-    context.fillStyle = context.strokeStyle;
-    context.lineWidth = ws.brush.diameter;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.beginPath();
-    if (from.x === to.x && from.y === to.y) {
-      context.arc(to.x, to.y, ws.brush.diameter / 2, 0, Math.PI * 2);
+    context.fillStyle = tool === "draw" ? color : tool === "remove" ? "#e5484d" : "#ffffff";
+    let box = strokeBox.current;
+    const dab = (x: number, y: number, pressure: number) => {
+      const r = sizeAt(pressure) / 2;
+      context.globalAlpha = alphaAt(pressure);
+      context.beginPath();
+      context.arc(x, y, r, 0, Math.PI * 2);
       context.fill();
+      const edge = r + 2; // and its antialiased edge
+      box = box
+        ? { x: Math.min(box.x, x - edge), y: Math.min(box.y, y - edge), width: Math.max(box.x + box.width, x + edge) - Math.min(box.x, x - edge), height: Math.max(box.y + box.height, y + edge) - Math.min(box.y, y - edge) }
+        : { x: x - edge, y: y - edge, width: 2 * edge, height: 2 * edge };
+    };
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length === 0) {
+      dab(to.x, to.y, to.pressure);
+      strokeCarry.current = sizeAt(to.pressure) * DAB_SPACING;
     } else {
-      context.moveTo(from.x, from.y);
-      context.lineTo(to.x, to.y);
-      context.stroke();
+      // A dab every DAB_SPACING of the brush size along the segment; the rest carries into the next one.
+      let at = strokeCarry.current;
+      while (at <= length) {
+        const t = at / length;
+        const pressure = from.pressure + (to.pressure - from.pressure) * t;
+        dab(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, pressure);
+        at += Math.max(0.5, sizeAt(pressure) * DAB_SPACING);
+      }
+      strokeCarry.current = at - length;
     }
     context.restore();
-    const r = ws.brush.diameter / 2 + 2; // and its antialiased edge
-    const box = strokeBox.current;
-    const left = Math.min(from.x, to.x) - r;
-    const top = Math.min(from.y, to.y) - r;
-    const right = Math.max(from.x, to.x) + r;
-    const bottom = Math.max(from.y, to.y) + r;
-    strokeBox.current = box
-      ? { x: Math.min(box.x, left), y: Math.min(box.y, top), width: Math.max(box.x + box.width, right) - Math.min(box.x, left), height: Math.max(box.y + box.height, bottom) - Math.min(box.y, top) }
-      : { x: left, y: top, width: right - left, height: bottom - top };
+    strokeBox.current = box;
   };
 
   const finishStroke = async (stroke: Extract<Gesture, { kind: "stroke" }>) => {
@@ -772,6 +838,7 @@ export function Canvas() {
 
   const onPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (!page) return;
+    if (editing) setEditing(null);
     const point = toImage(event);
     const panning = event.button === 1 || ws.tool === "pan" || spaceHeld;
     if (event.button !== 0 && !panning) return;
@@ -803,18 +870,25 @@ export function Canvas() {
       let target: HTMLCanvasElement | null | undefined;
       let layer: RasterLayer | undefined;
       if (ws.tool !== "remove") adoptPending();
+      const selectedRaster = rasters.find((r) => r.id === ws.rasterId);
       if (ws.tool === "remove") target = mask.current;
-      else if (ws.tool === "draw") {
+      else if (ws.tool === "draw" && !selectedRaster) {
+        // No layer selected: the newest paint layer, created by the first stroke if there is none.
         layer = paintLayer;
         // Until the paint layer's canvas has taken them over, strokes keep going where the first ones are.
         target = layer && !pendingDirty.current ? layerCanvases.current.get(layer.id) : pendingPaint.current;
       } else {
-        layer = rasters.find((r) => r.id === ws.rasterId) ?? paintLayer;
+        // As in Photoshop, the brush and eraser work on the selected layer.
+        layer = selectedRaster ?? paintLayer;
         if (!layer) {
           ws.reportError("Select a paint or cleanup layer in Layers before using the eraser.");
           return;
         }
         target = layerCanvases.current.get(layer.id);
+      }
+      if (layer && !layer.visible) {
+        ws.reportError(`${layer.name} is hidden. Show it in Layers to paint on it.`);
+        return;
       }
       if (!target) return;
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -829,8 +903,9 @@ export function Canvas() {
         }
       }
       strokeBox.current = null;
-      strokeTo(target, ws.tool, point, point);
-      strokeLast.current = point;
+      const first = { ...point, pressure: pressureOf(event.nativeEvent) };
+      strokeTo(target, ws.tool, first, first);
+      strokeLast.current = first;
       setGesture({ kind: "stroke", tool: ws.tool, target, layer });
     }
   };
@@ -838,6 +913,17 @@ export function Canvas() {
   const startMove = (event: ReactPointerEvent, block: TextBlock) => {
     if (event.button !== 0 || ws.tool !== "select" || spaceHeld || block.frame.length < 3) return;
     event.stopPropagation();
+    // A second press on the same block soon after the first edits its text on the canvas. (The first press
+    // captures the pointer, so the browser's dblclick goes to the canvas, not the block.)
+    const now = performance.now();
+    const previous = lastPress.current;
+    lastPress.current = { id: block.layerId, at: now };
+    if (previous && previous.id === block.layerId && now - previous.at < DOUBLE_PRESS_MS) {
+      lastPress.current = null;
+      ws.selectBlock(block.layerId);
+      setEditing(block.layerId);
+      return;
+    }
     ws.selectBlock(block.layerId);
     svg.current?.setPointerCapture(event.pointerId);
     const origin = block.frame.map((p) => ({ x: p.x, y: p.y }));
@@ -891,7 +977,7 @@ export function Canvas() {
     } else if (gesture.kind === "stroke") {
       const events = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
       for (const sample of events.length ? events : [event.nativeEvent]) {
-        const next = toImage(sample);
+        const next = { ...toImage(sample), pressure: pressureOf(sample) };
         strokeTo(gesture.target, gesture.tool, strokeLast.current, next);
         strokeLast.current = next;
       }
@@ -938,7 +1024,10 @@ export function Canvas() {
     if (gesture.kind === "pan" || gesture.kind === "compare") return;
     if (gesture.kind === "stroke") return void finishStroke(gesture);
     if (gesture.kind === "text") {
-      if (gesture.rect.width > 6 && gesture.rect.height > 6) void ws.createBlock(gesture.rect);
+      if (gesture.rect.width > 6 && gesture.rect.height > 6) {
+        editCreated.current = true;
+        void ws.createBlock(gesture.rect);
+      }
       return;
     }
     if (gesture.kind === "select") {
@@ -1014,7 +1103,8 @@ export function Canvas() {
             )}
             <svg
               ref={svg}
-              className="absolute inset-0 h-full w-full"
+              // touch-none: a pen or finger drag draws instead of scrolling the page (which would cancel the stroke).
+              className="absolute inset-0 h-full w-full touch-none"
               viewBox={`0 0 ${page.width} ${page.height}`}
               style={{ cursor: svgCursor }}
               onPointerDown={onPointerDown}
@@ -1061,6 +1151,7 @@ export function Canvas() {
                 </svg>
               </div>
             )}
+            {editingBlock && <CanvasTextEditor key={editingBlock.layerId} block={editingBlock} zoom={zoom} onDone={() => setEditing(null)} />}
             {selection && (!gesture || gesture.kind === "compare") && (
               <FillPrompt
                 bounds={boundsOf(selection.points)}
@@ -1173,6 +1264,70 @@ const FILL_PROMPT_HEIGHT = 112;
 
 // The floating prompt under a generative fill selection. It lives in the page box, so it
 // scrolls and zooms with the page; near the bottom of the page it sits above the selection.
+const DOUBLE_PRESS_MS = 450;
+
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+
+/** Text size for editing when the layer fits its text automatically: what roughly fills the box. */
+function fittedSize(text: string, width: number, height: number): number {
+  const characters = Math.max(Array.from(text).length, 4);
+  return clamp(Math.sqrt((width * height) / (characters * 0.6 * 1.2)), 10, 72);
+}
+
+/**
+ * Editing a text block on the page, as Photoshop's text tool does: the box shows the text in the
+ * layer's font, colour, alignment and direction (the browser's approximation of the render, which
+ * follows once saved), with the formatting toolbar above it.
+ */
+function CanvasTextEditor({ block, zoom, onDone }: { block: TextBlock; zoom: number; onDone: () => void }) {
+  const ws = useWorkspace();
+  const defaultFont = useDefaultFont();
+  const { box } = orientedBox(block.frame);
+  const typography = block.typography;
+  const text = block.translation ?? "";
+  const vertical = typography?.writingMode === "Vertical" || (!typography?.writingMode && block.ocrDirection === "Vertical" && CJK.test(text));
+  const size = (typography?.size ?? fittedSize(text, vertical ? box.h : box.w, vertical ? box.w : box.h)) * zoom;
+  const align = { Start: "left", Center: "center", End: "right", Justify: "justify" }[typography?.alignment ?? ""] ?? "center";
+  const family = typography?.preferredFont || defaultFont;
+  useLayerFonts([family, ...block.translationStyles.map((style) => style.font)]);
+  return (
+    <div
+      className="absolute z-20"
+      style={{
+        left: (box.cx - box.w / 2) * zoom,
+        top: (box.cy - box.h / 2) * zoom,
+        width: box.w * zoom,
+        height: box.h * zoom,
+        transform: box.angle ? `rotate(${box.angle}rad)` : undefined,
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <RichTextField
+        label="Text on the canvas"
+        text={text}
+        styles={block.translationStyles}
+        onCommit={(next, styles) => void ws.updateBlock(block.layerId, { translation: next, translationStyles: styles })}
+        onDone={onDone}
+        overlay={{
+          className: "rounded-[2px] bg-[color-mix(in_oklab,var(--surface)_90%,transparent)] shadow-[0_0_0_1.5px_var(--overlay-block)]",
+          style: {
+            padding: 4 * zoom,
+            fontFamily: family ? `"${family}", var(--font), sans-serif` : undefined,
+            fontSize: size,
+            lineHeight: 1.2,
+            fontWeight: typography?.fontWeight ?? undefined,
+            fontStyle: typography?.fontStyle === "italic" ? "italic" : undefined,
+            color: typography?.color ?? "#000000",
+            textAlign: align as CSSProperties["textAlign"],
+            writingMode: vertical ? "vertical-rl" : undefined,
+          },
+        }}
+      />
+    </div>
+  );
+}
+
 function FillPrompt({
   bounds,
   page,

@@ -37,6 +37,8 @@ class PositionedGlyph:
     y_advance: float
     x_offset: float
     y_offset: float
+    # Rich text: the run's size relative to the layout's (the glyph was shaped at font_size * scale).
+    scale: float = 1.0
 
 
 @dataclass

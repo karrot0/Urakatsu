@@ -9,7 +9,7 @@ import { cn } from "cn";
 
 import { format } from "../shortcuts";
 import { currentPage, MIN_BRUSH, useWorkspace, type FillShape, type Tool } from "../state/workspace";
-import { ColorWell, NumberField, Popover, Slider, Tooltip } from "./primitives";
+import { ColorWell, NumberField, Popover, Slider, Switch, Tooltip } from "./primitives";
 
 export const TOOL_INFO: Record<Tool, { label: string; icon: LucideIcon }> = {
   select: { label: "Select", icon: MousePointer2 },
@@ -112,6 +112,7 @@ function BrushSize({ max }: { max: number }) {
   const ws = useWorkspace();
   const size = Math.round(ws.brush.diameter);
   const set = (diameter: number) => ws.setBrush({ ...ws.brush, diameter: Math.min(max, Math.max(MIN_BRUSH, Math.round(diameter))) });
+  const keys = `${format(ws.shortcuts.brush_smaller)} and ${format(ws.shortcuts.brush_larger)}`;
   return (
     <Popover
       side="right"
@@ -120,6 +121,7 @@ function BrushSize({ max }: { max: number }) {
           type="button"
           className={cn(TOOL_BUTTON, "h-8 w-8 text-[11px] font-medium tabular-nums text-fg-2 hover:bg-hover")}
           aria-label={`Brush size ${size} pixels`}
+          title={`Brush size (${keys})`}
         >
           {size}
         </button>
@@ -133,7 +135,19 @@ function BrushSize({ max }: { max: number }) {
           </div>
         </div>
         <Slider label="Brush size" min={MIN_BRUSH} max={max} value={size} onChange={set} />
-        <p className="text-xs tracking-[0.005em] text-fg-3">Alt + scroll on the canvas also changes the size.</p>
+        <p className="text-xs tracking-[0.005em] text-fg-3">{keys}, or Alt + scroll on the canvas, also change the size.</p>
+        <div className="flex flex-col gap-1.5 pt-2 shadow-[inset_0_1px_0_var(--border-soft)]">
+          <span className="text-xs tracking-[0.005em] text-fg-2">Pen pressure</span>
+          <label className="flex items-center justify-between gap-2 text-xs text-fg-2">
+            Size
+            <Switch label="Pen pressure changes the size" checked={ws.brush.pressureSize} onChange={(on) => ws.setBrush({ ...ws.brush, pressureSize: on })} />
+          </label>
+          <label className="flex items-center justify-between gap-2 text-xs text-fg-2">
+            Opacity
+            <Switch label="Pen pressure changes the opacity" checked={ws.brush.pressureOpacity} onChange={(on) => ws.setBrush({ ...ws.brush, pressureOpacity: on })} />
+          </label>
+          <p className="text-xs tracking-[0.005em] text-fg-3">With a drawing tablet: press harder for a bigger, darker stroke.</p>
+        </div>
       </div>
     </Popover>
   );

@@ -27,6 +27,17 @@ class BoxView(BaseModel):
     height: float
 
 
+class GradientStopView(BaseModel):
+    offset: float
+    color: str  # #rrggbbaa
+
+
+class GradientView(BaseModel):
+    kind: str = "linear"
+    angle: float = 90.0
+    stops: list[GradientStopView] = Field(default_factory=list)
+
+
 class TypographyView(BaseModel):
     preferred_font: Optional[str] = None
     font_weight: Optional[int] = None
@@ -38,6 +49,8 @@ class TypographyView(BaseModel):
     stroke_width: Optional[float] = None
     alignment: Optional[str] = None
     writing_mode: Optional[str] = None
+    fill_gradient: Optional[GradientView] = None
+    stroke_gradient: Optional[GradientView] = None
     authored: bool = False  # the user set this style; a pipeline-made one only hints its writing mode
 
 
@@ -56,6 +69,7 @@ class TextBlockView(BaseModel):
     translation: Optional[str] = None
     translation_origin: Optional[str] = None
     translation_language: Optional[str] = None
+    translation_styles: list[TextStyleView] = Field(default_factory=list)
     ocr_direction: Optional[str] = None
     typography: Optional[TypographyView] = None
     visible: bool = True
@@ -78,6 +92,18 @@ class RasterLayerView(BaseModel):
     kind: str
     visible: bool = True
     opacity: float = 1.0
+
+
+class TextStyleView(BaseModel):
+    start: int
+    end: int
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strikethrough: bool = False
+    color: Optional[str] = None  # #rrggbbaa
+    font: Optional[str] = None
+    scale: Optional[float] = None
 
 
 class StageStatusView(BaseModel):
@@ -141,6 +167,12 @@ def _bounds(geometry: Optional[c.Geometry]) -> Optional[BoxView]:
     return BoxView(x=x0, y=y0, width=x1 - x0, height=y1 - y0)
 
 
+def gradient_view(value: Optional[c.Gradient]) -> Optional[GradientView]:
+    if value is None:
+        return None
+    return GradientView(kind=value.kind.value, angle=value.angle, stops=[GradientStopView(offset=s.offset, color=rgba_hex(s.color)) for s in value.stops])
+
+
 def typography_view(value: Optional[c.Typography]) -> Optional[TypographyView]:
     if value is None:
         return None
@@ -153,6 +185,8 @@ def typography_view(value: Optional[c.Typography]) -> Optional[TypographyView]:
         color=rgba_hex(value.color),
         stroke_color=rgba_hex(value.stroke_color),
         stroke_width=value.stroke_width,
+        fill_gradient=gradient_view(value.fill_gradient),
+        stroke_gradient=gradient_view(value.stroke_gradient),
         alignment=value.alignment.value if value.alignment else None,
         writing_mode=value.writing_mode.value if value.writing_mode else None,
         authored=isinstance(value.origin, c.UserOrigin),
@@ -193,6 +227,22 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
                 translation=translation.text.value if translation else None,
                 translation_origin=origin_name(translation.text.origin) if translation else None,
                 translation_language=translation.language if translation else None,
+                translation_styles=[
+                    TextStyleView(
+                        start=style.start,
+                        end=style.end,
+                        bold=style.bold,
+                        italic=style.italic,
+                        underline=style.underline,
+                        strikethrough=style.strikethrough,
+                        color=rgba_hex(style.color),
+                        font=style.font,
+                        scale=style.scale,
+                    )
+                    for style in c.normalize_text_styles(translation.styles, len(translation.text.value))
+                ]
+                if translation
+                else [],
                 ocr_direction=ocr.direction.value if ocr else None,
                 typography=typography_view(snapshot.component(layer, c.Typography)),
                 visible=visibility.visible if visibility else True,

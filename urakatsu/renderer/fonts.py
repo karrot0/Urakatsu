@@ -206,6 +206,18 @@ class Font:
         if glyph_id >= len(self._tt.getGlyphOrder()):
             return []
         name = self._tt.getGlyphName(glyph_id)
+    def decoration_metrics(self, font_size: float) -> tuple[float, float, float, float]:
+        """(underline offset below the baseline, underline thickness, strikeout height above the
+        baseline, strikeout thickness) in pixels, from the post and OS/2 tables where the face has them."""
+        scale = font_size / self.units_per_em
+        post = self._tt["post"] if "post" in self._tt else None
+        os2 = self._tt["OS/2"] if "OS/2" in self._tt else None
+        underline_position = post.underlinePosition if post is not None and post.underlinePosition else -0.1 * self.units_per_em
+        underline_thickness = post.underlineThickness if post is not None and post.underlineThickness > 0 else 0.05 * self.units_per_em
+        strike_position = os2.yStrikeoutPosition if os2 is not None and os2.yStrikeoutPosition > 0 else 0.25 * self.units_per_em
+        strike_thickness = os2.yStrikeoutSize if os2 is not None and os2.yStrikeoutSize > 0 else underline_thickness
+        return -underline_position * scale, underline_thickness * scale, strike_position * scale, strike_thickness * scale
+
         # Decomposing: composite glyphs are expanded into their components' outlines.
         pen = DecomposingRecordingPen(self._glyph_set)
         try:

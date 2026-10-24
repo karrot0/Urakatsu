@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file urakatsu/v1/urakatsu.proto.
  */
 export const file_urakatsu_v1_urakatsu: GenFile = /*@__PURE__*/
-  fileDesc("Chp1cmFrYXRzdS92MS91cmFrYXRzdS5wcm90bxILdXJha2F0c3UudjEiBwoFRW1wdHkiiwEKBkRldmljZRINCgVpbmRleBgBIAEoBRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg8KB2JhY2tlbmQYBCABKAkSEwoLZGV2aWNlX3R5cGUYBSABKAkSFAoMbWVtb3J5X3RvdGFsGAYgASgDEhMKC21lbW9yeV9mcmVlGAcgASgDIkAKDVJ1bnRpbWVPcHRpb24SDAoEbmFtZRgBIAEoCRIRCglhdmFpbGFibGUYAiABKAgSDgoGcmVhc29uGAMgASgJIq4CCgxQcm92aWRlckluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVzdGFnZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIsCghydW50aW1lcxgFIAMoCzIaLnVyYWthdHN1LnYxLlJ1bnRpbWVPcHRpb24SFwoPZGVmYXVsdF9ydW50aW1lGAYgASgJEhEKCWF2YWlsYWJsZRgHIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCCABKAkSDwoHd2VpZ2h0cxgJIAMoCRIcChRzZXR0aW5nc19zY2hlbWFfanNvbhgKIAEoCRIVCg1kZWZhdWx0c19qc29uGAsgASgJEhAKCHByb21wdGVkGAwgASgIEhIKCmluc3RydWN0ZWQYDSABKAgiigMKDENhcGFiaWxpdGllcxIPCgd2ZXJzaW9uGAEgASgJEiMKBmRldmljZRgCIAEoCzITLnVyYWthdHN1LnYxLkRldmljZRIkCgdkZXZpY2VzGAMgAygLMhMudXJha2F0c3UudjEuRGV2aWNlEhAKCHBsYXRmb3JtGAQgASgJEhUKDXJ1bnRpbWVzX2pzb24YBSABKAkSLAoJcHJvdmlkZXJzGAYgAygLMhkudXJha2F0c3UudjEuUHJvdmlkZXJJbmZvEg4KBnN0YWdlcxgHIAMoCRISCgpzdG9yZV9yb290GAggASgJEhMKC3N0b3JlX2J5dGVzGAkgASgDEjUKBmxvYWRlZBgKIAMoCzIlLnVyYWthdHN1LnYxLkNhcGFiaWxpdGllcy5Mb2FkZWRFbnRyeRIoCglsYW5ndWFnZXMYCyADKAsyFS51cmFrYXRzdS52MS5MYW5ndWFnZRotCgtMb2FkZWRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiUKCExhbmd1YWdlEgsKA3RhZxgBIAEoCRIMCgRuYW1lGAIgASgJImoKDk1vZGVsU2VsZWN0aW9uEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhQKDHF1YW50aXphdGlvbhgDIAEoCRIOCgZ2aXNpb24YBCABKAgSEQoJcmVhc29uaW5nGAUgASgIItUECgZDb25maWcSDgoGZGV2aWNlGAEgASgJEhEKCWRldGVjdGlvbhgCIAEoCRILCgNvY3IYAyABKAkSEgoKaW5wYWludGluZxgEIAEoCRIwCgt0cmFuc2xhdGlvbhgFIAEoCzIbLnVyYWthdHN1LnYxLk1vZGVsU2VsZWN0aW9uEhcKD2dlbmVyYXRpb25fanNvbhgGIAEoCRIXCg90YXJnZXRfbGFuZ3VhZ2UYByABKAkSFAoMaW5zdHJ1Y3Rpb25zGAggASgJEj4KDnByb2Nlc3Nvcl9qc29uGAkgAygLMiYudXJha2F0c3UudjEuQ29uZmlnLlByb2Nlc3Nvckpzb25FbnRyeRI+Cg5wcm92aWRlcnNfanNvbhgKIAMoCzImLnVyYWthdHN1LnYxLkNvbmZpZy5Qcm92aWRlcnNKc29uRW50cnkSMwoIcnVudGltZXMYCyADKAsyIS51cmFrYXRzdS52MS5Db25maWcuUnVudGltZXNFbnRyeRIVCg1mb250X2ZhbWlsaWVzGAwgAygJEgwKBGZpbGwYDSABKAkSFgoObG9zc2xlc3NfcGFnZXMYDiABKAgaNAoSUHJvY2Vzc29ySnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaNAoSUHJvdmlkZXJzSnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaLwoNUnVudGltZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIq0BChBUcmFuc2xhdGlvbk1vZGVsEhAKCHByb3ZpZGVyGAEgASgJEhUKDXByb3ZpZGVyX25hbWUYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEbmFtZRgEIAEoCRIwCg1xdWFudGl6YXRpb25zGAUgAygLMhkudXJha2F0c3UudjEuUXVhbnRpemF0aW9uEg4KBnZpc2lvbhgGIAEoCBIRCglyZWFzb25pbmcYByABKAgiPAoMUXVhbnRpemF0aW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoKZG93bmxvYWRlZBgDIAEoCCJFChRUcmFuc2xhdGlvbk1vZGVsTGlzdBItCgZtb2RlbHMYASADKAsyHS51cmFrYXRzdS52MS5UcmFuc2xhdGlvbk1vZGVsIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASI6CgNCb3gSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASLBAgoKVHlwb2dyYXBoeRIWCg5wcmVmZXJyZWRfZm9udBgBIAEoCRIYCgtmb250X3dlaWdodBgCIAEoBUgAiAEBEhIKCmZvbnRfc3R5bGUYAyABKAkSEQoEc2l6ZRgEIAEoAUgBiAEBEhAKCGF1dG9fZml0GAUgASgIEhIKBWNvbG9yGAYgASgJSAKIAQESGQoMc3Ryb2tlX2NvbG9yGAcgASgJSAOIAQESGQoMc3Ryb2tlX3dpZHRoGAggASgBSASIAQESEQoJYWxpZ25tZW50GAkgASgJEhQKDHdyaXRpbmdfbW9kZRgKIAEoCRIQCghhdXRob3JlZBgLIAEoCEIOCgxfZm9udF93ZWlnaHRCBwoFX3NpemVCCAoGX2NvbG9yQg8KDV9zdHJva2VfY29sb3JCDwoNX3N0cm9rZV93aWR0aCLJAwoJVGV4dEJsb2NrEhAKCGxheWVyX2lkGAEgASgJEhIKCmNvbnRlbnRfaWQYAiABKAkSEQoJcmVnaW9uX2lkGAMgASgJEhIKCmJhbGxvb25faWQYBCABKAkSEwoLbGF5b3V0X2tpbmQYBSABKAkSIQoFZnJhbWUYBiADKAsyEi51cmFrYXRzdS52MS5Qb2ludBIgCgZib3VuZHMYByABKAsyEC51cmFrYXRzdS52MS5Cb3gSDQoFYW5nbGUYCCABKAESEwoLc291cmNlX3RleHQYCSABKAkSFQoNc291cmNlX29yaWdpbhgKIAEoCRIXCg9zb3VyY2VfbGFuZ3VhZ2UYCyABKAkSEwoLdHJhbnNsYXRpb24YDCABKAkSGgoSdHJhbnNsYXRpb25fb3JpZ2luGA0gASgJEhwKFHRyYW5zbGF0aW9uX2xhbmd1YWdlGA4gASgJEhUKDW9jcl9kaXJlY3Rpb24YDyABKAkSKwoKdHlwb2dyYXBoeRgQIAEoCzIXLnVyYWthdHN1LnYxLlR5cG9ncmFwaHkSDwoHdmlzaWJsZRgRIAEoCBIMCgRyb2xlGBIgASgJEg8KB29wYWNpdHkYEyABKAEijAEKBlJlZ2lvbhIKCgJpZBgBIAEoCRIMCgRraW5kGAIgASgJEg0KBWxhYmVsGAMgASgJEiMKB3BvbHlnb24YBCADKAsyEi51cmFrYXRzdS52MS5Qb2ludBIgCgZib3VuZHMYBSABKAsyEC51cmFrYXRzdS52MS5Cb3gSEgoKY29uZmlkZW5jZRgGIAEoASJXCgtSYXN0ZXJMYXllchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGtpbmQYAyABKAkSDwoHdmlzaWJsZRgEIAEoCBIPCgdvcGFjaXR5GAUgASgBIpQBChZMYXllclZpc2liaWxpdHlSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIRCglsYXllcl9pZHMYAyADKAkSFAoHdmlzaWJsZRgEIAEoCEgAiAEBEhQKB29wYWNpdHkYBSABKAFIAYgBAUIKCghfdmlzaWJsZUIKCghfb3BhY2l0eSJYChBNb3ZlTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIQCghsYXllcl9pZBgDIAEoCRINCgVkZWx0YRgEIAEoBSKOAQoVU2V0UmFzdGVyTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIMCgRraW5kGAMgASgJEhAKCGxheWVyX2lkGAQgASgJEgsKA3BuZxgFIAEoDBINCgVwYXRjaBgGIAEoCBIJCgF4GAcgASgFEgkKAXkYCCABKAUiOQoLU3RhZ2VTdGF0dXMSDQoFc3RhZ2UYASABKAkSDAoEZG9uZRgCIAEoCBINCgVtb2RlbBgDIAEoCSL+AgoEUGFnZRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBXdpZHRoGAMgASgFEg4KBmhlaWdodBgEIAEoBRImCgZibG9ja3MYBSADKAsyFi51cmFrYXRzdS52MS5UZXh0QmxvY2sSJAoHcmVnaW9ucxgGIAMoCzITLnVyYWthdHN1LnYxLlJlZ2lvbhIvCg1yYXN0ZXJfbGF5ZXJzGAcgAygLMhgudXJha2F0c3UudjEuUmFzdGVyTGF5ZXISDgoGYXNzZXRzGAggAygJEigKBnN0YWdlcxgJIAMoCzIYLnVyYWthdHN1LnYxLlN0YWdlU3RhdHVzEhAKCHJldmlzaW9uGAogASgDEjwKDmFzc2V0X3ZlcnNpb25zGAsgAygLMiQudXJha2F0c3UudjEuUGFnZS5Bc3NldFZlcnNpb25zRW50cnkaNAoSQXNzZXRWZXJzaW9uc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiywEKB1Byb2plY3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRISCgpjcmVhdGVkX2F0GAMgASgBEhIKCnVwZGF0ZWRfYXQYBCABKAESEAoIcmV2aXNpb24YBSABKAMSIAoFcGFnZXMYBiADKAsyES51cmFrYXRzdS52MS5QYWdlEhAKCGNhbl91bmRvGAcgASgIEhAKCGNhbl9yZWRvGAggASgIEiYKCGNoYXB0ZXJzGAkgAygLMhQudXJha2F0c3UudjEuQ2hhcHRlciI1CgdDaGFwdGVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcGFnZV9pZHMYAyADKAkicwoOUHJvamVjdFN1bW1hcnkSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVwYWdlcxgDIAEoBRISCgpjcmVhdGVkX2F0GAQgASgBEhIKCnVwZGF0ZWRfYXQYBSABKAESEAoIY2hhcHRlcnMYBiABKAUiPAoLUHJvamVjdExpc3QSLQoIcHJvamVjdHMYASADKAsyGy51cmFrYXRzdS52MS5Qcm9qZWN0U3VtbWFyeSIkChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIMCgRuYW1lGAEgASgJIjgKFFJlbmFtZVByb2plY3RSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCSIgCgpQcm9qZWN0UmVmEhIKCnByb2plY3RfaWQYASABKAkiLgoHUGFnZVJlZhISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkiVgoUQ3JlYXRlQ2hhcHRlclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhIKBWluZGV4GAMgASgFSACIAQFCCAoGX2luZGV4IkwKFFJlbmFtZUNoYXB0ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSEgoKY2hhcHRlcl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJIjQKCkNoYXB0ZXJSZWYSEgoKcHJvamVjdF9pZBgBIAEoCRISCgpjaGFwdGVyX2lkGAIgASgJIjUKDUNoYXB0ZXJMYXlvdXQSEgoKY2hhcHRlcl9pZBgBIAEoCRIQCghwYWdlX2lkcxgCIAMoCSJZChVBcnJhbmdlUHJvamVjdFJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCghjaGFwdGVycxgCIAMoCzIaLnVyYWthdHN1LnYxLkNoYXB0ZXJMYXlvdXQiRQoMVGV4dEJsb2NrUmVmEhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIQCghsYXllcl9pZBgDIAEoCSJyCg5BZGRQYWdlUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEZGF0YRgDIAEoDBISCgVpbmRleBgEIAEoBUgAiAEBEhIKCmNoYXB0ZXJfaWQYBSABKAlCCAoGX2luZGV4IkEKDEFzc2V0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSDAoEa2luZBgDIAEoCSJZCgVBc3NldBIMCgRkYXRhGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRINCgV3aWR0aBgDIAEoBRIOCgZoZWlnaHQYBCABKAUSDQoFZm91bmQYBSABKAgipQIKFlVwZGF0ZVRleHRCbG9ja1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhAKCGxheWVyX2lkGAMgASgJEhgKC3NvdXJjZV90ZXh0GAQgASgJSACIAQESGAoLdHJhbnNsYXRpb24YBSABKAlIAYgBARIrCgp0eXBvZ3JhcGh5GAYgASgLMhcudXJha2F0c3UudjEuVHlwb2dyYXBoeRIhCgVmcmFtZRgHIAMoCzISLnVyYWthdHN1LnYxLlBvaW50EhQKB3Zpc2libGUYCCABKAhIAogBARIOCgZmaWVsZHMYCSADKAlCDgoMX3NvdXJjZV90ZXh0Qg4KDF90cmFuc2xhdGlvbkIKCghfdmlzaWJsZSJfChZDcmVhdGVUZXh0QmxvY2tSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIgCgZib3VuZHMYAyABKAsyEC51cmFrYXRzdS52MS5Cb3giOAoJT3BlcmF0aW9uEgwKBGtpbmQYASABKAkSDQoFc3RhZ2UYAiABKAkSDgoGc3RhZ2VzGAMgAygJIuYBCgpSdW5SZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSEAoIcGFnZV9pZHMYAiADKAkSKQoJb3BlcmF0aW9uGAMgASgLMhYudXJha2F0c3UudjEuT3BlcmF0aW9uEiUKBnJlZ2lvbhgEIAEoCzIQLnVyYWthdHN1LnYxLkJveEgAiAEBEhIKCmVudGl0eV9pZHMYBSADKAkSFwoPaW5wYWludGluZ19tYXNrGAYgASgMEhgKC2ZpbGxfcHJvbXB0GAcgASgJSAGIAQFCCQoHX3JlZ2lvbkIOCgxfZmlsbF9wcm9tcHQi4wEKDVByb2dyZXNzRXZlbnQSDgoGam9iX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDwoHcGFnZV9pZBgDIAEoCRINCgVzdGFnZRgEIAEoCRINCgVtb2RlbBgFIAEoCRISCgplbGFwc2VkX21zGAYgASgBEg8KB21lc3NhZ2UYByABKAkSEQoJY29tcGxldGVkGAggASgFEg0KBXRvdGFsGAkgASgFEg0KBXBhZ2VzGAogAygJEg4KBnN0YWdlcxgLIAMoCRIfCgRwYWdlGAwgASgLMhEudXJha2F0c3UudjEuUGFnZSIYCgZKb2JSZWYSDgoGam9iX2lkGAEgASgJInoKA0pvYhIKCgJpZBgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEg4KBnN0YXR1cxgDIAEoCRIRCgljb21wbGV0ZWQYBCABKAUSDQoFdG90YWwYBSABKAUSEgoKc3RhcnRlZF9hdBgGIAEoARINCgVlcnJvchgHIAEoCSIpCgdKb2JMaXN0Eh4KBGpvYnMYASADKAsyEC51cmFrYXRzdS52MS5Kb2IiKQoKRm9udEZhbWlseRIMCgRuYW1lGAEgASgJEg0KBWZhY2VzGAIgAygJIjUKCEZvbnRMaXN0EikKCGZhbWlsaWVzGAEgAygLMhcudXJha2F0c3UudjEuRm9udEZhbWlseTKPDwoIVXJha2F0c3USQAoPR2V0Q2FwYWJpbGl0aWVzEhIudXJha2F0c3UudjEuRW1wdHkaGS51cmFrYXRzdS52MS5DYXBhYmlsaXRpZXMSNAoJR2V0Q29uZmlnEhIudXJha2F0c3UudjEuRW1wdHkaEy51cmFrYXRzdS52MS5Db25maWcSNQoJU2V0Q29uZmlnEhMudXJha2F0c3UudjEuQ29uZmlnGhMudXJha2F0c3UudjEuQ29uZmlnEk4KFUxpc3RUcmFuc2xhdGlvbk1vZGVscxISLnVyYWthdHN1LnYxLkVtcHR5GiEudXJha2F0c3UudjEuVHJhbnNsYXRpb25Nb2RlbExpc3QSPAoMTGlzdFByb2plY3RzEhIudXJha2F0c3UudjEuRW1wdHkaGC51cmFrYXRzdS52MS5Qcm9qZWN0TGlzdBJICg1DcmVhdGVQcm9qZWN0EiEudXJha2F0c3UudjEuQ3JlYXRlUHJvamVjdFJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjsKCkdldFByb2plY3QSFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhQudXJha2F0c3UudjEuUHJvamVjdBJICg1SZW5hbWVQcm9qZWN0EiEudXJha2F0c3UudjEuUmVuYW1lUHJvamVjdFJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjwKDURlbGV0ZVByb2plY3QSFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhIudXJha2F0c3UudjEuRW1wdHkSNQoEVW5kbxIXLnVyYWthdHN1LnYxLlByb2plY3RSZWYaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjUKBFJlZG8SFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhQudXJha2F0c3UudjEuUHJvamVjdBJICg1DcmVhdGVDaGFwdGVyEiEudXJha2F0c3UudjEuQ3JlYXRlQ2hhcHRlclJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0EkgKDVJlbmFtZUNoYXB0ZXISIS51cmFrYXRzdS52MS5SZW5hbWVDaGFwdGVyUmVxdWVzdBoULnVyYWthdHN1LnYxLlByb2plY3QSPgoNRGVsZXRlQ2hhcHRlchIXLnVyYWthdHN1LnYxLkNoYXB0ZXJSZWYaFC51cmFrYXRzdS52MS5Qcm9qZWN0EkoKDkFycmFuZ2VQcm9qZWN0EiIudXJha2F0c3UudjEuQXJyYW5nZVByb2plY3RSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI5CgdBZGRQYWdlEhsudXJha2F0c3UudjEuQWRkUGFnZVJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEjgKClJlbW92ZVBhZ2USFC51cmFrYXRzdS52MS5QYWdlUmVmGhQudXJha2F0c3UudjEuUHJvamVjdBIyCgdHZXRQYWdlEhQudXJha2F0c3UudjEuUGFnZVJlZhoRLnVyYWthdHN1LnYxLlBhZ2USOQoIR2V0QXNzZXQSGS51cmFrYXRzdS52MS5Bc3NldFJlcXVlc3QaEi51cmFrYXRzdS52MS5Bc3NldBJJCg9VcGRhdGVUZXh0QmxvY2sSIy51cmFrYXRzdS52MS5VcGRhdGVUZXh0QmxvY2tSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRJJCg9DcmVhdGVUZXh0QmxvY2sSIy51cmFrYXRzdS52MS5DcmVhdGVUZXh0QmxvY2tSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI/Cg9EZWxldGVUZXh0QmxvY2sSGS51cmFrYXRzdS52MS5UZXh0QmxvY2tSZWYaES51cmFrYXRzdS52MS5QYWdlEkwKElNldExheWVyVmlzaWJpbGl0eRIjLnVyYWthdHN1LnYxLkxheWVyVmlzaWJpbGl0eVJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEj0KCU1vdmVMYXllchIdLnVyYWthdHN1LnYxLk1vdmVMYXllclJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEkcKDlNldFJhc3RlckxheWVyEiIudXJha2F0c3UudjEuU2V0UmFzdGVyTGF5ZXJSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI7CgtEZWxldGVMYXllchIZLnVyYWthdHN1LnYxLlRleHRCbG9ja1JlZhoRLnVyYWthdHN1LnYxLlBhZ2USPAoDUnVuEhcudXJha2F0c3UudjEuUnVuUmVxdWVzdBoaLnVyYWthdHN1LnYxLlByb2dyZXNzRXZlbnQwARIvCgRTdG9wEhMudXJha2F0c3UudjEuSm9iUmVmGhIudXJha2F0c3UudjEuRW1wdHkSNAoITGlzdEpvYnMSEi51cmFrYXRzdS52MS5FbXB0eRoULnVyYWthdHN1LnYxLkpvYkxpc3QSNgoJTGlzdEZvbnRzEhIudXJha2F0c3UudjEuRW1wdHkaFS51cmFrYXRzdS52MS5Gb250TGlzdGIGcHJvdG8z");
+  fileDesc("Chp1cmFrYXRzdS92MS91cmFrYXRzdS5wcm90bxILdXJha2F0c3UudjEiBwoFRW1wdHkiiwEKBkRldmljZRINCgVpbmRleBgBIAEoBRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg8KB2JhY2tlbmQYBCABKAkSEwoLZGV2aWNlX3R5cGUYBSABKAkSFAoMbWVtb3J5X3RvdGFsGAYgASgDEhMKC21lbW9yeV9mcmVlGAcgASgDIkAKDVJ1bnRpbWVPcHRpb24SDAoEbmFtZRgBIAEoCRIRCglhdmFpbGFibGUYAiABKAgSDgoGcmVhc29uGAMgASgJIq4CCgxQcm92aWRlckluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVzdGFnZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIsCghydW50aW1lcxgFIAMoCzIaLnVyYWthdHN1LnYxLlJ1bnRpbWVPcHRpb24SFwoPZGVmYXVsdF9ydW50aW1lGAYgASgJEhEKCWF2YWlsYWJsZRgHIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCCABKAkSDwoHd2VpZ2h0cxgJIAMoCRIcChRzZXR0aW5nc19zY2hlbWFfanNvbhgKIAEoCRIVCg1kZWZhdWx0c19qc29uGAsgASgJEhAKCHByb21wdGVkGAwgASgIEhIKCmluc3RydWN0ZWQYDSABKAgiigMKDENhcGFiaWxpdGllcxIPCgd2ZXJzaW9uGAEgASgJEiMKBmRldmljZRgCIAEoCzITLnVyYWthdHN1LnYxLkRldmljZRIkCgdkZXZpY2VzGAMgAygLMhMudXJha2F0c3UudjEuRGV2aWNlEhAKCHBsYXRmb3JtGAQgASgJEhUKDXJ1bnRpbWVzX2pzb24YBSABKAkSLAoJcHJvdmlkZXJzGAYgAygLMhkudXJha2F0c3UudjEuUHJvdmlkZXJJbmZvEg4KBnN0YWdlcxgHIAMoCRISCgpzdG9yZV9yb290GAggASgJEhMKC3N0b3JlX2J5dGVzGAkgASgDEjUKBmxvYWRlZBgKIAMoCzIlLnVyYWthdHN1LnYxLkNhcGFiaWxpdGllcy5Mb2FkZWRFbnRyeRIoCglsYW5ndWFnZXMYCyADKAsyFS51cmFrYXRzdS52MS5MYW5ndWFnZRotCgtMb2FkZWRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiUKCExhbmd1YWdlEgsKA3RhZxgBIAEoCRIMCgRuYW1lGAIgASgJImoKDk1vZGVsU2VsZWN0aW9uEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhQKDHF1YW50aXphdGlvbhgDIAEoCRIOCgZ2aXNpb24YBCABKAgSEQoJcmVhc29uaW5nGAUgASgIItUECgZDb25maWcSDgoGZGV2aWNlGAEgASgJEhEKCWRldGVjdGlvbhgCIAEoCRILCgNvY3IYAyABKAkSEgoKaW5wYWludGluZxgEIAEoCRIwCgt0cmFuc2xhdGlvbhgFIAEoCzIbLnVyYWthdHN1LnYxLk1vZGVsU2VsZWN0aW9uEhcKD2dlbmVyYXRpb25fanNvbhgGIAEoCRIXCg90YXJnZXRfbGFuZ3VhZ2UYByABKAkSFAoMaW5zdHJ1Y3Rpb25zGAggASgJEj4KDnByb2Nlc3Nvcl9qc29uGAkgAygLMiYudXJha2F0c3UudjEuQ29uZmlnLlByb2Nlc3Nvckpzb25FbnRyeRI+Cg5wcm92aWRlcnNfanNvbhgKIAMoCzImLnVyYWthdHN1LnYxLkNvbmZpZy5Qcm92aWRlcnNKc29uRW50cnkSMwoIcnVudGltZXMYCyADKAsyIS51cmFrYXRzdS52MS5Db25maWcuUnVudGltZXNFbnRyeRIVCg1mb250X2ZhbWlsaWVzGAwgAygJEgwKBGZpbGwYDSABKAkSFgoObG9zc2xlc3NfcGFnZXMYDiABKAgaNAoSUHJvY2Vzc29ySnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaNAoSUHJvdmlkZXJzSnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaLwoNUnVudGltZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIq0BChBUcmFuc2xhdGlvbk1vZGVsEhAKCHByb3ZpZGVyGAEgASgJEhUKDXByb3ZpZGVyX25hbWUYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEbmFtZRgEIAEoCRIwCg1xdWFudGl6YXRpb25zGAUgAygLMhkudXJha2F0c3UudjEuUXVhbnRpemF0aW9uEg4KBnZpc2lvbhgGIAEoCBIRCglyZWFzb25pbmcYByABKAgiPAoMUXVhbnRpemF0aW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoKZG93bmxvYWRlZBgDIAEoCCJFChRUcmFuc2xhdGlvbk1vZGVsTGlzdBItCgZtb2RlbHMYASADKAsyHS51cmFrYXRzdS52MS5UcmFuc2xhdGlvbk1vZGVsIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASI6CgNCb3gSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASItCgxHcmFkaWVudFN0b3ASDgoGb2Zmc2V0GAEgASgBEg0KBWNvbG9yGAIgASgJIlEKCEdyYWRpZW50EgwKBGtpbmQYASABKAkSDQoFYW5nbGUYAiABKAESKAoFc3RvcHMYAyADKAsyGS51cmFrYXRzdS52MS5HcmFkaWVudFN0b3AinwMKClR5cG9ncmFwaHkSFgoOcHJlZmVycmVkX2ZvbnQYASABKAkSGAoLZm9udF93ZWlnaHQYAiABKAVIAIgBARISCgpmb250X3N0eWxlGAMgASgJEhEKBHNpemUYBCABKAFIAYgBARIQCghhdXRvX2ZpdBgFIAEoCBISCgVjb2xvchgGIAEoCUgCiAEBEhkKDHN0cm9rZV9jb2xvchgHIAEoCUgDiAEBEhkKDHN0cm9rZV93aWR0aBgIIAEoAUgEiAEBEhEKCWFsaWdubWVudBgJIAEoCRIUCgx3cml0aW5nX21vZGUYCiABKAkSEAoIYXV0aG9yZWQYCyABKAgSLAoNZmlsbF9ncmFkaWVudBgMIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Ei4KD3N0cm9rZV9ncmFkaWVudBgNIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Qg4KDF9mb250X3dlaWdodEIHCgVfc2l6ZUIICgZfY29sb3JCDwoNX3N0cm9rZV9jb2xvckIPCg1fc3Ryb2tlX3dpZHRoIrkBCglUZXh0U3R5bGUSDQoFc3RhcnQYASABKAUSCwoDZW5kGAIgASgFEgwKBGJvbGQYAyABKAgSDgoGaXRhbGljGAQgASgIEhEKCXVuZGVybGluZRgFIAEoCBIVCg1zdHJpa2V0aHJvdWdoGAYgASgIEhIKBWNvbG9yGAcgASgJSACIAQESDAoEZm9udBgIIAEoCRISCgVzY2FsZRgJIAEoAUgBiAEBQggKBl9jb2xvckIICgZfc2NhbGUi/QMKCVRleHRCbG9jaxIQCghsYXllcl9pZBgBIAEoCRISCgpjb250ZW50X2lkGAIgASgJEhEKCXJlZ2lvbl9pZBgDIAEoCRISCgpiYWxsb29uX2lkGAQgASgJEhMKC2xheW91dF9raW5kGAUgASgJEiEKBWZyYW1lGAYgAygLMhIudXJha2F0c3UudjEuUG9pbnQSIAoGYm91bmRzGAcgASgLMhAudXJha2F0c3UudjEuQm94Eg0KBWFuZ2xlGAggASgBEhMKC3NvdXJjZV90ZXh0GAkgASgJEhUKDXNvdXJjZV9vcmlnaW4YCiABKAkSFwoPc291cmNlX2xhbmd1YWdlGAsgASgJEhMKC3RyYW5zbGF0aW9uGAwgASgJEhoKEnRyYW5zbGF0aW9uX29yaWdpbhgNIAEoCRIcChR0cmFuc2xhdGlvbl9sYW5ndWFnZRgOIAEoCRIVCg1vY3JfZGlyZWN0aW9uGA8gASgJEisKCnR5cG9ncmFwaHkYECABKAsyFy51cmFrYXRzdS52MS5UeXBvZ3JhcGh5Eg8KB3Zpc2libGUYESABKAgSDAoEcm9sZRgSIAEoCRIPCgdvcGFjaXR5GBMgASgBEjIKEnRyYW5zbGF0aW9uX3N0eWxlcxgUIAMoCzIWLnVyYWthdHN1LnYxLlRleHRTdHlsZSKMAQoGUmVnaW9uEgoKAmlkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGFiZWwYAyABKAkSIwoHcG9seWdvbhgEIAMoCzISLnVyYWthdHN1LnYxLlBvaW50EiAKBmJvdW5kcxgFIAEoCzIQLnVyYWthdHN1LnYxLkJveBISCgpjb25maWRlbmNlGAYgASgBIlcKC1Jhc3RlckxheWVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEa2luZBgDIAEoCRIPCgd2aXNpYmxlGAQgASgIEg8KB29wYWNpdHkYBSABKAEilAEKFkxheWVyVmlzaWJpbGl0eVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhEKCWxheWVyX2lkcxgDIAMoCRIUCgd2aXNpYmxlGAQgASgISACIAQESFAoHb3BhY2l0eRgFIAEoAUgBiAEBQgoKCF92aXNpYmxlQgoKCF9vcGFjaXR5ImIKFUFkZFJhc3RlckxheWVyUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIWCg5hYm92ZV9sYXllcl9pZBgEIAEoCSJYChBNb3ZlTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIQCghsYXllcl9pZBgDIAEoCRINCgVkZWx0YRgEIAEoBSKOAQoVU2V0UmFzdGVyTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIMCgRraW5kGAMgASgJEhAKCGxheWVyX2lkGAQgASgJEgsKA3BuZxgFIAEoDBINCgVwYXRjaBgGIAEoCBIJCgF4GAcgASgFEgkKAXkYCCABKAUiOQoLU3RhZ2VTdGF0dXMSDQoFc3RhZ2UYASABKAkSDAoEZG9uZRgCIAEoCBINCgVtb2RlbBgDIAEoCSL+AgoEUGFnZRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBXdpZHRoGAMgASgFEg4KBmhlaWdodBgEIAEoBRImCgZibG9ja3MYBSADKAsyFi51cmFrYXRzdS52MS5UZXh0QmxvY2sSJAoHcmVnaW9ucxgGIAMoCzITLnVyYWthdHN1LnYxLlJlZ2lvbhIvCg1yYXN0ZXJfbGF5ZXJzGAcgAygLMhgudXJha2F0c3UudjEuUmFzdGVyTGF5ZXISDgoGYXNzZXRzGAggAygJEigKBnN0YWdlcxgJIAMoCzIYLnVyYWthdHN1LnYxLlN0YWdlU3RhdHVzEhAKCHJldmlzaW9uGAogASgDEjwKDmFzc2V0X3ZlcnNpb25zGAsgAygLMiQudXJha2F0c3UudjEuUGFnZS5Bc3NldFZlcnNpb25zRW50cnkaNAoSQXNzZXRWZXJzaW9uc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiywEKB1Byb2plY3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRISCgpjcmVhdGVkX2F0GAMgASgBEhIKCnVwZGF0ZWRfYXQYBCABKAESEAoIcmV2aXNpb24YBSABKAMSIAoFcGFnZXMYBiADKAsyES51cmFrYXRzdS52MS5QYWdlEhAKCGNhbl91bmRvGAcgASgIEhAKCGNhbl9yZWRvGAggASgIEiYKCGNoYXB0ZXJzGAkgAygLMhQudXJha2F0c3UudjEuQ2hhcHRlciI1CgdDaGFwdGVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcGFnZV9pZHMYAyADKAkicwoOUHJvamVjdFN1bW1hcnkSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVwYWdlcxgDIAEoBRISCgpjcmVhdGVkX2F0GAQgASgBEhIKCnVwZGF0ZWRfYXQYBSABKAESEAoIY2hhcHRlcnMYBiABKAUiPAoLUHJvamVjdExpc3QSLQoIcHJvamVjdHMYASADKAsyGy51cmFrYXRzdS52MS5Qcm9qZWN0U3VtbWFyeSIkChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIMCgRuYW1lGAEgASgJIjgKFFJlbmFtZVByb2plY3RSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCSIgCgpQcm9qZWN0UmVmEhIKCnByb2plY3RfaWQYASABKAkiLgoHUGFnZVJlZhISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkiVgoUQ3JlYXRlQ2hhcHRlclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhIKBWluZGV4GAMgASgFSACIAQFCCAoGX2luZGV4IkwKFFJlbmFtZUNoYXB0ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSEgoKY2hhcHRlcl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJIjQKCkNoYXB0ZXJSZWYSEgoKcHJvamVjdF9pZBgBIAEoCRISCgpjaGFwdGVyX2lkGAIgASgJIjUKDUNoYXB0ZXJMYXlvdXQSEgoKY2hhcHRlcl9pZBgBIAEoCRIQCghwYWdlX2lkcxgCIAMoCSJZChVBcnJhbmdlUHJvamVjdFJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCghjaGFwdGVycxgCIAMoCzIaLnVyYWthdHN1LnYxLkNoYXB0ZXJMYXlvdXQiRQoMVGV4dEJsb2NrUmVmEhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIQCghsYXllcl9pZBgDIAEoCSJyCg5BZGRQYWdlUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEZGF0YRgDIAEoDBISCgVpbmRleBgEIAEoBUgAiAEBEhIKCmNoYXB0ZXJfaWQYBSABKAlCCAoGX2luZGV4IkEKDEFzc2V0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSDAoEa2luZBgDIAEoCSJZCgVBc3NldBIMCgRkYXRhGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRINCgV3aWR0aBgDIAEoBRIOCgZoZWlnaHQYBCABKAUSDQoFZm91bmQYBSABKAgi2QIKFlVwZGF0ZVRleHRCbG9ja1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhAKCGxheWVyX2lkGAMgASgJEhgKC3NvdXJjZV90ZXh0GAQgASgJSACIAQESGAoLdHJhbnNsYXRpb24YBSABKAlIAYgBARIrCgp0eXBvZ3JhcGh5GAYgASgLMhcudXJha2F0c3UudjEuVHlwb2dyYXBoeRIhCgVmcmFtZRgHIAMoCzISLnVyYWthdHN1LnYxLlBvaW50EhQKB3Zpc2libGUYCCABKAhIAogBARIOCgZmaWVsZHMYCSADKAkSMgoSdHJhbnNsYXRpb25fc3R5bGVzGAogAygLMhYudXJha2F0c3UudjEuVGV4dFN0eWxlQg4KDF9zb3VyY2VfdGV4dEIOCgxfdHJhbnNsYXRpb25CCgoIX3Zpc2libGUiXwoWQ3JlYXRlVGV4dEJsb2NrUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSIAoGYm91bmRzGAMgASgLMhAudXJha2F0c3UudjEuQm94IjgKCU9wZXJhdGlvbhIMCgRraW5kGAEgASgJEg0KBXN0YWdlGAIgASgJEg4KBnN0YWdlcxgDIAMoCSLmAQoKUnVuUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEhAKCHBhZ2VfaWRzGAIgAygJEikKCW9wZXJhdGlvbhgDIAEoCzIWLnVyYWthdHN1LnYxLk9wZXJhdGlvbhIlCgZyZWdpb24YBCABKAsyEC51cmFrYXRzdS52MS5Cb3hIAIgBARISCgplbnRpdHlfaWRzGAUgAygJEhcKD2lucGFpbnRpbmdfbWFzaxgGIAEoDBIYCgtmaWxsX3Byb21wdBgHIAEoCUgBiAEBQgkKB19yZWdpb25CDgoMX2ZpbGxfcHJvbXB0IuMBCg1Qcm9ncmVzc0V2ZW50Eg4KBmpvYl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg8KB3BhZ2VfaWQYAyABKAkSDQoFc3RhZ2UYBCABKAkSDQoFbW9kZWwYBSABKAkSEgoKZWxhcHNlZF9tcxgGIAEoARIPCgdtZXNzYWdlGAcgASgJEhEKCWNvbXBsZXRlZBgIIAEoBRINCgV0b3RhbBgJIAEoBRINCgVwYWdlcxgKIAMoCRIOCgZzdGFnZXMYCyADKAkSHwoEcGFnZRgMIAEoCzIRLnVyYWthdHN1LnYxLlBhZ2UiGAoGSm9iUmVmEg4KBmpvYl9pZBgBIAEoCSJ6CgNKb2ISCgoCaWQYASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJY29tcGxldGVkGAQgASgFEg0KBXRvdGFsGAUgASgFEhIKCnN0YXJ0ZWRfYXQYBiABKAESDQoFZXJyb3IYByABKAkiKQoHSm9iTGlzdBIeCgRqb2JzGAEgAygLMhAudXJha2F0c3UudjEuSm9iIikKCkZvbnRGYW1pbHkSDAoEbmFtZRgBIAEoCRINCgVmYWNlcxgCIAMoCSI1CghGb250TGlzdBIpCghmYW1pbGllcxgBIAMoCzIXLnVyYWthdHN1LnYxLkZvbnRGYW1pbHky2A8KCFVyYWthdHN1EkAKD0dldENhcGFiaWxpdGllcxISLnVyYWthdHN1LnYxLkVtcHR5GhkudXJha2F0c3UudjEuQ2FwYWJpbGl0aWVzEjQKCUdldENvbmZpZxISLnVyYWthdHN1LnYxLkVtcHR5GhMudXJha2F0c3UudjEuQ29uZmlnEjUKCVNldENvbmZpZxITLnVyYWthdHN1LnYxLkNvbmZpZxoTLnVyYWthdHN1LnYxLkNvbmZpZxJOChVMaXN0VHJhbnNsYXRpb25Nb2RlbHMSEi51cmFrYXRzdS52MS5FbXB0eRohLnVyYWthdHN1LnYxLlRyYW5zbGF0aW9uTW9kZWxMaXN0EjwKDExpc3RQcm9qZWN0cxISLnVyYWthdHN1LnYxLkVtcHR5GhgudXJha2F0c3UudjEuUHJvamVjdExpc3QSSAoNQ3JlYXRlUHJvamVjdBIhLnVyYWthdHN1LnYxLkNyZWF0ZVByb2plY3RSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI7CgpHZXRQcm9qZWN0EhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSSAoNUmVuYW1lUHJvamVjdBIhLnVyYWthdHN1LnYxLlJlbmFtZVByb2plY3RSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI8Cg1EZWxldGVQcm9qZWN0EhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoSLnVyYWthdHN1LnYxLkVtcHR5EjUKBFVuZG8SFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhQudXJha2F0c3UudjEuUHJvamVjdBI1CgRSZWRvEhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSSAoNQ3JlYXRlQ2hhcHRlchIhLnVyYWthdHN1LnYxLkNyZWF0ZUNoYXB0ZXJSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBJICg1SZW5hbWVDaGFwdGVyEiEudXJha2F0c3UudjEuUmVuYW1lQ2hhcHRlclJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0Ej4KDURlbGV0ZUNoYXB0ZXISFy51cmFrYXRzdS52MS5DaGFwdGVyUmVmGhQudXJha2F0c3UudjEuUHJvamVjdBJKCg5BcnJhbmdlUHJvamVjdBIiLnVyYWthdHN1LnYxLkFycmFuZ2VQcm9qZWN0UmVxdWVzdBoULnVyYWthdHN1LnYxLlByb2plY3QSOQoHQWRkUGFnZRIbLnVyYWthdHN1LnYxLkFkZFBhZ2VSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI4CgpSZW1vdmVQYWdlEhQudXJha2F0c3UudjEuUGFnZVJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSMgoHR2V0UGFnZRIULnVyYWthdHN1LnYxLlBhZ2VSZWYaES51cmFrYXRzdS52MS5QYWdlEjkKCEdldEFzc2V0EhkudXJha2F0c3UudjEuQXNzZXRSZXF1ZXN0GhIudXJha2F0c3UudjEuQXNzZXQSSQoPVXBkYXRlVGV4dEJsb2NrEiMudXJha2F0c3UudjEuVXBkYXRlVGV4dEJsb2NrUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USSQoPQ3JlYXRlVGV4dEJsb2NrEiMudXJha2F0c3UudjEuQ3JlYXRlVGV4dEJsb2NrUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USPwoPRGVsZXRlVGV4dEJsb2NrEhkudXJha2F0c3UudjEuVGV4dEJsb2NrUmVmGhEudXJha2F0c3UudjEuUGFnZRJMChJTZXRMYXllclZpc2liaWxpdHkSIy51cmFrYXRzdS52MS5MYXllclZpc2liaWxpdHlSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI9CglNb3ZlTGF5ZXISHS51cmFrYXRzdS52MS5Nb3ZlTGF5ZXJSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRJHCg5TZXRSYXN0ZXJMYXllchIiLnVyYWthdHN1LnYxLlNldFJhc3RlckxheWVyUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USRwoOQWRkUmFzdGVyTGF5ZXISIi51cmFrYXRzdS52MS5BZGRSYXN0ZXJMYXllclJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEjsKC0RlbGV0ZUxheWVyEhkudXJha2F0c3UudjEuVGV4dEJsb2NrUmVmGhEudXJha2F0c3UudjEuUGFnZRI8CgNSdW4SFy51cmFrYXRzdS52MS5SdW5SZXF1ZXN0GhoudXJha2F0c3UudjEuUHJvZ3Jlc3NFdmVudDABEi8KBFN0b3ASEy51cmFrYXRzdS52MS5Kb2JSZWYaEi51cmFrYXRzdS52MS5FbXB0eRI0CghMaXN0Sm9icxISLnVyYWthdHN1LnYxLkVtcHR5GhQudXJha2F0c3UudjEuSm9iTGlzdBI2CglMaXN0Rm9udHMSEi51cmFrYXRzdS52MS5FbXB0eRoVLnVyYWthdHN1LnYxLkZvbnRMaXN0YgZwcm90bzM");
 
 /**
  * @generated from message urakatsu.v1.Empty
@@ -552,6 +552,65 @@ export const BoxSchema: GenMessage<Box> = /*@__PURE__*/
   messageDesc(file_urakatsu_v1_urakatsu, 12);
 
 /**
+ * Photoshop's Gradient Overlay / gradient Stroke over a text layer's bounds.
+ *
+ * @generated from message urakatsu.v1.GradientStop
+ */
+export type GradientStop = Message<"urakatsu.v1.GradientStop"> & {
+  /**
+   * 0..1
+   *
+   * @generated from field: double offset = 1;
+   */
+  offset: number;
+
+  /**
+   * #rrggbbaa
+   *
+   * @generated from field: string color = 2;
+   */
+  color: string;
+};
+
+/**
+ * Describes the message urakatsu.v1.GradientStop.
+ * Use `create(GradientStopSchema)` to create a new message.
+ */
+export const GradientStopSchema: GenMessage<GradientStop> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 13);
+
+/**
+ * @generated from message urakatsu.v1.Gradient
+ */
+export type Gradient = Message<"urakatsu.v1.Gradient"> & {
+  /**
+   * linear | radial
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * degrees counter-clockwise from +x; 90 runs bottom to top
+   *
+   * @generated from field: double angle = 2;
+   */
+  angle: number;
+
+  /**
+   * @generated from field: repeated urakatsu.v1.GradientStop stops = 3;
+   */
+  stops: GradientStop[];
+};
+
+/**
+ * Describes the message urakatsu.v1.Gradient.
+ * Use `create(GradientSchema)` to create a new message.
+ */
+export const GradientSchema: GenMessage<Gradient> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 14);
+
+/**
  * @generated from message urakatsu.v1.Typography
  */
 export type Typography = Message<"urakatsu.v1.Typography"> & {
@@ -619,6 +678,20 @@ export type Typography = Message<"urakatsu.v1.Typography"> & {
    * @generated from field: bool authored = 11;
    */
   authored: boolean;
+
+  /**
+   * unset: the solid color
+   *
+   * @generated from field: urakatsu.v1.Gradient fill_gradient = 12;
+   */
+  fillGradient?: Gradient | undefined;
+
+  /**
+   * unset: the solid stroke color
+   *
+   * @generated from field: urakatsu.v1.Gradient stroke_gradient = 13;
+   */
+  strokeGradient?: Gradient | undefined;
 };
 
 /**
@@ -626,7 +699,72 @@ export type Typography = Message<"urakatsu.v1.Typography"> & {
  * Use `create(TypographySchema)` to create a new message.
  */
 export const TypographySchema: GenMessage<Typography> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 13);
+  messageDesc(file_urakatsu_v1_urakatsu, 15);
+
+/**
+ * Rich text formatting over [start, end) of a text, in code points (Unicode scalar values).
+ *
+ * @generated from message urakatsu.v1.TextStyle
+ */
+export type TextStyle = Message<"urakatsu.v1.TextStyle"> & {
+  /**
+   * @generated from field: int32 start = 1;
+   */
+  start: number;
+
+  /**
+   * @generated from field: int32 end = 2;
+   */
+  end: number;
+
+  /**
+   * @generated from field: bool bold = 3;
+   */
+  bold: boolean;
+
+  /**
+   * @generated from field: bool italic = 4;
+   */
+  italic: boolean;
+
+  /**
+   * @generated from field: bool underline = 5;
+   */
+  underline: boolean;
+
+  /**
+   * @generated from field: bool strikethrough = 6;
+   */
+  strikethrough: boolean;
+
+  /**
+   * #rrggbbaa
+   *
+   * @generated from field: optional string color = 7;
+   */
+  color?: string | undefined;
+
+  /**
+   * a family of its own, or "" for the layer's
+   *
+   * @generated from field: string font = 8;
+   */
+  font: string;
+
+  /**
+   * size relative to the layer's; unset is 1
+   *
+   * @generated from field: optional double scale = 9;
+   */
+  scale?: number | undefined;
+};
+
+/**
+ * Describes the message urakatsu.v1.TextStyle.
+ * Use `create(TextStyleSchema)` to create a new message.
+ */
+export const TextStyleSchema: GenMessage<TextStyle> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 16);
 
 /**
  * A text layer with its semantic content and analysis region (document view).
@@ -740,6 +878,13 @@ export type TextBlock = Message<"urakatsu.v1.TextBlock"> & {
    * @generated from field: double opacity = 19;
    */
   opacity: number;
+
+  /**
+   * rich text over `translation`
+   *
+   * @generated from field: repeated urakatsu.v1.TextStyle translation_styles = 20;
+   */
+  translationStyles: TextStyle[];
 };
 
 /**
@@ -747,7 +892,7 @@ export type TextBlock = Message<"urakatsu.v1.TextBlock"> & {
  * Use `create(TextBlockSchema)` to create a new message.
  */
 export const TextBlockSchema: GenMessage<TextBlock> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 14);
+  messageDesc(file_urakatsu_v1_urakatsu, 17);
 
 /**
  * @generated from message urakatsu.v1.Region
@@ -791,7 +936,7 @@ export type Region = Message<"urakatsu.v1.Region"> & {
  * Use `create(RegionSchema)` to create a new message.
  */
 export const RegionSchema: GenMessage<Region> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 15);
+  messageDesc(file_urakatsu_v1_urakatsu, 18);
 
 /**
  * @generated from message urakatsu.v1.RasterLayer
@@ -830,7 +975,7 @@ export type RasterLayer = Message<"urakatsu.v1.RasterLayer"> & {
  * Use `create(RasterLayerSchema)` to create a new message.
  */
 export const RasterLayerSchema: GenMessage<RasterLayer> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 16);
+  messageDesc(file_urakatsu_v1_urakatsu, 19);
 
 /**
  * @generated from message urakatsu.v1.LayerVisibilityRequest
@@ -869,7 +1014,42 @@ export type LayerVisibilityRequest = Message<"urakatsu.v1.LayerVisibilityRequest
  * Use `create(LayerVisibilityRequestSchema)` to create a new message.
  */
 export const LayerVisibilityRequestSchema: GenMessage<LayerVisibilityRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 17);
+  messageDesc(file_urakatsu_v1_urakatsu, 20);
+
+/**
+ * A new, empty paint layer (Photoshop's New Layer): drawn directly above `above_layer_id` (a raster
+ * layer), or above every raster layer. An empty `name` names it "Layer N".
+ *
+ * @generated from message urakatsu.v1.AddRasterLayerRequest
+ */
+export type AddRasterLayerRequest = Message<"urakatsu.v1.AddRasterLayerRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: string page_id = 2;
+   */
+  pageId: string;
+
+  /**
+   * @generated from field: string name = 3;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string above_layer_id = 4;
+   */
+  aboveLayerId: string;
+};
+
+/**
+ * Describes the message urakatsu.v1.AddRasterLayerRequest.
+ * Use `create(AddRasterLayerRequestSchema)` to create a new message.
+ */
+export const AddRasterLayerRequestSchema: GenMessage<AddRasterLayerRequest> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 21);
 
 /**
  * Moves a layer among its siblings; positive delta draws it later (on top).
@@ -903,7 +1083,7 @@ export type MoveLayerRequest = Message<"urakatsu.v1.MoveLayerRequest"> & {
  * Use `create(MoveLayerRequestSchema)` to create a new message.
  */
 export const MoveLayerRequestSchema: GenMessage<MoveLayerRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 18);
+  messageDesc(file_urakatsu_v1_urakatsu, 22);
 
 /**
  * Replaces a raster layer's pixels with a page-sized PNG. Without layer_id the
@@ -963,7 +1143,7 @@ export type SetRasterLayerRequest = Message<"urakatsu.v1.SetRasterLayerRequest">
  * Use `create(SetRasterLayerRequestSchema)` to create a new message.
  */
 export const SetRasterLayerRequestSchema: GenMessage<SetRasterLayerRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 19);
+  messageDesc(file_urakatsu_v1_urakatsu, 23);
 
 /**
  * @generated from message urakatsu.v1.StageStatus
@@ -990,7 +1170,7 @@ export type StageStatus = Message<"urakatsu.v1.StageStatus"> & {
  * Use `create(StageStatusSchema)` to create a new message.
  */
 export const StageStatusSchema: GenMessage<StageStatus> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 20);
+  messageDesc(file_urakatsu_v1_urakatsu, 24);
 
 /**
  * @generated from message urakatsu.v1.Page
@@ -1062,7 +1242,7 @@ export type Page = Message<"urakatsu.v1.Page"> & {
  * Use `create(PageSchema)` to create a new message.
  */
 export const PageSchema: GenMessage<Page> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 21);
+  messageDesc(file_urakatsu_v1_urakatsu, 25);
 
 /**
  * @generated from message urakatsu.v1.Project
@@ -1121,7 +1301,7 @@ export type Project = Message<"urakatsu.v1.Project"> & {
  * Use `create(ProjectSchema)` to create a new message.
  */
 export const ProjectSchema: GenMessage<Project> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 22);
+  messageDesc(file_urakatsu_v1_urakatsu, 26);
 
 /**
  * @generated from message urakatsu.v1.Chapter
@@ -1148,7 +1328,7 @@ export type Chapter = Message<"urakatsu.v1.Chapter"> & {
  * Use `create(ChapterSchema)` to create a new message.
  */
 export const ChapterSchema: GenMessage<Chapter> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 23);
+  messageDesc(file_urakatsu_v1_urakatsu, 27);
 
 /**
  * @generated from message urakatsu.v1.ProjectSummary
@@ -1190,7 +1370,7 @@ export type ProjectSummary = Message<"urakatsu.v1.ProjectSummary"> & {
  * Use `create(ProjectSummarySchema)` to create a new message.
  */
 export const ProjectSummarySchema: GenMessage<ProjectSummary> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 24);
+  messageDesc(file_urakatsu_v1_urakatsu, 28);
 
 /**
  * @generated from message urakatsu.v1.ProjectList
@@ -1207,7 +1387,7 @@ export type ProjectList = Message<"urakatsu.v1.ProjectList"> & {
  * Use `create(ProjectListSchema)` to create a new message.
  */
 export const ProjectListSchema: GenMessage<ProjectList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 25);
+  messageDesc(file_urakatsu_v1_urakatsu, 29);
 
 /**
  * @generated from message urakatsu.v1.CreateProjectRequest
@@ -1224,7 +1404,7 @@ export type CreateProjectRequest = Message<"urakatsu.v1.CreateProjectRequest"> &
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 26);
+  messageDesc(file_urakatsu_v1_urakatsu, 30);
 
 /**
  * @generated from message urakatsu.v1.RenameProjectRequest
@@ -1246,7 +1426,7 @@ export type RenameProjectRequest = Message<"urakatsu.v1.RenameProjectRequest"> &
  * Use `create(RenameProjectRequestSchema)` to create a new message.
  */
 export const RenameProjectRequestSchema: GenMessage<RenameProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 27);
+  messageDesc(file_urakatsu_v1_urakatsu, 31);
 
 /**
  * @generated from message urakatsu.v1.ProjectRef
@@ -1263,7 +1443,7 @@ export type ProjectRef = Message<"urakatsu.v1.ProjectRef"> & {
  * Use `create(ProjectRefSchema)` to create a new message.
  */
 export const ProjectRefSchema: GenMessage<ProjectRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 28);
+  messageDesc(file_urakatsu_v1_urakatsu, 32);
 
 /**
  * @generated from message urakatsu.v1.PageRef
@@ -1285,7 +1465,7 @@ export type PageRef = Message<"urakatsu.v1.PageRef"> & {
  * Use `create(PageRefSchema)` to create a new message.
  */
 export const PageRefSchema: GenMessage<PageRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 29);
+  messageDesc(file_urakatsu_v1_urakatsu, 33);
 
 /**
  * @generated from message urakatsu.v1.CreateChapterRequest
@@ -1312,7 +1492,7 @@ export type CreateChapterRequest = Message<"urakatsu.v1.CreateChapterRequest"> &
  * Use `create(CreateChapterRequestSchema)` to create a new message.
  */
 export const CreateChapterRequestSchema: GenMessage<CreateChapterRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 30);
+  messageDesc(file_urakatsu_v1_urakatsu, 34);
 
 /**
  * @generated from message urakatsu.v1.RenameChapterRequest
@@ -1339,7 +1519,7 @@ export type RenameChapterRequest = Message<"urakatsu.v1.RenameChapterRequest"> &
  * Use `create(RenameChapterRequestSchema)` to create a new message.
  */
 export const RenameChapterRequestSchema: GenMessage<RenameChapterRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 31);
+  messageDesc(file_urakatsu_v1_urakatsu, 35);
 
 /**
  * @generated from message urakatsu.v1.ChapterRef
@@ -1361,7 +1541,7 @@ export type ChapterRef = Message<"urakatsu.v1.ChapterRef"> & {
  * Use `create(ChapterRefSchema)` to create a new message.
  */
 export const ChapterRefSchema: GenMessage<ChapterRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 32);
+  messageDesc(file_urakatsu_v1_urakatsu, 36);
 
 /**
  * @generated from message urakatsu.v1.ChapterLayout
@@ -1383,7 +1563,7 @@ export type ChapterLayout = Message<"urakatsu.v1.ChapterLayout"> & {
  * Use `create(ChapterLayoutSchema)` to create a new message.
  */
 export const ChapterLayoutSchema: GenMessage<ChapterLayout> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 33);
+  messageDesc(file_urakatsu_v1_urakatsu, 37);
 
 /**
  * The whole new structure: every chapter exactly once, every page exactly once.
@@ -1407,7 +1587,7 @@ export type ArrangeProjectRequest = Message<"urakatsu.v1.ArrangeProjectRequest">
  * Use `create(ArrangeProjectRequestSchema)` to create a new message.
  */
 export const ArrangeProjectRequestSchema: GenMessage<ArrangeProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 34);
+  messageDesc(file_urakatsu_v1_urakatsu, 38);
 
 /**
  * @generated from message urakatsu.v1.TextBlockRef
@@ -1434,7 +1614,7 @@ export type TextBlockRef = Message<"urakatsu.v1.TextBlockRef"> & {
  * Use `create(TextBlockRefSchema)` to create a new message.
  */
 export const TextBlockRefSchema: GenMessage<TextBlockRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 35);
+  messageDesc(file_urakatsu_v1_urakatsu, 39);
 
 /**
  * @generated from message urakatsu.v1.AddPageRequest
@@ -1475,7 +1655,7 @@ export type AddPageRequest = Message<"urakatsu.v1.AddPageRequest"> & {
  * Use `create(AddPageRequestSchema)` to create a new message.
  */
 export const AddPageRequestSchema: GenMessage<AddPageRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 36);
+  messageDesc(file_urakatsu_v1_urakatsu, 40);
 
 /**
  * @generated from message urakatsu.v1.AssetRequest
@@ -1504,7 +1684,7 @@ export type AssetRequest = Message<"urakatsu.v1.AssetRequest"> & {
  * Use `create(AssetRequestSchema)` to create a new message.
  */
 export const AssetRequestSchema: GenMessage<AssetRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 37);
+  messageDesc(file_urakatsu_v1_urakatsu, 41);
 
 /**
  * @generated from message urakatsu.v1.Asset
@@ -1541,7 +1721,7 @@ export type Asset = Message<"urakatsu.v1.Asset"> & {
  * Use `create(AssetSchema)` to create a new message.
  */
 export const AssetSchema: GenMessage<Asset> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 38);
+  messageDesc(file_urakatsu_v1_urakatsu, 42);
 
 /**
  * @generated from message urakatsu.v1.UpdateTextBlockRequest
@@ -1597,6 +1777,13 @@ export type UpdateTextBlockRequest = Message<"urakatsu.v1.UpdateTextBlockRequest
    * @generated from field: repeated string fields = 9;
    */
   fields: string[];
+
+  /**
+   * Sent with "translation": its rich text. A translation sent without styles is plain.
+   *
+   * @generated from field: repeated urakatsu.v1.TextStyle translation_styles = 10;
+   */
+  translationStyles: TextStyle[];
 };
 
 /**
@@ -1604,7 +1791,7 @@ export type UpdateTextBlockRequest = Message<"urakatsu.v1.UpdateTextBlockRequest
  * Use `create(UpdateTextBlockRequestSchema)` to create a new message.
  */
 export const UpdateTextBlockRequestSchema: GenMessage<UpdateTextBlockRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 39);
+  messageDesc(file_urakatsu_v1_urakatsu, 43);
 
 /**
  * @generated from message urakatsu.v1.CreateTextBlockRequest
@@ -1631,7 +1818,7 @@ export type CreateTextBlockRequest = Message<"urakatsu.v1.CreateTextBlockRequest
  * Use `create(CreateTextBlockRequestSchema)` to create a new message.
  */
 export const CreateTextBlockRequestSchema: GenMessage<CreateTextBlockRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 40);
+  messageDesc(file_urakatsu_v1_urakatsu, 44);
 
 /**
  * @generated from message urakatsu.v1.Operation
@@ -1660,7 +1847,7 @@ export type Operation = Message<"urakatsu.v1.Operation"> & {
  * Use `create(OperationSchema)` to create a new message.
  */
 export const OperationSchema: GenMessage<Operation> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 41);
+  messageDesc(file_urakatsu_v1_urakatsu, 45);
 
 /**
  * @generated from message urakatsu.v1.RunRequest
@@ -1717,7 +1904,7 @@ export type RunRequest = Message<"urakatsu.v1.RunRequest"> & {
  * Use `create(RunRequestSchema)` to create a new message.
  */
 export const RunRequestSchema: GenMessage<RunRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 42);
+  messageDesc(file_urakatsu_v1_urakatsu, 46);
 
 /**
  * @generated from message urakatsu.v1.ProgressEvent
@@ -1793,7 +1980,7 @@ export type ProgressEvent = Message<"urakatsu.v1.ProgressEvent"> & {
  * Use `create(ProgressEventSchema)` to create a new message.
  */
 export const ProgressEventSchema: GenMessage<ProgressEvent> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 43);
+  messageDesc(file_urakatsu_v1_urakatsu, 47);
 
 /**
  * @generated from message urakatsu.v1.JobRef
@@ -1810,7 +1997,7 @@ export type JobRef = Message<"urakatsu.v1.JobRef"> & {
  * Use `create(JobRefSchema)` to create a new message.
  */
 export const JobRefSchema: GenMessage<JobRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 44);
+  messageDesc(file_urakatsu_v1_urakatsu, 48);
 
 /**
  * @generated from message urakatsu.v1.Job
@@ -1857,7 +2044,7 @@ export type Job = Message<"urakatsu.v1.Job"> & {
  * Use `create(JobSchema)` to create a new message.
  */
 export const JobSchema: GenMessage<Job> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 45);
+  messageDesc(file_urakatsu_v1_urakatsu, 49);
 
 /**
  * @generated from message urakatsu.v1.JobList
@@ -1874,7 +2061,7 @@ export type JobList = Message<"urakatsu.v1.JobList"> & {
  * Use `create(JobListSchema)` to create a new message.
  */
 export const JobListSchema: GenMessage<JobList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 46);
+  messageDesc(file_urakatsu_v1_urakatsu, 50);
 
 /**
  * @generated from message urakatsu.v1.FontFamily
@@ -1896,7 +2083,7 @@ export type FontFamily = Message<"urakatsu.v1.FontFamily"> & {
  * Use `create(FontFamilySchema)` to create a new message.
  */
 export const FontFamilySchema: GenMessage<FontFamily> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 47);
+  messageDesc(file_urakatsu_v1_urakatsu, 51);
 
 /**
  * @generated from message urakatsu.v1.FontList
@@ -1913,7 +2100,7 @@ export type FontList = Message<"urakatsu.v1.FontList"> & {
  * Use `create(FontListSchema)` to create a new message.
  */
 export const FontListSchema: GenMessage<FontList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 48);
+  messageDesc(file_urakatsu_v1_urakatsu, 52);
 
 /**
  * Urakatsu service: one contract for native gRPC, gRPC-web (browser) and the JSON mirror.
@@ -2124,6 +2311,14 @@ export const Urakatsu: GenService<{
   setRasterLayer: {
     methodKind: "unary";
     input: typeof SetRasterLayerRequestSchema;
+    output: typeof PageSchema;
+  },
+  /**
+   * @generated from rpc urakatsu.v1.Urakatsu.AddRasterLayer
+   */
+  addRasterLayer: {
+    methodKind: "unary";
+    input: typeof AddRasterLayerRequestSchema;
     output: typeof PageSchema;
   },
   /**

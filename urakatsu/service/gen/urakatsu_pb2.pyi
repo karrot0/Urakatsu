@@ -230,8 +230,26 @@ class Box(_message.Message):
     height: float
     def __init__(self, x: _Optional[float] = ..., y: _Optional[float] = ..., width: _Optional[float] = ..., height: _Optional[float] = ...) -> None: ...
 
+class GradientStop(_message.Message):
+    __slots__ = ("offset", "color")
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    COLOR_FIELD_NUMBER: _ClassVar[int]
+    offset: float
+    color: str
+    def __init__(self, offset: _Optional[float] = ..., color: _Optional[str] = ...) -> None: ...
+
+class Gradient(_message.Message):
+    __slots__ = ("kind", "angle", "stops")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ANGLE_FIELD_NUMBER: _ClassVar[int]
+    STOPS_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    angle: float
+    stops: _containers.RepeatedCompositeFieldContainer[GradientStop]
+    def __init__(self, kind: _Optional[str] = ..., angle: _Optional[float] = ..., stops: _Optional[_Iterable[_Union[GradientStop, _Mapping]]] = ...) -> None: ...
+
 class Typography(_message.Message):
-    __slots__ = ("preferred_font", "font_weight", "font_style", "size", "auto_fit", "color", "stroke_color", "stroke_width", "alignment", "writing_mode", "authored")
+    __slots__ = ("preferred_font", "font_weight", "font_style", "size", "auto_fit", "color", "stroke_color", "stroke_width", "alignment", "writing_mode", "authored", "fill_gradient", "stroke_gradient")
     PREFERRED_FONT_FIELD_NUMBER: _ClassVar[int]
     FONT_WEIGHT_FIELD_NUMBER: _ClassVar[int]
     FONT_STYLE_FIELD_NUMBER: _ClassVar[int]
@@ -243,6 +261,8 @@ class Typography(_message.Message):
     ALIGNMENT_FIELD_NUMBER: _ClassVar[int]
     WRITING_MODE_FIELD_NUMBER: _ClassVar[int]
     AUTHORED_FIELD_NUMBER: _ClassVar[int]
+    FILL_GRADIENT_FIELD_NUMBER: _ClassVar[int]
+    STROKE_GRADIENT_FIELD_NUMBER: _ClassVar[int]
     preferred_font: str
     font_weight: int
     font_style: str
@@ -254,10 +274,34 @@ class Typography(_message.Message):
     alignment: str
     writing_mode: str
     authored: bool
-    def __init__(self, preferred_font: _Optional[str] = ..., font_weight: _Optional[int] = ..., font_style: _Optional[str] = ..., size: _Optional[float] = ..., auto_fit: _Optional[bool] = ..., color: _Optional[str] = ..., stroke_color: _Optional[str] = ..., stroke_width: _Optional[float] = ..., alignment: _Optional[str] = ..., writing_mode: _Optional[str] = ..., authored: _Optional[bool] = ...) -> None: ...
+    fill_gradient: Gradient
+    stroke_gradient: Gradient
+    def __init__(self, preferred_font: _Optional[str] = ..., font_weight: _Optional[int] = ..., font_style: _Optional[str] = ..., size: _Optional[float] = ..., auto_fit: _Optional[bool] = ..., color: _Optional[str] = ..., stroke_color: _Optional[str] = ..., stroke_width: _Optional[float] = ..., alignment: _Optional[str] = ..., writing_mode: _Optional[str] = ..., authored: _Optional[bool] = ..., fill_gradient: _Optional[_Union[Gradient, _Mapping]] = ..., stroke_gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
+
+class TextStyle(_message.Message):
+    __slots__ = ("start", "end", "bold", "italic", "underline", "strikethrough", "color", "font", "scale")
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    BOLD_FIELD_NUMBER: _ClassVar[int]
+    ITALIC_FIELD_NUMBER: _ClassVar[int]
+    UNDERLINE_FIELD_NUMBER: _ClassVar[int]
+    STRIKETHROUGH_FIELD_NUMBER: _ClassVar[int]
+    COLOR_FIELD_NUMBER: _ClassVar[int]
+    FONT_FIELD_NUMBER: _ClassVar[int]
+    SCALE_FIELD_NUMBER: _ClassVar[int]
+    start: int
+    end: int
+    bold: bool
+    italic: bool
+    underline: bool
+    strikethrough: bool
+    color: str
+    font: str
+    scale: float
+    def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., bold: _Optional[bool] = ..., italic: _Optional[bool] = ..., underline: _Optional[bool] = ..., strikethrough: _Optional[bool] = ..., color: _Optional[str] = ..., font: _Optional[str] = ..., scale: _Optional[float] = ...) -> None: ...
 
 class TextBlock(_message.Message):
-    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity")
+    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles")
     LAYER_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_ID_FIELD_NUMBER: _ClassVar[int]
     REGION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -277,6 +321,7 @@ class TextBlock(_message.Message):
     VISIBLE_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
     OPACITY_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATION_STYLES_FIELD_NUMBER: _ClassVar[int]
     layer_id: str
     content_id: str
     region_id: str
@@ -296,7 +341,8 @@ class TextBlock(_message.Message):
     visible: bool
     role: str
     opacity: float
-    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ...) -> None: ...
+    translation_styles: _containers.RepeatedCompositeFieldContainer[TextStyle]
+    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ...) -> None: ...
 
 class Region(_message.Message):
     __slots__ = ("id", "kind", "label", "polygon", "bounds", "confidence")
@@ -341,6 +387,18 @@ class LayerVisibilityRequest(_message.Message):
     visible: bool
     opacity: float
     def __init__(self, project_id: _Optional[str] = ..., page_id: _Optional[str] = ..., layer_ids: _Optional[_Iterable[str]] = ..., visible: _Optional[bool] = ..., opacity: _Optional[float] = ...) -> None: ...
+
+class AddRasterLayerRequest(_message.Message):
+    __slots__ = ("project_id", "page_id", "name", "above_layer_id")
+    PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    PAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ABOVE_LAYER_ID_FIELD_NUMBER: _ClassVar[int]
+    project_id: str
+    page_id: str
+    name: str
+    above_layer_id: str
+    def __init__(self, project_id: _Optional[str] = ..., page_id: _Optional[str] = ..., name: _Optional[str] = ..., above_layer_id: _Optional[str] = ...) -> None: ...
 
 class MoveLayerRequest(_message.Message):
     __slots__ = ("project_id", "page_id", "layer_id", "delta")
@@ -592,7 +650,7 @@ class Asset(_message.Message):
     def __init__(self, data: _Optional[bytes] = ..., content_type: _Optional[str] = ..., width: _Optional[int] = ..., height: _Optional[int] = ..., found: _Optional[bool] = ...) -> None: ...
 
 class UpdateTextBlockRequest(_message.Message):
-    __slots__ = ("project_id", "page_id", "layer_id", "source_text", "translation", "typography", "frame", "visible", "fields")
+    __slots__ = ("project_id", "page_id", "layer_id", "source_text", "translation", "typography", "frame", "visible", "fields", "translation_styles")
     PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
     PAGE_ID_FIELD_NUMBER: _ClassVar[int]
     LAYER_ID_FIELD_NUMBER: _ClassVar[int]
@@ -602,6 +660,7 @@ class UpdateTextBlockRequest(_message.Message):
     FRAME_FIELD_NUMBER: _ClassVar[int]
     VISIBLE_FIELD_NUMBER: _ClassVar[int]
     FIELDS_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATION_STYLES_FIELD_NUMBER: _ClassVar[int]
     project_id: str
     page_id: str
     layer_id: str
@@ -611,7 +670,8 @@ class UpdateTextBlockRequest(_message.Message):
     frame: _containers.RepeatedCompositeFieldContainer[Point]
     visible: bool
     fields: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, project_id: _Optional[str] = ..., page_id: _Optional[str] = ..., layer_id: _Optional[str] = ..., source_text: _Optional[str] = ..., translation: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., visible: _Optional[bool] = ..., fields: _Optional[_Iterable[str]] = ...) -> None: ...
+    translation_styles: _containers.RepeatedCompositeFieldContainer[TextStyle]
+    def __init__(self, project_id: _Optional[str] = ..., page_id: _Optional[str] = ..., layer_id: _Optional[str] = ..., source_text: _Optional[str] = ..., translation: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., visible: _Optional[bool] = ..., fields: _Optional[_Iterable[str]] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ...) -> None: ...
 
 class CreateTextBlockRequest(_message.Message):
     __slots__ = ("project_id", "page_id", "bounds")

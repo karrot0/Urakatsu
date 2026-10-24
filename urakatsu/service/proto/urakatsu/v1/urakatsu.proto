@@ -37,6 +37,7 @@ service Urakatsu {
   rpc SetLayerVisibility(LayerVisibilityRequest) returns (Page);
   rpc MoveLayer(MoveLayerRequest) returns (Page);
   rpc SetRasterLayer(SetRasterLayerRequest) returns (Page);
+  rpc AddRasterLayer(AddRasterLayerRequest) returns (Page);
   rpc DeleteLayer(TextBlockRef) returns (Page);
 
   rpc Run(RunRequest) returns (stream ProgressEvent);
@@ -162,6 +163,18 @@ message Box {
   double height = 4;
 }
 
+// Photoshop's Gradient Overlay / gradient Stroke over a text layer's bounds.
+message GradientStop {
+  double offset = 1;                // 0..1
+  string color = 2;                 // #rrggbbaa
+}
+
+message Gradient {
+  string kind = 1;                  // linear | radial
+  double angle = 2;                 // degrees counter-clockwise from +x; 90 runs bottom to top
+  repeated GradientStop stops = 3;
+}
+
 message Typography {
   string preferred_font = 1;
   optional int32 font_weight = 2;
@@ -174,6 +187,21 @@ message Typography {
   string alignment = 9;             // Start | Center | End | Justify | ""
   string writing_mode = 10;         // Horizontal | Vertical | ""
   bool authored = 11;               // output only: set by the user, not a pipeline guess (a guessed writing mode is only a hint)
+  Gradient fill_gradient = 12;      // unset: the solid color
+  Gradient stroke_gradient = 13;    // unset: the solid stroke color
+}
+
+// Rich text formatting over [start, end) of a text, in code points (Unicode scalar values).
+message TextStyle {
+  int32 start = 1;
+  int32 end = 2;
+  bool bold = 3;
+  bool italic = 4;
+  bool underline = 5;
+  bool strikethrough = 6;
+  optional string color = 7;        // #rrggbbaa
+  string font = 8;                  // a family of its own, or "" for the layer's
+  optional double scale = 9;        // size relative to the layer's; unset is 1
 }
 
 // A text layer with its semantic content and analysis region (document view).
@@ -197,6 +225,7 @@ message TextBlock {
   bool visible = 17;
   string role = 18;
   double opacity = 19;
+  repeated TextStyle translation_styles = 20;  // rich text over `translation`
 }
 
 message Region {
@@ -222,6 +251,15 @@ message LayerVisibilityRequest {
   repeated string layer_ids = 3;
   optional bool visible = 4;
   optional double opacity = 5;      // 0..1
+}
+
+// A new, empty paint layer (Photoshop's New Layer): drawn directly above `above_layer_id` (a raster
+// layer), or above every raster layer. An empty `name` names it "Layer N".
+message AddRasterLayerRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string name = 3;
+  string above_layer_id = 4;
 }
 
 // Moves a layer among its siblings; positive delta draws it later (on top).
@@ -387,6 +425,8 @@ message UpdateTextBlockRequest {
   repeated Point frame = 7;         // applied when "frame" is listed in fields
   optional bool visible = 8;
   repeated string fields = 9;       // which of: source_text, translation, typography, frame, visible
+  // Sent with "translation": its rich text. A translation sent without styles is plain.
+  repeated TextStyle translation_styles = 10;
 }
 
 message CreateTextBlockRequest {

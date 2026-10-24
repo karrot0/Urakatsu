@@ -32,6 +32,38 @@ def box_to_proto(box: Optional[BoxView]) -> Optional[pb.Box]:
     return pb.Box(x=box.x, y=box.y, width=box.width, height=box.height) if box else None
 
 
+def text_style_to_proto(style) -> pb.TextStyle:
+    message = pb.TextStyle(
+        start=style.start,
+        end=style.end,
+        bold=style.bold,
+        italic=style.italic,
+        underline=style.underline,
+        strikethrough=style.strikethrough,
+    )
+    if style.color:
+        message.color = style.color
+    if style.font:
+        message.font = style.font
+    if style.scale is not None:
+        message.scale = style.scale
+    return message
+
+
+def text_style_from_proto(message: pb.TextStyle) -> dict[str, Any]:
+    return {
+        "start": message.start,
+        "end": message.end,
+        "bold": message.bold,
+        "italic": message.italic,
+        "underline": message.underline,
+        "strikethrough": message.strikethrough,
+        "color": message.color if message.HasField("color") else None,
+        "font": message.font or None,
+        "scale": message.scale if message.HasField("scale") else None,
+    }
+
+
 def typography_to_proto(view: Optional[TypographyView]) -> Optional[pb.Typography]:
     if view is None:
         return None
@@ -48,7 +80,20 @@ def typography_to_proto(view: Optional[TypographyView]) -> Optional[pb.Typograph
     _opt(message, "color", view.color)
     _opt(message, "stroke_color", view.stroke_color)
     _opt(message, "stroke_width", view.stroke_width)
+    for key in ("fill_gradient", "stroke_gradient"):
+        gradient = getattr(view, key)
+        if gradient is not None:
+            getattr(message, key).CopyFrom(
+                pb.Gradient(kind=gradient.kind, angle=gradient.angle, stops=[pb.GradientStop(offset=s.offset, color=s.color) for s in gradient.stops])
+            )
     return message
+
+
+def _gradient_from_proto(message: pb.Typography, key: str) -> Optional[dict[str, Any]]:
+    if not message.HasField(key):
+        return None
+    gradient = getattr(message, key)
+    return {"kind": gradient.kind or "linear", "angle": gradient.angle, "stops": [{"offset": s.offset, "color": s.color} for s in gradient.stops]}
 
 
 def typography_from_proto(message: pb.Typography) -> dict[str, Any]:
@@ -63,6 +108,8 @@ def typography_from_proto(message: pb.Typography) -> dict[str, Any]:
         "stroke_width": message.stroke_width if message.HasField("stroke_width") else None,
         "alignment": message.alignment or None,
         "writing_mode": message.writing_mode or None,
+        "fill_gradient": _gradient_from_proto(message, "fill_gradient"),
+        "stroke_gradient": _gradient_from_proto(message, "stroke_gradient"),
     }
 
 
@@ -81,6 +128,7 @@ def block_to_proto(block: TextBlockView) -> pb.TextBlock:
         translation=block.translation or "",
         translation_origin=block.translation_origin or "",
         translation_language=block.translation_language or "",
+        translation_styles=[text_style_to_proto(style) for style in block.translation_styles],
         ocr_direction=block.ocr_direction or "",
         visible=block.visible,
         opacity=block.opacity,

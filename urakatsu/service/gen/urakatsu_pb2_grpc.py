@@ -161,6 +161,11 @@ class UrakatsuStub:
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.SetRasterLayerRequest.SerializeToString,
                 response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
                 _registered_method=True)
+        self.AddRasterLayer = channel.unary_unary(
+                '/urakatsu.v1.Urakatsu/AddRasterLayer',
+                request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.AddRasterLayerRequest.SerializeToString,
+                response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
+                _registered_method=True)
         self.DeleteLayer = channel.unary_unary(
                 '/urakatsu.v1.Urakatsu/DeleteLayer',
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.TextBlockRef.SerializeToString,
@@ -345,6 +350,12 @@ class UrakatsuServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AddRasterLayer(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DeleteLayer(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -501,6 +512,11 @@ def add_UrakatsuServicer_to_server(servicer, server):
             'SetRasterLayer': grpc.unary_unary_rpc_method_handler(
                     servicer.SetRasterLayer,
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.SetRasterLayerRequest.FromString,
+                    response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.SerializeToString,
+            ),
+            'AddRasterLayer': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddRasterLayer,
+                    request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.AddRasterLayerRequest.FromString,
                     response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.SerializeToString,
             ),
             'DeleteLayer': grpc.unary_unary_rpc_method_handler(
@@ -1205,6 +1221,33 @@ class Urakatsu:
             target,
             '/urakatsu.v1.Urakatsu/SetRasterLayer',
             urakatsu_dot_v1_dot_urakatsu__pb2.SetRasterLayerRequest.SerializeToString,
+            urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AddRasterLayer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/urakatsu.v1.Urakatsu/AddRasterLayer',
+            urakatsu_dot_v1_dot_urakatsu__pb2.AddRasterLayerRequest.SerializeToString,
             urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
             options,
             channel_credentials,

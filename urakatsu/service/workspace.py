@@ -398,7 +398,14 @@ class Workspace:
         if "translation" in patch:
             current = snapshot.component(content, c.Translation)
             language = current.language if current else self.config.translation.target_language
-            edit.set(content, c.Translation(text=c.Authored.user(patch["translation"] or ""), language=language))
+            text = patch["translation"] or ""
+            # Rich text comes with the text it formats; a translation without styles is plain.
+            styles = [
+                c.TextStyle(**{**style, "color": parse_rgba(style.get("color"))})
+                for style in patch.get("translation_styles") or []
+            ]
+            styles = c.normalize_text_styles(styles, len(text))
+            edit.set(content, c.Translation(text=c.Authored.user(text), language=language, styles=styles))
         if "typography" in patch:
             edit.set(layer_id, _typography(patch["typography"], snapshot.component(layer_id, c.Typography)))
         if "frame" in patch:
@@ -606,6 +613,26 @@ class Workspace:
         self.store.touch(project_id)
         return self.page(project_id, page_id), entity, hidden
 
+    def add_empty_layer(self, project_id: str, page_id: str, name: Optional[str] = None, above: Optional[str] = None) -> PageView:
+        """Adds an empty paint layer (Photoshop's New Layer) directly above raster layer ``above``, or
+        above every raster layer. It has no pixels until its first stroke; the renderer skips it till then."""
+        session = self.session(project_id)
+        snapshot = session.snapshot()
+        snapshot.page(page_id)
+        rasters = snapshot.raster_layers(page_id)
+        if above is not None and above not in rasters:
+            raise KeyError(f"page {page_id} has no raster layer {above}")
+        if not name:
+            taken = {snapshot.component(layer, c.RasterLayer).name for layer in rasters}
+            name = next(f"Layer {n}" for n in range(1, len(rasters) + 2) if f"Layer {n}" not in taken)
+        edit = snapshot.edit()
+        anchor = above or (rasters[-1] if rasters else None)
+        entity = edit.add_entity(page_id, At.after(anchor) if anchor else At.START)
+        edit.set(entity, c.RasterLayer(origin=c.user(), name=name, kind=c.RasterLayerKind.PAINT))
+        session.commit(edit.finish())
+        self.store.touch(project_id)
+        return self.page(project_id, page_id)
+
     def delete_layer(self, project_id: str, page_id: str, layer_id: str) -> PageView:
         snapshot = self.session(project_id).snapshot()
         if layer_id in snapshot.text_layers(page_id):
@@ -724,6 +751,22 @@ class Workspace:
             result.append((name, [getattr(f, "post_script_name", str(f)) for f in faces]))
         return result
 
+    def font_face(self, family: str, weight: int = 400, italic: bool = False) -> Optional[tuple[bytes, str]]:
+        """The font file the renderer draws ``family`` with at that weight and style, with its media type, for
+        the browser: the on-canvas text editor shows text in the layer's font, which may come from the bundled
+        catalog rather than the system. None when the family is not installed, or is a face in a collection
+        (browsers load whole files only)."""
+        from urakatsu.renderer.types import FontStyle
+
+        for font in self.renderer().fonts.resolve(family, weight, FontStyle.ITALIC if italic else None, [], "A"):
+            if font.family_name.lower() != family.lower():
+                continue
+            data = font.data()
+            if font.index != 0 or data[:4] == b"ttcf":
+                return None
+            return data, "font/otf" if data[:4] == b"OTTO" else "font/ttf"
+        return None
+
     async def close(self) -> None:
         await self.automations.close()
         for job in self.jobs.values():
@@ -780,6 +823,12 @@ def _typography(data: dict[str, Any], current: Optional[c.Typography]) -> c.Typo
     for key in ("color", "stroke_color"):
         if key in data:
             value[key] = parse_rgba(data[key])
+    for key in ("fill_gradient", "stroke_gradient"):
+        if key in data:
+            gradient = data[key]
+            stops = [c.GradientStop(offset=float(stop["offset"]), color=parse_rgba(stop["color"])) for stop in (gradient or {}).get("stops", []) if parse_rgba(stop.get("color"))]
+            # Fewer than two stops is no gradient.
+            value[key] = c.Gradient(kind=c.GradientKind(gradient.get("kind") or "linear"), angle=float(gradient.get("angle", 90.0)), stops=stops) if len(stops) >= 2 else None
     if not value.get("auto_fit", True) and value.get("size") is None:
         raise ValueError("a fixed-size typography needs a size")
     return c.Typography(**value)

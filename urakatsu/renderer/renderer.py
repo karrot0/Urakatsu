@@ -44,7 +44,7 @@ from .frame import (
     affine_rotate,
 )
 from .script import is_chinese_or_japanese_text, shaping_direction_for_text
-from .text_renderer import MINIMUM_FONT_SIZE, StrokeOptions, TextNodeDescriptor, TextRenderer
+from .text_renderer import MINIMUM_FONT_SIZE, GradientSpec, StrokeOptions, TextNodeDescriptor, TextRenderer, TextStyleRun
 from .types import FontStyle, TextAlign, WritingMode
 
 MAX_SURFACE_DIMENSION = 32_768
@@ -508,6 +508,22 @@ class _Traversal:
             word_spacing=0.0,
             text_inset=(4.0, 4.0, 4.0, 4.0),
             point_text=not is_bubble and layout.kind == c.TextLayoutKind.POINT,
+            styles=[
+                TextStyleRun(
+                    start=style.start,
+                    end=style.end,
+                    bold=style.bold,
+                    italic=style.italic,
+                    underline=style.underline,
+                    strikethrough=style.strikethrough,
+                    color=tuple(style.color) if style.color else None,
+                    font=style.font,
+                    scale=style.scale or 1.0,
+                )
+                for style in c.normalize_text_styles(translation.styles, len(text))
+            ],
+            fill_gradient=_gradient_spec(typography.fill_gradient if typography is not None else None),
+            stroke_gradient=_gradient_spec(typography.stroke_gradient if typography is not None else None),
         )
         return LayerDraft(
             entity=entity,
@@ -692,6 +708,16 @@ def _resolve_alignment(alignment: Optional[c.TextAlignment], writing_mode: Writi
     if alignment == c.TextAlignment.END:
         return TextAlign.RIGHT
     return TextAlign.JUSTIFY
+
+
+def _gradient_spec(gradient: Optional[c.Gradient]) -> Optional[GradientSpec]:
+    if gradient is None or len(gradient.stops) < 2:
+        return None
+    return GradientSpec(
+        kind=gradient.kind.value,
+        angle=gradient.angle,
+        stops=tuple((stop.offset, tuple(stop.color)) for stop in gradient.stops),
+    )
 
 
 def _resolve_stroke(typography) -> Optional[StrokeOptions]:

@@ -242,6 +242,28 @@ class FontStyle(str, Enum):
     OBLIQUE = "oblique"
 
 
+class GradientKind(str, Enum):
+    LINEAR = "linear"
+    RADIAL = "radial"
+
+
+class GradientStop(BaseModel):
+    offset: float  # 0 to 1 along the gradient
+    color: tuple[int, int, int, int]
+
+
+class Gradient(BaseModel):
+    """Photoshop's Gradient Overlay (on the fill) and gradient Stroke, aligned with the text's bounds.
+
+    ``angle`` is in degrees counter-clockwise from the +x axis, as Photoshop's: at 90 the first stop is
+    at the bottom and the last at the top. A radial gradient runs from the centre outwards.
+    """
+
+    kind: GradientKind = GradientKind.LINEAR
+    angle: float = 90.0
+    stops: list[GradientStop]
+
+
 class Typography(Component):
     KIND: ClassVar[str] = "dev.koharu.text.typography"
     origin: Origin = Field(default_factory=UserOrigin)
@@ -255,6 +277,9 @@ class Typography(Component):
     stroke_width: Optional[float] = None
     alignment: Optional[TextAlignment] = None
     writing_mode: Optional[WritingMode] = None
+    # Not in Koharu: gradients over the fill and the border (Photoshop's layer styles).
+    fill_gradient: Optional[Gradient] = None
+    stroke_gradient: Optional[Gradient] = None
     extensions: dict[str, str] = Field(default_factory=dict)
 
 
@@ -293,10 +318,66 @@ class SourceText(Component):
         return True
 
 
+# How far a run's size may stray from its layer's.
+MIN_TEXT_SCALE = 0.25
+MAX_TEXT_SCALE = 4.0
+
+
+class TextStyle(BaseModel):
+    """Character formatting over ``[start, end)`` of a text, in code points (rich text).
+
+    Not in Koharu, whose typography applies to a whole text layer: these override it for a run.
+    """
+
+    start: int
+    end: int
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strikethrough: bool = False
+    color: Optional[tuple[int, int, int, int]] = None
+    # A family of its own, and a size relative to the layer's (which auto-fit may choose).
+    font: Optional[str] = None
+    scale: Optional[float] = None
+
+    def formatting(self) -> tuple:
+        scale = None if self.scale is None or abs(self.scale - 1.0) < 1e-6 else min(max(self.scale, MIN_TEXT_SCALE), MAX_TEXT_SCALE)
+        return (self.bold, self.italic, self.underline, self.strikethrough, self.color, self.font or None, scale)
+
+
+def normalize_text_styles(styles: list[TextStyle], length: int) -> list[TextStyle]:
+    """Clamped to the text, sorted, non-overlapping (a later span wins), without empty or plain runs,
+    and with touching runs of the same formatting merged."""
+    if length <= 0 or not styles:
+        return []
+    per_char: list[Optional[tuple]] = [None] * length
+    for style in styles:
+        for index in range(max(style.start, 0), min(style.end, length)):
+            per_char[index] = style.formatting()
+    plain = TextStyle(start=0, end=0).formatting()
+    result: list[TextStyle] = []
+    index = 0
+    while index < length:
+        formatting = per_char[index]
+        end = index + 1
+        while end < length and per_char[end] == formatting:
+            end += 1
+        if formatting is not None and formatting != plain:
+            bold, italic, underline, strikethrough, color, font, scale = formatting
+            result.append(
+                TextStyle(start=index, end=end, bold=bold, italic=italic, underline=underline, strikethrough=strikethrough, color=color, font=font, scale=scale)
+            )
+        index = end
+    return result
+
+
 class Translation(Component):
     KIND: ClassVar[str] = "dev.koharu.text.translation"
     text: Authored[str]
     language: Optional[str] = None
+    # Rich text over ``text``. Whoever replaces the text without styles drops them, so a span can
+    # never point at characters it was not made for.
+    styles: list[TextStyle] = Field(default_factory=list)
 
     def get_origin(self) -> Optional[Origin]:
         return self.text.origin

@@ -331,7 +331,34 @@ def _draw_layer_content(canvas: skia.Canvas, layer: Layer, matrix: Affine) -> No
         _draw_raster(canvas, layer.raster, layer, matrix)
     elif layer.scene is not None:
         for run in layer.scene.runs:
-            _draw_glyph_run(canvas, run, matrix)
+            if hasattr(run, "rect"):
+                _draw_decoration(canvas, run, matrix)
+            else:
+                _draw_glyph_run(canvas, run, matrix)
+
+
+def _gradient_shader(gradient):
+    """A Skia shader for a ``GradientPaint`` (layout coordinates; draw under the layout's matrix)."""
+    colors = [_to_skia_color(color) for color in gradient.colors]
+    positions = list(gradient.positions)
+    if gradient.kind == "radial":
+        return skia.GradientShader.MakeRadial(center=gradient.start, radius=gradient.radius, colors=colors, positions=positions, mode=skia.TileMode.kClamp)
+    return skia.GradientShader.MakeLinear(points=[gradient.start, gradient.end], colors=colors, positions=positions, mode=skia.TileMode.kClamp)
+
+
+def _draw_decoration(canvas: skia.Canvas, run, matrix: Affine) -> None:
+    """An underline or strikethrough bar (rich text), grown by ``dilation`` for the border pass."""
+    x0, y0, x1, y1 = run.rect
+    grow = run.dilation
+    paint = skia.Paint()
+    paint.setAntiAlias(True)
+    paint.setColor(_to_skia_color(run.color))
+    if getattr(run, "gradient", None) is not None:
+        paint.setShader(_gradient_shader(run.gradient))
+    canvas.save()
+    canvas.concat(_skia_matrix(affine_mul(matrix, run.transform)))
+    canvas.drawRect(skia.Rect.MakeLTRB(x0 - grow, y0 - grow, x1 + grow, y1 + grow), paint)
+    canvas.restore()
 
 
 def _skia_matrix(transform: Affine) -> skia.Matrix:
@@ -397,7 +424,44 @@ def _glyph_path(font, glyph_id: int) -> skia.Path:
     return path
 
 
+def _draw_gradient_glyph_run(canvas: skia.Canvas, run, matrix: Affine) -> None:
+    """A glyph run painted with a gradient. The gradient lives in layout coordinates, so the canvas keeps
+    the layout's matrix and each outline is moved into layout space instead of the canvas into glyph space."""
+    shader = _gradient_shader(run.gradient)
+    scale = run.font_size / run.font.units_per_em
+    fill = skia.Paint()
+    fill.setAntiAlias(True)
+    fill.setShader(shader)
+    fill.setStyle(skia.Paint.kFill_Style)
+    stroke = None
+    if run.embolden > 0.0:
+        stroke = skia.Paint()
+        stroke.setAntiAlias(True)
+        stroke.setShader(shader)
+        stroke.setStyle(skia.Paint.kStroke_Style)
+        stroke.setStrokeWidth(2.0 * run.embolden)  # layout pixels: outward by ``embolden``
+        stroke.setStrokeJoin(skia.Paint.kRound_Join)
+        stroke.setStrokeCap(skia.Paint.kRound_Cap)
+    canvas.save()
+    canvas.concat(_skia_matrix(affine_mul(matrix, run.transform)))
+    for glyph_id, x, y in run.glyphs:
+        outline = _glyph_path(run.font, glyph_id)
+        if outline.isEmpty():
+            continue
+        glyph_matrix = (scale, 0.0, 0.0, -scale, 0.0, 0.0)
+        if run.glyph_skew is not None:
+            glyph_matrix = affine_mul((1.0, 0.0, -run.glyph_skew, 1.0, 0.0, 0.0), glyph_matrix)
+        placed = skia.Path(outline)
+        placed.transform(_skia_matrix(affine_mul(affine_translate(x, y), glyph_matrix)))
+        if stroke is not None:
+            canvas.drawPath(placed, stroke)
+        canvas.drawPath(placed, fill)
+    canvas.restore()
+
+
 def _draw_glyph_run(canvas: skia.Canvas, run, matrix: Affine) -> None:
+    if getattr(run, "gradient", None) is not None:
+        return _draw_gradient_glyph_run(canvas, run, matrix)
     a, b, c, d, e, f = run.transform
     base = affine_mul(matrix, (a, b, c, d, e, f))
     scale = run.font_size / run.font.units_per_em

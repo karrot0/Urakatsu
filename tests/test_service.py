@@ -201,6 +201,69 @@ def test_layer_operations(workspace):
     assert [b.layer_id for b in view.blocks] == [first]
 
 
+def test_rich_text_styles_travel_with_the_translation(workspace):
+    project = workspace.create_project("rich").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 10, "y": 10, "width": 200, "height": 60})
+    [block] = workspace.page(project, page).blocks
+
+    styles = [
+        {"start": 4, "end": 8, "bold": True},
+        {"start": 9, "end": 99, "underline": True, "color": "#ff0000ff"},  # past the end: clamped
+        {"start": 0, "end": 3},  # no formatting: dropped
+    ]
+    view = workspace.update_text_block(project, page, block.layer_id, {"translation": "One bold word", "translation_styles": styles})
+    [block] = view.blocks
+    assert [(s.start, s.end, s.bold, s.underline, s.color) for s in block.translation_styles] == [
+        (4, 8, True, False, None),
+        (9, 13, False, True, "#ff0000ff"),
+    ]
+    message = convert.page_to_proto(view).blocks[0]
+    assert [(s.start, s.end, s.bold, s.color) for s in message.translation_styles] == [(4, 8, True, ""), (9, 13, False, "#ff0000ff")]
+
+    # A family and a relative size of its own; 100% is no size change.
+    view = workspace.update_text_block(
+        project, page, block.layer_id,
+        {"translation": "One bold word", "translation_styles": [{"start": 0, "end": 3, "font": "Times New Roman", "scale": 1.5}, {"start": 4, "end": 8, "scale": 1.0}]},
+    )
+    assert [(s.start, s.end, s.font, s.scale) for s in view.blocks[0].translation_styles] == [(0, 3, "Times New Roman", 1.5)]
+    message = convert.page_to_proto(view).blocks[0].translation_styles[0]
+    assert (message.font, message.scale) == ("Times New Roman", 1.5)
+    workspace.update_text_block(project, page, block.layer_id, {"translation": "One bold word", "translation_styles": styles})
+
+    # Other edits keep the formatting; new text without styles is plain.
+    view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"size": 30}})
+    assert len(view.blocks[0].translation_styles) == 2
+    view = workspace.update_text_block(project, page, block.layer_id, {"translation": "Different words"})
+    assert view.blocks[0].translation_styles == []
+
+
+def test_new_layers_are_empty_paint_layers_placed_like_photoshop(workspace):
+    project = workspace.create_project("new layers").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+
+    first = workspace.add_empty_layer(project, page)
+    [one] = first.raster_layers
+    assert (one.name, one.kind) == ("Layer 1", "paint")
+    assert workspace.asset(project, page, f"layer:{one.id}") is None  # no pixels until a stroke
+    workspace.asset(project, page, "render")  # an empty layer renders as nothing
+
+    top = workspace.add_empty_layer(project, page).raster_layers
+    assert [r.name for r in top] == ["Layer 1", "Layer 2"]  # later draws on top
+    between = workspace.add_empty_layer(project, page, "Shading", above=one.id).raster_layers
+    assert [r.name for r in between] == ["Layer 1", "Shading", "Layer 2"]
+    with pytest.raises(KeyError):
+        workspace.add_empty_layer(project, page, above="missing")
+
+    # Strokes go to the layer they name, even when it is not the newest paint layer.
+    paint = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+    paint.putpixel((3, 3), (0, 0, 0, 255))
+    buffer = io.BytesIO()
+    paint.save(buffer, format="PNG")
+    view = workspace.set_raster_layer(project, page, "paint", one.id, buffer.getvalue())
+    assert len(view.raster_layers) == 3 and f"layer:{one.id}" in view.asset_versions
+
+
 def test_layer_saves_store_full_pngs_as_sent_and_paste_patches(workspace):
     project = workspace.create_project("patches").id
     page = workspace.add_page(project, "p.png", page_png()).id
@@ -359,3 +422,38 @@ def test_frame_edit_clears_a_stored_angle_so_the_frame_sets_the_rotation(workspa
     assert layout.angle_degrees is None and isinstance(layout.origin, c.UserOrigin)
     placed = geometry_frame(snapshot.component(layer, c.Geometry), layout.angle_degrees)
     assert round(placed.angle_degrees) == 30 and round(placed.bounds.width) == 40
+
+
+def test_font_faces_are_served_for_the_canvas_editor(workspace):
+    workspace._renderer = None  # the real renderer and its fonts, not the fixture's stand-in
+    found = workspace.font_face("Arial")
+    if found is None:  # pragma: no cover - depends on installed fonts
+        pytest.skip("Arial is not installed")
+    data, media = found
+    assert media in ("font/ttf", "font/otf") and len(data) > 10_000
+    bold = workspace.font_face("Arial", 700)
+    assert bold is not None and bold[0] != data  # the bold face, not the regular one
+    assert workspace.font_face("No Such Family Anywhere") is None
+
+
+def test_text_gradients_round_trip_and_clear(workspace):
+    project = workspace.create_project("gradients").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 10, "y": 10, "width": 200, "height": 60})
+    [block] = workspace.page(project, page).blocks
+    sunset = {"kind": "linear", "angle": 45, "stops": [{"offset": 0, "color": "#ff512fff"}, {"offset": 1, "color": "#f09819ff"}]}
+    ring = {"kind": "radial", "angle": 0, "stops": [{"offset": 0, "color": "#ffffffff"}, {"offset": 0.6, "color": "#000000ff"}]}
+    view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"fill_gradient": sunset, "stroke_gradient": ring, "stroke_width": 3}})
+    typography = view.blocks[0].typography
+    assert (typography.fill_gradient.kind, typography.fill_gradient.angle) == ("linear", 45)
+    assert [s.color for s in typography.fill_gradient.stops] == ["#ff512fff", "#f09819ff"]
+    assert typography.stroke_gradient.kind == "radial"
+    message = convert.page_to_proto(view).blocks[0].typography
+    assert message.fill_gradient.stops[1].color == "#f09819ff" and message.stroke_gradient.kind == "radial"
+    assert convert.typography_from_proto(message)["fill_gradient"]["angle"] == 45
+
+    # Another property keeps them; unset or a single stop clears one.
+    view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"size": 30, "auto_fit": False}})
+    assert view.blocks[0].typography.fill_gradient is not None
+    view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"fill_gradient": None, "stroke_gradient": {"stops": [{"offset": 0, "color": "#000000ff"}]}}})
+    assert view.blocks[0].typography.fill_gradient is None and view.blocks[0].typography.stroke_gradient is None

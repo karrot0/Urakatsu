@@ -10,10 +10,10 @@ import { formatDate, formatTimestamp } from "../format";
 
 import type { Config, ProviderInfo, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
 import { format as formatShortcut, fromEvent as shortcutFromEvent, MOD_NAME } from "../shortcuts";
-import { DEFAULT_SHORTCUTS, NUDGES, TOOLS, useWorkspace, type ShortcutAction, type StageName, type Theme } from "../state/workspace";
+import { BRUSH_SIZES, DEFAULT_SHORTCUTS, NUDGES, TOOLS, useWorkspace, type ShortcutAction, type StageName, type Theme } from "../state/workspace";
 import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./ModelsStorage";
 import { NumberField, Select, Switch, type Option } from "./primitives";
-import { FontPicker } from "./RightPanel";
+import { FontPicker } from "./FontPicker";
 import { SourcesSettings } from "./SourcesSettings";
 import { AboutSettings } from "./Updates";
 import { TOOL_INFO } from "./ToolBelt";
@@ -700,6 +700,8 @@ const ACTION_LABELS: Partial<Record<ShortcutAction, string>> = {
   nudge_right: "Move right",
   nudge_up: "Move up",
   nudge_down: "Move down",
+  brush_smaller: "Smaller brush",
+  brush_larger: "Larger brush",
 };
 
 const shortcutLabel = (action: ShortcutAction) => ACTION_LABELS[action] ?? TOOL_INFO[action as keyof typeof TOOL_INFO].label;
@@ -718,6 +720,7 @@ const FIXED_KEYS: Record<string, string> = {
 const SHORTCUT_GROUPS: { title: string; description?: string; actions: readonly ShortcutAction[] }[] = [
   { title: "Editing", actions: ["undo", "redo"] },
   { title: "Tools", actions: [...TOOLS, "fit"] },
+  { title: "Brush", description: "Size steps by about a tenth, with the brush, eraser or remove tool.", actions: BRUSH_SIZES },
   { title: "Move selected block", description: "Hold Shift to move 10 pixels. With no block selected, these keys scroll the canvas.", actions: NUDGES },
 ];
 

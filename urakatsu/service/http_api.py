@@ -138,6 +138,14 @@ def api_router(ws: Workspace) -> APIRouter:
     def fonts():
         return [{"name": name, "faces": faces} for name, faces in guard(ws.fonts)]
 
+    @router.get("/fonts/{family}/face")
+    def font_face(family: str, weight: int = 400, italic: bool = False):
+        found = guard(ws.font_face, family, weight, italic)
+        if found is None:
+            raise HTTPException(status_code=404, detail=f"no loadable face for {family!r}")
+        data, media = found
+        return Response(content=data, media_type=media, headers={"cache-control": "public, max-age=86400"})
+
     # -- projects ----------------------------------------------------------------------------------
 
     @router.get("/projects")

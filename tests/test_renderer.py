@@ -576,3 +576,141 @@ def test_comic_auto_size_uses_tall_balloon_capacity(font: Font):
     )
     assert not fitted.overflowed()
     assert fitted.height >= height * 0.5
+
+
+# ---- rich text (not in Koharu) ------------------------------------------------------------------
+
+
+def _rich_descriptor(text, styles, writing_mode=WritingMode.HORIZONTAL):
+    from urakatsu.renderer.text_renderer import TextNodeDescriptor
+
+    return TextNodeDescriptor(
+        entity="t",
+        text=text,
+        language="en",
+        width=600.0,
+        height=400.0,
+        balloon_contour=None,
+        preferred_font="Arial",
+        font_families=[],
+        font_weight=None,
+        font_style=None,
+        font_size=32.0,
+        minimum_font_size=9.0,
+        auto_fit=False,
+        alignment=TextAlign.LEFT,
+        writing_mode=writing_mode,
+        foreground_color=(0, 0, 0, 255),
+        stroke=None,
+        line_height=1.2,
+        letter_spacing=0.0,
+        word_spacing=0.0,
+        text_inset=(4.0, 4.0, 4.0, 4.0),
+        point_text=True,
+        styles=styles,
+    )
+
+
+def test_rich_text_runs_get_their_own_face_colour_and_bars():
+    from urakatsu.renderer.text_renderer import DecorationRun, GlyphRun, TextRenderer, TextStyleRun
+
+    fonts = Fonts()
+    text = "plain bold red under struck"
+    styles = [
+        TextStyleRun(start=6, end=10, bold=True),
+        TextStyleRun(start=11, end=14, color=(255, 0, 0, 255)),
+        TextStyleRun(start=15, end=20, underline=True),
+        TextStyleRun(start=21, end=27, strikethrough=True),
+    ]
+    plain = TextRenderer().render_descriptor(_rich_descriptor(text, []), fonts)
+    rich = TextRenderer().render_descriptor(_rich_descriptor(text, styles), fonts)
+
+    glyph_runs = [r for r in rich.scene.runs if isinstance(r, GlyphRun)]
+    faces = {(r.font.post_script_name, r.font.synthetic_bold()) for r in glyph_runs}
+    assert len(faces) >= 2  # the bold word is shaped with a bold face (or emboldened)
+    assert rich.metadata.rendered_bounds.width > plain.metadata.rendered_bounds.width  # bold advances are wider
+    assert {r.color for r in glyph_runs} == {(0, 0, 0, 255), (255, 0, 0, 255)}
+
+    bars = [r for r in rich.scene.runs if isinstance(r, DecorationRun)]
+    assert len(bars) == 2
+    underline, strike = sorted(bars, key=lambda bar: bar.rect[1], reverse=True)
+    assert underline.rect[2] > underline.rect[0] and strike.rect[2] > strike.rect[0]
+    assert strike.rect[1] < underline.rect[1]  # strikethrough above the underline
+    assert underline.rect[0] < strike.rect[0]  # "under" comes before "struck"
+    bounds = rich.local_bounds
+    assert bounds.y + bounds.height >= rich.metadata.rendered_bounds.y + underline.rect[3] - 1e-6
+
+    # Unstyled text renders exactly as before: one colour, no bars.
+    assert not any(isinstance(r, DecorationRun) for r in plain.scene.runs)
+
+
+def test_vertical_rich_text_underline_is_a_sideline():
+    from urakatsu.renderer.text_renderer import DecorationRun, TextRenderer, TextStyleRun
+
+    try:
+        fonts = Fonts()
+        fonts.resolve("Yu Gothic", None, None, [], "日本語", "ja")
+    except Exception:  # pragma: no cover - depends on installed fonts
+        pytest.skip("no Japanese font")
+    text = "日本語の文章"
+    styles = [TextStyleRun(start=0, end=3, underline=True), TextStyleRun(start=3, end=6, strikethrough=True)]
+    node = TextRenderer().render_descriptor(_rich_descriptor(text, styles, WritingMode.VERTICAL_RL), fonts)
+    bars = {round(bar.rect[0], 1): bar for bar in node.scene.runs if isinstance(bar, DecorationRun)}
+    assert len(bars) == 2
+    side, strike = (bars[k] for k in sorted(bars, reverse=True))
+    assert side.rect[3] - side.rect[1] > side.rect[2] - side.rect[0]  # runs down the column
+    assert side.rect[0] > strike.rect[0]  # right of the strikethrough, which is mid-column
+    assert side.rect[1] < strike.rect[1]  # the underlined characters come first
+
+
+def test_rich_text_runs_take_their_own_family_and_relative_size():
+    from urakatsu.renderer.text_renderer import GlyphRun, TextRenderer, TextStyleRun
+
+    fonts = Fonts()
+    try:
+        fonts.resolve("Times New Roman", None, None, [], "A")
+    except Exception:  # pragma: no cover - depends on installed fonts
+        pytest.skip("no Times New Roman")
+    text = "small\nBIG\nserif"
+    styles = [TextStyleRun(start=6, end=9, scale=2.0), TextStyleRun(start=10, end=15, font="Times New Roman")]
+    plain = TextRenderer().render_descriptor(_rich_descriptor(text, []), fonts)
+    rich = TextRenderer().render_descriptor(_rich_descriptor(text, styles), fonts)
+
+    runs = [r for r in rich.scene.runs if isinstance(r, GlyphRun)]
+    sizes = sorted({r.font_size for r in runs})
+    assert sizes == [32.0, 64.0]  # the 200% run is drawn at twice the layer's size
+    assert any("Times" in r.font.family_name for r in runs)
+    # The big line pushes the lines after it down: the block is taller by about one line.
+    extra = rich.metadata.rendered_bounds.height - plain.metadata.rendered_bounds.height
+    assert 0.6 * 32 * 1.2 < extra < 1.6 * 32 * 1.2
+    big_y = min(y for r in runs if r.font_size == 64.0 for _, _, y in r.glyphs)
+    small_y = min(y for r in runs if r.font_size == 32.0 for _, _, y in r.glyphs)
+    assert big_y > small_y + 32  # the big line's baseline sits well below the first line's
+
+
+def test_text_gradients_are_laid_over_the_text_like_photoshop():
+    from dataclasses import replace
+
+    from urakatsu.renderer.text_renderer import GlyphRun, GradientSpec, StrokeOptions, TextRenderer, TextStyleRun, place_gradient
+
+    up = place_gradient(GradientSpec("linear", 90.0, ((0.0, (255, 0, 0, 255)), (1.0, (0, 0, 255, 255)))), 0, 0, 100, 40)
+    assert up.start[1] > up.end[1] and up.start[0] == up.end[0] == 50  # 90 degrees: first stop at the bottom
+    right = place_gradient(GradientSpec("linear", 0.0, ((1.0, (0, 0, 0, 255)), (0.0, (9, 9, 9, 255)))), 0, 0, 100, 40)
+    assert right.start == (0.0, 20.0) and right.end == (100.0, 20.0) and right.positions == (0.0, 1.0)
+
+    fonts = Fonts()
+    fill = GradientSpec("linear", 90.0, ((0.0, (255, 0, 0, 255)), (1.0, (0, 0, 255, 255))))
+    ring = GradientSpec("radial", 0.0, ((0.0, (255, 255, 255, 255)), (1.0, (0, 0, 0, 255))))
+    descriptor = replace(
+        _rich_descriptor("gradient green", [TextStyleRun(start=9, end=14, color=(0, 160, 0, 255))]),
+        fill_gradient=fill,
+        stroke_gradient=ring,
+        stroke=StrokeOptions(color=(255, 255, 255, 0), width_px=2.0),
+    )
+    node = TextRenderer().render_descriptor(descriptor, fonts)
+    runs = [r for r in node.scene.runs if isinstance(r, GlyphRun)]
+    border = [r for r in runs if r.embolden >= 2.0]
+    fills = [r for r in runs if r.embolden < 2.0]
+    assert border and all(r.gradient is not None and r.gradient.kind == "radial" for r in border)  # drawn though its colour is clear
+    assert any(r.gradient is not None and r.gradient.kind == "linear" for r in fills)
+    assert any(r.gradient is None and r.color == (0, 160, 0, 255) for r in fills)  # the green run keeps its colour

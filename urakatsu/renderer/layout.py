@@ -206,6 +206,11 @@ class TextLayout:
         self.letter_spacing: float = 0.0
         self.word_spacing: float = 0.0
         self.cjk_punctuation_layout: bool = False
+        # Rich text: each character's face key (bold, italic, family) with a face list per key, and its size
+        # relative to the layout's.
+        self.style_keys: Optional[list[tuple]] = None
+        self.style_fonts: dict[tuple, list[Font]] = {}
+        self.style_scales: Optional[list[float]] = None
 
     def with_font_size(self, size: float) -> "TextLayout":
         self.font_size = size
@@ -275,6 +280,40 @@ class TextLayout:
     def with_cjk_punctuation_layout(self, enabled: bool) -> "TextLayout":
         self.cjk_punctuation_layout = enabled
         return self
+
+    def with_styles(self, keys: list[tuple], fonts: dict[tuple, list[Font]], scales: Optional[list[float]] = None) -> "TextLayout":
+        """Rich text (not in Koharu): character i is shaped with ``fonts[keys[i]]`` (its bold, italic or
+        family) instead of the layout's faces, at ``scales[i]`` times the layout's size. Those faces and
+        sizes have their own advances, so they take part in line breaking and the fitted size."""
+        self.style_keys = keys
+        self.style_fonts = fonts
+        self.style_scales = scales
+        return self
+
+    def scale_at(self, index: int) -> float:
+        if self.style_scales is None or not 0 <= index < len(self.style_scales):
+            return 1.0
+        return self.style_scales[index]
+
+    def fonts_at(self, index: int) -> list[Font]:
+        default = [self.font, *self.fallback_fonts]
+        if self.style_keys is None or not 0 <= index < len(self.style_keys):
+            return default
+        return self.style_fonts.get(self.style_keys[index], default)
+
+    def style_pieces(self, start: int, end: int) -> list[tuple[int, int]]:
+        """``[start, end)`` split where the faces or sizes change."""
+        if self.style_keys is None and self.style_scales is None:
+            return [(start, end)]
+        pieces = []
+        piece_start = start
+        for index in range(start + 1, end):
+            key_changes = self.style_keys is not None and self.style_keys[index] != self.style_keys[index - 1]
+            if key_changes or self.scale_at(index) != self.scale_at(index - 1):
+                pieces.append((piece_start, index))
+                piece_start = index
+        pieces.append((piece_start, end))
+        return pieces
 
     def run(self, text: str) -> LayoutRun:
         if self.font_size is not None:
@@ -387,6 +426,14 @@ class TextLayout:
             line_height = max(ascent + descent + leading, font_size)
 
         levels = _embedding_levels(text)
+        # Rich text sizes: balloons and vertical columns fit on one line pitch, so it grows with the largest
+        # run; horizontal lines each grow with their own largest run (below, at the baselines).
+        largest_scale = max(self.style_scales) if self.style_scales else 1.0
+        uniform_pitch = self.comic_balloon is not None or self.writing_mode.is_vertical()
+        if uniform_pitch and largest_scale != 1.0:
+            line_height *= largest_scale
+            ascent *= largest_scale
+            descent *= largest_scale
 
         direction, script = shaping_direction_for_text(text, self.writing_mode)
         features = {"vert": 1, "vrt2": 1} if self.writing_mode.is_vertical() else {}
@@ -395,20 +442,21 @@ class TextLayout:
             self.max_width if self.max_width is not None else math.inf
         )
 
-        fonts: list[Font] = [self.font, *self.fallback_fonts]
-
         def shape_break_suffix(suffix: LineBreakSuffix, level: int, cluster: int) -> ShapedBreakSuffix:
+            scale = self.scale_at(cluster - 1)
             suffix_options = ShapingOptions(
                 direction="rtl" if level % 2 == 1 else "ltr",
                 script=options.script,
-                font_size=options.font_size,
+                font_size=options.font_size * scale,
                 features=options.features,
             )
             runs: list[LineRun] = []
             advance = 0.0
-            for shaped in shape_script_runs(shaper, suffix.as_str(), fonts, suffix_options):
+            # A hyphen takes the formatting of the character it follows.
+            for shaped in shape_script_runs(shaper, suffix.as_str(), self.fonts_at(cluster - 1), suffix_options):
                 for glyph in shaped.glyphs:
                     glyph.cluster += cluster
+                    glyph.scale = scale
                 advance += abs(shaped.x_advance)
                 runs.append(LineRun(shaped=shaped, level=level))
             return ShapedBreakSuffix(runs=runs, advance=advance)
@@ -437,48 +485,52 @@ class TextLayout:
                         scan += 1
                     index = run_end
 
-                    run_text = text[run_start:run_end]
-                    if self.writing_mode.is_vertical():
-                        run_direction = "ttb"
-                    elif level % 2 == 1:
-                        run_direction = "rtl"
-                    else:
-                        run_direction = "ltr"
-                    run_options = ShapingOptions(
-                        direction=run_direction,
-                        script=options.script,
-                        font_size=options.font_size,
-                        features=options.features,
-                    )
-
-                    normalized_punctuation = (
-                        normalize_cjk_emphasis_punctuation(run_text)
-                        if self.cjk_punctuation_layout
-                        else None
-                    )
-                    shaping_text = normalized_punctuation[0] if normalized_punctuation else run_text
-                    script_runs = shape_script_runs(shaper, shaping_text, fonts, run_options)
-                    for shaped in script_runs:
-                        self.apply_spacing(shaping_text, shaped)
-                        if self.writing_mode.is_vertical() and self.center_vertical_punctuation:
-                            self.center_vertical_punctuation_glyphs(font_size, shaping_text, shaped.glyphs)
-                        if self.cjk_punctuation_layout:
-                            self.layout_cjk_emphasis_runs(font_size, shaping_text, shaped)
-                        if normalized_punctuation is not None:
-                            cluster_map = normalized_punctuation[1]
-                            for glyph in shaped.glyphs:
-                                if 0 <= glyph.cluster < len(cluster_map):
-                                    glyph.cluster = cluster_map[glyph.cluster]
-
-                        for glyph in shaped.glyphs:
-                            glyph.cluster += run_start
-
+                    for piece_start, piece_end in self.style_pieces(run_start, run_end):
+                        run_text = text[piece_start:piece_end]
+                        scale = self.scale_at(piece_start)
+                        piece_size = font_size * scale
                         if self.writing_mode.is_vertical():
-                            segment_advance += abs(shaped.y_advance)
+                            run_direction = "ttb"
+                        elif level % 2 == 1:
+                            run_direction = "rtl"
                         else:
-                            segment_advance += abs(shaped.x_advance)
+                            run_direction = "ltr"
+                        run_options = ShapingOptions(
+                            direction=run_direction,
+                            script=options.script,
+                            font_size=piece_size,
+                            features=options.features,
+                        )
 
-                        segment_runs.append(LineRun(shaped=shaped, level=level))
+                        normalized_punctuation = (
+                            normalize_cjk_emphasis_punctuation(run_text)
+                            if self.cjk_punctuation_layout
+                            else None
+                        )
+                        shaping_text = normalized_punctuation[0] if normalized_punctuation else run_text
+                        script_runs = shape_script_runs(shaper, shaping_text, self.fonts_at(piece_start), run_options)
+                        for shaped in script_runs:
+                            self.apply_spacing(shaping_text, shaped)
+                            if self.writing_mode.is_vertical() and self.center_vertical_punctuation:
+                                self.center_vertical_punctuation_glyphs(piece_size, shaping_text, shaped.glyphs)
+                            if self.cjk_punctuation_layout:
+                                self.layout_cjk_emphasis_runs(piece_size, shaping_text, shaped)
+                            if normalized_punctuation is not None:
+                                cluster_map = normalized_punctuation[1]
+                                for glyph in shaped.glyphs:
+                                    if 0 <= glyph.cluster < len(cluster_map):
+                                        glyph.cluster = cluster_map[glyph.cluster]
+
+                            for glyph in shaped.glyphs:
+                                glyph.cluster += piece_start
+                                glyph.scale = scale
+
+                            if self.writing_mode.is_vertical():
+                                segment_advance += abs(shaped.y_advance)
+                            else:
+                                segment_advance += abs(shaped.x_advance)
+
+                            segment_runs.append(LineRun(shaped=shaped, level=level))
 
             segment_break_suffix = None
             if segment.break_suffix is not None and segment_runs:
@@ -578,6 +630,7 @@ class TextLayout:
         # BASELINES (layout.rs: per-line baseline from line index and metrics; vertical X absolute).
         line_count = len(lines)
         effective_alignment = self.alignment if self.alignment is not None else TextAlign.LEFT
+        line_top = 0.0
         for i, line in enumerate(lines):
             if self.writing_mode.is_vertical():
                 if self.comic_balloon is not None and i < len(line_profiles):
@@ -588,8 +641,13 @@ class TextLayout:
             else:
                 if self.comic_balloon is not None and i < len(line_profiles):
                     y = line_profiles[i].block_baseline
-                else:
+                elif uniform_pitch or largest_scale == 1.0:
                     y = ascent + i * line_height
+                else:
+                    # A line is as tall as its largest run.
+                    line_scale = max((glyph.scale for glyph in line.glyphs), default=1.0)
+                    y = line_top + ascent * line_scale
+                    line_top += line_height * line_scale
                 line.baseline = (0.0, y)
 
         if effective_alignment == TextAlign.JUSTIFY and not self.writing_mode.is_vertical():
@@ -701,13 +759,14 @@ class TextLayout:
             suffix_runs = segment.break_suffix.runs if segment.break_suffix is not None else []
             for run in [*segment.runs, *suffix_runs]:
                 for glyph in run.shaped.glyphs:
-                    bounds = glyph.font.glyph_bounds(glyph.glyph_id, font_size)
+                    size = font_size * glyph.scale
+                    bounds = glyph.font.glyph_bounds(glyph.glyph_id, size)
                     if bounds is None:
                         continue
                     x_min, y_min, x_max, y_max = bounds
                     if self.writing_mode.is_vertical():
-                        synthetic_pad = (font_size * 0.25 if glyph.font.synthetic_skew() is not None else 0.0) + (
-                            font_size * 0.05 if glyph.font.synthetic_bold() else 0.0
+                        synthetic_pad = (size * 0.25 if glyph.font.synthetic_skew() is not None else 0.0) + (
+                            size * 0.05 if glyph.font.synthetic_bold() else 0.0
                         )
                         minimum = min(minimum, glyph.x_offset + x_min - synthetic_pad)
                         maximum = max(maximum, glyph.x_offset + x_max + synthetic_pad)
@@ -861,13 +920,14 @@ class TextLayout:
         for line in lines:
             x, y = line.baseline
             for g in line.glyphs:
-                bounds = g.font.glyph_bounds(g.glyph_id, font_size)
+                size = font_size * g.scale
+                bounds = g.font.glyph_bounds(g.glyph_id, size)
                 if bounds is not None:
                     b_x_min, b_y_min, b_x_max, b_y_max = bounds
                     x0 = x + g.x_offset + b_x_min
                     x1 = x + g.x_offset + b_x_max
-                    synthetic_pad = (font_size * 0.25 if g.font.synthetic_skew() is not None else 0.0) + (
-                        font_size * 0.05 if g.font.synthetic_bold() else 0.0
+                    synthetic_pad = (size * 0.25 if g.font.synthetic_skew() is not None else 0.0) + (
+                        size * 0.05 if g.font.synthetic_bold() else 0.0
                     )
                     # Font bounds are Y-up; layout coordinates are Y-down, so subtract.
                     y0 = (y - g.y_offset) - b_y_max
