@@ -19,6 +19,8 @@
   re-run never overwrites your edits.
 - **Chapters from the sites you read.** Download series from Suwayomi (Tachiyomi and Mihon
   extensions) and Mana sources straight into a project.
+- **Translate overnight.** Automations run chosen or new chapters on a schedule, one model at a
+  time, so the largest models get the whole GPU, and can wake the computer to do it.
 - **Any model from Hugging Face.** Every download is rated for your GPU and RAM before you get
   it. Translate with a local model or a hosted one (Claude, OpenAI, DeepL and more).
 - **Always current.** PyTorch, llama.cpp and stable-diffusion.cpp stay on their newest
@@ -209,6 +211,7 @@ parity, and swappable providers.
 | [Architecture](docs/architecture.md) | Code layout, pipeline semantics, service modes, the API, the web UI, writing a provider |
 | [Models](docs/models.md) | Default models, the Hugging Face catalog, diffusion inpainting, hosted translation, page storage |
 | [Sources](docs/sources.md) | Source systems, linking a series, the built-in browser |
+| [Automations](docs/automations.md) | Scheduled batches, model profiles, waking the computer |
 | [Runtimes](docs/runtimes.md) | How runtimes stay current, the `urakatsu runtimes` commands, pinning a release |
 | [The desktop app](docs/app.md) | What setup does on each system, the app environment, command-line options, building |
 | [CI and releases](docs/releases.md) | The GitHub workflows, publishing a release, nightly builds |

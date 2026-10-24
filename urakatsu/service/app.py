@@ -20,6 +20,7 @@ from urakatsu import __version__
 from urakatsu.agents import AgentService
 
 from .agent_api import agent_router
+from .automations_api import automations_router
 from .catalog_api import catalog_router
 from .gen import urakatsu_pb2_grpc as rpc
 from .grpc_web import GrpcWebBridge
@@ -55,6 +56,7 @@ def build_app(
     app.include_router(catalog_router(), prefix="/api/v1")
     app.include_router(sources_router(workspace), prefix="/api/v1")
     app.include_router(updates_router(), prefix="/api/v1")
+    app.include_router(automations_router(workspace), prefix="/api/v1")
     app.state.agents = AgentService(workspace)
     app.include_router(agent_router(app.state.agents), prefix="/api/v1")
 
@@ -111,6 +113,7 @@ async def serve(
     """Runs until SIGINT / SIGTERM, or until ``shutdown`` is set (the desktop app runs this on a thread)."""
     servicer = UrakatsuServicer(workspace)
     workspace.systems.start_enabled()
+    workspace.automations.start()  # the timer that runs scheduled automations
     if not os.environ.get("URAKATSU_NO_UPDATE_CHECK"):
         from urakatsu.updates import updater
 

@@ -47,6 +47,9 @@ Urakatsu keeps Koharu's stage semantics:
 
 Projects are organized as Project, then Chapters, then Pages (`urakatsu/pipeline/projects.py`).
 
+Automations (`docs/automations.md`) run a different order on top of the same stages: every
+page through one stage, unload, then the next stage (`urakatsu/pipeline/batch.py`).
+
 ## Service modes
 
 | Command | What runs |

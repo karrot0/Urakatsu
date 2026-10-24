@@ -85,7 +85,10 @@ class Server:
         self._loop = asyncio.get_running_loop()
         self._shutdown = asyncio.Event()
         start_updater()  # newest llama.cpp and stable-diffusion.cpp, as `urakatsu serve` does
-        await serve(Workspace(), port=self.port, grpc_port=None, log_level="warning", shutdown=self._shutdown)
+        workspace = Workspace()
+        # A scheduled automation that wakes the computer starts this app if it is closed.
+        workspace.automations.wake.launch = background_command()
+        await serve(workspace, port=self.port, grpc_port=None, log_level="warning", shutdown=self._shutdown)
 
     def wait_ready(self, timeout: float = 120.0) -> None:
         deadline = time.monotonic() + timeout
@@ -107,6 +110,16 @@ class Server:
 
 
 # ---- one instance -------------------------------------------------------------------------------
+
+
+BACKGROUND = "--background"
+
+
+def background_command() -> tuple[str, list[str]]:
+    """Starts the app minimized, or does nothing when it is already open (``BACKGROUND``)."""
+    python = Path(sys.executable)
+    windowless = python.with_name("pythonw.exe")
+    return str(windowless if windowless.exists() else python), ["-m", "urakatsu.desktop", BACKGROUND]
 
 
 def _instance_path() -> Path:
@@ -356,8 +369,10 @@ def _configure_logging() -> None:
 def main() -> int:
     _configure_logging()
     log.info("Urakatsu %s desktop, Python %s, %s", __version__, sys.version.split()[0], sys.executable)
+    background = BACKGROUND in sys.argv[1:]  # started for a scheduled automation
     if running_instance():
-        _focus_existing()
+        if not background:
+            _focus_existing()
         return 0
     _claim_instance()
     if _windows():
@@ -376,6 +391,7 @@ def main() -> int:
         height=900,
         min_size=(960, 640),
         text_select=True,
+        minimized=background,
         **chrome.window_options(),
     )
     desktop.bridge._window = desktop.window

@@ -54,6 +54,7 @@ import { assetHref, assetVersion, describeError, exportChapter, exportPage, save
 import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../api/sources";
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
 import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
+import { AutomationsButton } from "./Automations";
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -430,6 +431,7 @@ function ProjectHead() {
           {project.name}
         </span>
       )}
+      <AutomationsButton />
     </div>
   );
 }

@@ -51,6 +51,9 @@ WebKitGTK 4.1 (`libwebkit2gtk-4.1-0`), which desktop installs of current distrib
 | `--quiet` | No window: installs without asking, or uninstalls keeping your data |
 | `--dump-state <file>` | Writes what setup detected (installs, data folders, models) as JSON, for diagnosing |
 
+`python -m urakatsu.desktop --background` starts the app minimized, or does nothing when it is
+already open; the wake task of a scheduled automation runs it ([Automations](automations.md)).
+
 ## Building it
 
 ```bash

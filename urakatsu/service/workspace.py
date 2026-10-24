@@ -47,6 +47,7 @@ from urakatsu.scene.scene import Snapshot
 from urakatsu.sources import SourceSystems
 from urakatsu.sources.links import SourceLinks
 
+from .automations import Automations
 from .views import PageView, page_view, parse_rgba
 
 log = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ class Workspace:
         self.pipeline = Pipeline(self.config, self.runtimes)
         self.systems = SourceSystems()
         self.links = SourceLinks(self.store, self.systems)
+        self.automations = Automations(self)
         self.jobs: dict[str, Job] = {}
         self._renders: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._thumbnails: dict[str, bytes] = {}
@@ -193,7 +195,8 @@ class Workspace:
         for provider_id, runtime in config.runtimes.items():
             if runtime not in RuntimeManager.RUNTIMES:
                 raise ValueError(f"unknown runtime {runtime!r} for {provider_id}")
-        self.pipeline.configure(config)
+        if not self.automations.busy:  # a running batch applies the saved settings when it ends
+            self.pipeline.configure(config)
         if config.typesetting != self.config.typesetting:
             self._renderer = None
             with self._render_lock:
@@ -239,6 +242,7 @@ class Workspace:
             if job.project_id == project_id and job.status == "running":
                 job.stop.stop()
         self.links.cancel_all(project_id)
+        self.automations.forget(project_id)
         self.store.delete(project_id)
         with self._render_lock:
             for key in [k for k in self._renders if k[0] == project_id]:
@@ -629,6 +633,8 @@ class Workspace:
     ) -> Job:
         """Starts a pipeline run. ``fill_prompt`` (with ``inpainting_mask``) makes it a generative fill."""
         session = self.session(project_id)
+        if self.automations.busy:
+            raise ProjectBusy("an automation is running; stop it to run the pipeline by hand")
         if entities:
             scope = EntitiesScope(tuple(entities))
         elif region is not None:
@@ -719,6 +725,7 @@ class Workspace:
         return result
 
     async def close(self) -> None:
+        await self.automations.close()
         for job in self.jobs.values():
             job.stop.stop()
         tasks = [j.task for j in self.jobs.values() if j.task and not j.task.done()]
