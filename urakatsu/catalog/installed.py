@@ -139,7 +139,9 @@ def _prune_empty(directory: Path) -> None:
 class Download(BaseModel):
     id: str
     model: InstalledModel
-    status: str = "queued"  # queued | downloading | completed | failed | cancelled
+    status: str = "queued"  # queued | downloading | paused | completed | failed | cancelled
+    # Place in the queue (0 downloads next) while queued; None otherwise.
+    position: Optional[int] = None
     done: int = 0
     total: int = 0
     current: str = ""
@@ -149,13 +151,19 @@ class Download(BaseModel):
 
 
 class Downloader:
-    """Runs installs one at a time in a background thread; resumes partial files."""
+    """Runs installs one at a time, in queue order, in a background thread; resumes partial files.
+
+    The queue can be managed while it runs: a download can be moved to another place in the queue,
+    paused (a running one stops after its current chunk and keeps its partial file) and resumed (it
+    goes back to the end of the queue), or cancelled.
+    """
 
     def __init__(self, registry: InstalledModels, on_change: Optional[Callable[[Download], None]] = None):
         self.registry = registry
         self.on_change = on_change
         self.downloads: dict[str, Download] = {}
-        self._cancel: set[str] = set()
+        # Stop requests for the running download: "pause" or "cancel".
+        self._stop: dict[str, str] = {}
         self._queue: list[str] = []
         self._lock = threading.Lock()
         self._worker: Optional[threading.Thread] = None
@@ -165,19 +173,88 @@ class Downloader:
             for existing in self.downloads.values():
                 if existing.model.id == model.id and existing.status in ("queued", "downloading"):
                     return existing
+                if existing.model.id == model.id and existing.status == "paused":
+                    self._enqueue(existing)
+                    return existing
             download = Download(id=uuid.uuid4().hex[:12], model=model, total=sum(f.size for f in model.files))
             self.downloads[download.id] = download
-            self._queue.append(download.id)
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(target=self._run, name="model-downloads", daemon=True)
-                self._worker.start()
+            self._enqueue(download)
         return download
+
+    def queue(self) -> list[str]:
+        """Ids of the queued downloads, the next one first."""
+        with self._lock:
+            return list(self._queue)
 
     def cancel(self, download_id: str) -> None:
         with self._lock:
-            if download_id not in self.downloads:
-                raise KeyError(f"download {download_id} not found")
-            self._cancel.add(download_id)
+            download = self._get(download_id)
+            if download.status == "downloading":
+                self._stop[download_id] = "cancel"
+                return
+            if download.status not in ("queued", "paused"):
+                return
+            self._dequeue(download_id)
+            download.status, download.finished_at = "cancelled", time.time()
+        self._changed(download)
+
+    def pause(self, download_id: str) -> None:
+        with self._lock:
+            download = self._get(download_id)
+            if download.status == "downloading":
+                self._stop[download_id] = "pause"
+                return
+            if download.status != "queued":
+                raise ValueError(f"Only a queued or running download can be paused (this one is {download.status}).")
+            self._dequeue(download_id)
+            download.status = "paused"
+        self._changed(download)
+
+    def resume(self, download_id: str) -> None:
+        """A paused or failed download goes back to the end of the queue."""
+        with self._lock:
+            download = self._get(download_id)
+            if download.status not in ("paused", "failed"):
+                raise ValueError(f"Only a paused or failed download can be resumed (this one is {download.status}).")
+            download.error, download.finished_at = None, 0.0
+            self._enqueue(download)
+        self._changed(download)
+
+    def move(self, download_id: str, position: int) -> None:
+        """Moves a queued download to ``position`` in the queue (0 downloads next; clamped to the ends)."""
+        with self._lock:
+            download = self._get(download_id)
+            if download.status != "queued":
+                raise ValueError("Only a queued download can be moved.")
+            self._dequeue(download_id)
+            self._queue.insert(min(max(position, 0), len(self._queue)), download_id)
+            self._number()
+        self._changed(download)
+
+    def _get(self, download_id: str) -> Download:
+        download = self.downloads.get(download_id)
+        if download is None:
+            raise KeyError(f"download {download_id} not found")
+        return download
+
+    def _enqueue(self, download: Download) -> None:
+        """Appends to the queue and makes sure the worker runs. Call with the lock held."""
+        download.status = "queued"
+        self._queue.append(download.id)
+        self._number()
+        if self._worker is None or not self._worker.is_alive():
+            self._worker = threading.Thread(target=self._run, name="model-downloads", daemon=True)
+            self._worker.start()
+
+    def _dequeue(self, download_id: str) -> None:
+        if download_id in self._queue:
+            self._queue.remove(download_id)
+            self.downloads[download_id].position = None
+            self._number()
+
+    def _number(self) -> None:
+        for position, queued in enumerate(self._queue):
+            self.downloads[queued].position = position
 
     def _changed(self, download: Download) -> None:
         if self.on_change:
@@ -190,7 +267,17 @@ class Downloader:
                     self._worker = None
                     return
                 download = self.downloads[self._queue.pop(0)]
+                download.position = None
+                download.status = "downloading"
+                self._number()
             self._install(download)
+
+    def _check_stop(self, download: Download) -> None:
+        request = self._stop.get(download.id)
+        if request == "pause":
+            raise _Paused
+        if request == "cancel":
+            raise _Cancelled
 
     def _install(self, download: Download) -> None:
         store = self.registry.store
@@ -205,6 +292,7 @@ class Downloader:
             with httpx.Client(follow_redirects=True, headers=headers, timeout=httpx.Timeout(30.0, read=120.0)) as client:
                 base = 0
                 for file in model.files:
+                    self._check_stop(download)
                     source = model.source(file.path)
                     target = source.local_path(store)
                     download.current = file.path
@@ -227,8 +315,7 @@ class Downloader:
                             with partial.open("ab" if have else "wb") as handle:
                                 last = 0.0
                                 for chunk in response.iter_bytes(1 << 20):
-                                    if download.id in self._cancel:
-                                        raise _Cancelled
+                                    self._check_stop(download)
                                     handle.write(chunk)
                                     have += len(chunk)
                                     download.done = base + have
@@ -240,15 +327,23 @@ class Downloader:
             model.installed_at = time.time()
             self.registry.add(model)
             download.status = "completed"
+        except _Paused:
+            download.status = "paused"  # the partial file stays; resuming continues it
         except _Cancelled:
             download.status = "cancelled"
         except Exception as error:  # noqa: BLE001 - reported to the UI
             download.status, download.error = "failed", str(error)
         finally:
-            download.finished_at = time.time()
-            self._cancel.discard(download.id)
+            with self._lock:
+                self._stop.pop(download.id, None)
+            if download.status != "paused":
+                download.finished_at = time.time()
             self._changed(download)
 
 
 class _Cancelled(Exception):
+    pass
+
+
+class _Paused(Exception):
     pass

@@ -4,6 +4,8 @@
 import {
   ArrowLeft,
   Boxes,
+  ChevronDown,
+  ChevronUp,
   CircleAlert,
   CircleCheck,
   Cpu,
@@ -14,6 +16,8 @@ import {
   Info,
   Lock,
   MemoryStick,
+  Pause,
+  Play,
   Search,
   Sparkles,
   Trash2,
@@ -177,6 +181,23 @@ function useCatalogState() {
       await catalog.cancel(id).catch((error) => ws.reportError(describeError(error)));
       void poll();
     },
+    pause: async (id: string) => {
+      await catalog.pause(id).catch((error) => ws.reportError(describeError(error)));
+      setPolling(true);
+      void poll();
+    },
+    resume: async (id: string) => {
+      await catalog.resume(id).catch((error) => ws.reportError(describeError(error)));
+      setPolling(true);
+      void poll();
+    },
+    move: async (id: string, position: number) => {
+      try {
+        setDownloads(await catalog.move(id, position));
+      } catch (error) {
+        ws.reportError(describeError(error));
+      }
+    },
   };
 }
 
@@ -194,7 +215,7 @@ export function ModelsPage() {
     catalog.hardware().then(setHardware, () => undefined);
   }, []);
 
-  const active = state.downloads.filter((d) => d.status === "queued" || d.status === "downloading");
+  const active = state.downloads.filter((d) => d.status === "queued" || d.status === "downloading" || d.status === "paused");
 
   return (
     <div className="flex h-screen flex-col bg-surface">
@@ -223,7 +244,7 @@ export function ModelsPage() {
         <TitleBarInset side="right" />
       </header>
       {tab === "discover" ? <Discover state={state} /> : <Installed state={state} onDiscover={() => setTab("discover")} />}
-      {active.length > 0 && <DownloadTray downloads={active} onCancel={state.cancel} />}
+      {active.length > 0 && <DownloadTray downloads={active} state={state} />}
     </div>
   );
 }
@@ -475,7 +496,10 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
 
   const action = (variant: Variant) => {
     const download = state.downloads.find(
-      (d) => d.model.repo === details.repo && (d.model.variant || "snapshot") === variant.id && (d.status === "queued" || d.status === "downloading"),
+      (d) =>
+        d.model.repo === details.repo &&
+        (d.model.variant || "snapshot") === variant.id &&
+        (d.status === "queued" || d.status === "downloading" || d.status === "paused"),
     );
     if (installedIds.has(variant.id)) {
       return (
@@ -484,7 +508,13 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
         </Badge>
       );
     }
-    if (download) return <DownloadProgress download={download} onCancel={() => state.cancel(download.id)} />;
+    if (download)
+      return (
+        <span className="inline-flex items-center gap-2">
+          <DownloadProgress download={download} className="w-24" />
+          <QueueControls download={download} state={state} compact />
+        </span>
+      );
     return (
       <Button
         size="sm"
@@ -715,40 +745,95 @@ function CompatibilityNote({ compatibility, onRuntimes }: { compatibility: Compa
   );
 }
 
-function DownloadProgress({ download, onCancel }: { download: Download; onCancel: () => void }) {
+/** Where a download stands: its share while running, its place in the queue, or paused. */
+function downloadLabel(download: Download): string {
+  if (download.status === "paused") return "Paused";
+  if (download.status === "queued") return download.position ? `#${download.position + 1} in queue` : "Up next";
+  return `${Math.round((download.total ? download.done / download.total : 0) * 100)}%`;
+}
+
+function DownloadProgress({ download, className }: { download: Download; className?: string }) {
   const share = download.total ? download.done / download.total : 0;
+  const running = download.status === "downloading";
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className={cn(PROGRESS_TRACK, "w-24")} aria-label={`Downloading ${Math.round(share * 100)}%`}>
-        <span className={cn(PROGRESS_FILL, download.status === "queued" && PROGRESS_SLIDE)} style={{ width: `${share * 100}%` }} />
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span className={cn(PROGRESS_TRACK, className)} aria-label={`${downloadLabel(download)}, ${Math.round(share * 100)}% downloaded`}>
+        <span className={cn(PROGRESS_FILL, !running && "bg-fg-3")} style={{ width: `${share * 100}%` }} />
       </span>
-      <span className="text-xs tracking-[0.005em] tabular-nums text-fg-2">{download.status === "queued" ? "Queued" : `${Math.round(share * 100)}%`}</span>
-      <Button variant="ghost" size="icon-xs" aria-label="Cancel download" onClick={onCancel}>
+      <span className="text-xs tracking-[0.005em] whitespace-nowrap tabular-nums text-fg-2">{downloadLabel(download)}</span>
+    </span>
+  );
+}
+
+/** Pause or resume, move within the queue (not when ``compact``), and cancel. */
+function QueueControls({ download, state, queued = 0, compact = false }: { download: Download; state: CatalogState; queued?: number; compact?: boolean }) {
+  const name = `${download.model.repo.split("/").pop()} ${download.model.variant}`.trim();
+  const position = download.position ?? 0;
+  return (
+    <span className="inline-flex flex-none items-center">
+      {!compact && download.status === "queued" && (
+        <>
+          <Button variant="ghost" size="icon-xs" aria-label={`Move ${name} up`} title="Move up" disabled={position === 0} onClick={() => state.move(download.id, position - 1)}>
+            <ChevronUp size={12} />
+          </Button>
+          <Button variant="ghost" size="icon-xs" aria-label={`Move ${name} down`} title="Move down" disabled={position >= queued - 1} onClick={() => state.move(download.id, position + 1)}>
+            <ChevronDown size={12} />
+          </Button>
+        </>
+      )}
+      {download.status === "paused" ? (
+        <Button variant="ghost" size="icon-xs" aria-label={`Resume ${name}`} title="Resume" onClick={() => state.resume(download.id)}>
+          <Play size={12} />
+        </Button>
+      ) : (
+        <Button variant="ghost" size="icon-xs" aria-label={`Pause ${name}`} title="Pause" onClick={() => state.pause(download.id)}>
+          <Pause size={12} />
+        </Button>
+      )}
+      <Button variant="ghost" size="icon-xs" aria-label={`Cancel ${name}`} title="Cancel" onClick={() => state.cancel(download.id)}>
         <X size={12} />
       </Button>
     </span>
   );
 }
 
-function DownloadTray({ downloads, onCancel }: { downloads: Download[]; onCancel: (id: string) => void }) {
+/** The download queue: the running download, then the queue in order (movable), then paused ones. */
+function DownloadTray({ downloads, state }: { downloads: Download[]; state: CatalogState }) {
+  const count = (status: Download["status"]) => downloads.filter((d) => d.status === status).length;
+  const queued = count("queued");
+  const summary = [
+    count("downloading") && `${count("downloading")} downloading`,
+    queued && `${queued} queued`,
+    count("paused") && `${count("paused")} paused`,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
-    <aside className="fixed bottom-4 left-4 z-20 flex w-[340px] flex-col rounded-card bg-surface-over px-3 py-1 shadow-overlay" aria-label="Downloads">
-      {downloads.map((d) => (
-        <div
-          key={d.id}
-          className="flex flex-col gap-1 py-2 shadow-[inset_0_-1px_0_var(--border-soft)] last:shadow-none [&>span]:flex [&>span>span:first-child]:w-auto [&>span>span:first-child]:flex-1"
-        >
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate font-medium">
-              {d.model.repo.split("/").pop()} {d.model.variant}
-            </span>
-            <span className="text-xs tracking-[0.005em] tabular-nums text-fg-3">
-              {formatBytes(d.done)} of {formatBytes(d.total)}
-            </span>
-          </div>
-          <DownloadProgress download={d} onCancel={() => onCancel(d.id)} />
-        </div>
-      ))}
+    <aside className="fixed bottom-4 left-4 z-20 flex w-[360px] flex-col rounded-card bg-surface-over py-1 shadow-overlay" aria-label="Downloads">
+      <div className="flex items-baseline justify-between gap-2 px-3 pt-1.5 pb-1">
+        <span className="font-semibold">Downloads</span>
+        <span className="text-xs tracking-[0.005em] tabular-nums text-fg-3">{summary}</span>
+      </div>
+      <ScrollArea className="max-h-[50vh]">
+        <ol aria-label="Download queue">
+          {downloads.map((d) => (
+            <li key={d.id} className="flex flex-col gap-1 px-3 py-2 shadow-[inset_0_1px_0_var(--border-soft)]">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={cn("truncate font-medium", d.status === "paused" && "text-fg-2")}>
+                  {d.model.repo.split("/").pop()} {d.model.variant}
+                </span>
+                <span className="flex-none text-xs tracking-[0.005em] tabular-nums text-fg-3">
+                  {formatBytes(d.done)} of {formatBytes(d.total)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 [&>span:first-child]:flex-1 [&>span:first-child>span:first-child]:flex-1">
+                <DownloadProgress download={d} />
+                <QueueControls download={d} state={state} queued={queued} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      </ScrollArea>
     </aside>
   );
 }

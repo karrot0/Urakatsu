@@ -25,6 +25,10 @@ class InstallBody(BaseModel):
     variant: str
 
 
+class MoveBody(BaseModel):
+    position: int  # 0 downloads next
+
+
 class PinBody(BaseModel):
     tag: Optional[str] = None  # None unpins
 
@@ -98,6 +102,21 @@ def catalog_router() -> APIRouter:
     def cancel(download_id: str):
         _guard(catalog().downloads.cancel, download_id)
         return {"ok": True}
+
+    @router.post("/catalog/downloads/{download_id}/pause", status_code=202)
+    def pause(download_id: str):
+        _guard(catalog().downloads.pause, download_id)
+        return {"ok": True}
+
+    @router.post("/catalog/downloads/{download_id}/resume", status_code=202)
+    def resume(download_id: str):
+        _guard(catalog().downloads.resume, download_id)
+        return {"ok": True}
+
+    @router.post("/catalog/downloads/{download_id}/move")
+    def move(download_id: str, body: MoveBody):
+        _guard(catalog().downloads.move, download_id, body.position)
+        return catalog().list_downloads()
 
     @router.get("/catalog/installed")
     def installed():

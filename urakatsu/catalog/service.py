@@ -591,8 +591,12 @@ class Catalog:
         self.installed.remove(model_id)
 
     def list_downloads(self) -> list[dict[str, Any]]:
+        """The running download, the queue in order, paused downloads, then the last hour's finished ones."""
         cutoff = time.time() - 3600
-        return [d.model_dump(mode="json") for d in self.downloads.downloads.values() if d.status in ("queued", "downloading") or d.finished_at > cutoff]
+        rank = {"downloading": 0, "queued": 1, "paused": 2}
+        shown = [d for d in self.downloads.downloads.values() if d.status in rank or d.finished_at > cutoff]
+        shown.sort(key=lambda d: (rank.get(d.status, 3), d.position if d.position is not None else 0, -d.finished_at))
+        return [d.model_dump(mode="json") for d in shown]
 
     # -- storage -----------------------------------------------------------------------------------
 
@@ -665,8 +669,8 @@ class Catalog:
         """Point the store at ``path`` (None: the default), moving the current models there when asked."""
         if models_folder.mover.running:
             raise ValueError("Models are already moving to a new folder.")
-        if any(d.status in ("queued", "downloading") for d in self.downloads.downloads.values()):
-            raise ValueError("Wait for the downloads to finish, or cancel them, before changing the models folder.")
+        if any(d.status in ("queued", "downloading", "paused") for d in self.downloads.downloads.values()):
+            raise ValueError("Wait for the downloads to finish, or cancel them (paused ones too), before changing the models folder.")
         target = Path(path).expanduser() if path else models_folder.default_root()
         if os.path.normcase(os.path.abspath(target)) != os.path.normcase(os.path.abspath(self.store.root)):
             models_folder.validate(target)

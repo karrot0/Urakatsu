@@ -130,7 +130,8 @@ export interface ModelDetails {
 export interface Download {
   id: string;
   model: InstalledModel;
-  status: "queued" | "downloading" | "completed" | "failed" | "cancelled";
+  status: "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
+  position: number | null;
   done: number;
   total: number;
   current: string;
@@ -243,6 +244,10 @@ export const catalog = {
     call<Download>("/catalog/install", { method: "POST", body: JSON.stringify({ runtime, repo, variant }) }),
   downloads: () => call<Download[]>("/catalog/downloads"),
   cancel: (id: string) => call<void>(`/catalog/downloads/${id}/cancel`, { method: "POST" }),
+  pause: (id: string) => call<void>(`/catalog/downloads/${id}/pause`, { method: "POST" }),
+  resume: (id: string) => call<void>(`/catalog/downloads/${id}/resume`, { method: "POST" }),
+  move: (id: string, position: number) =>
+    call<Download[]>(`/catalog/downloads/${id}/move`, { method: "POST", body: JSON.stringify({ position }) }),
   installed: () => call<InstalledModel[]>("/catalog/installed"),
   remove: (id: string) => call<void>(`/catalog/installed/${id}`, { method: "DELETE" }),
   runtimes: () => call<Runtimes>("/runtimes"),
