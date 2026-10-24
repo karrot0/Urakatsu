@@ -59,7 +59,8 @@ def test_variants_follow_the_driver():
     assert preferred_variants(CUDA)[:2] == ["win-cuda-13", "win-cuda-12"] or preferred_variants(CUDA)[0].startswith(("linux", "macos"))
     old = [Device.gpu(Backend.CUDA, 0, "RTX", driver_version="550.10")]
     assert not any(v.endswith("cuda-13") for v in preferred_variants(old))
-    assert preferred_variants([Device.cpu()])[-1].endswith("cpu")
+    # macOS has one build (Metal, falling back to the CPU) for every machine.
+    assert preferred_variants([Device.cpu()])[-1].endswith(("cpu", "macos-arm64"))
 
 
 def test_installs_the_newest_release_with_the_best_build(tmp_path, monkeypatch):

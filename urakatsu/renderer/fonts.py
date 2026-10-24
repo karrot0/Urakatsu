@@ -3,11 +3,12 @@
 Port of ``fonts.rs``.
 
 Divergences (no exact Python twin for these pieces):
-- fontique's system collection (DirectWrite on Windows) is replaced by a scan of the Windows
-  font directories with fontTools. Family, PostScript name, weight, width, style and variable
-  axis ranges come from the same OpenType name/OS/2/fvar tables fontique reads.
+- fontique's system collection (DirectWrite, CoreText, fontconfig) is replaced by a scan of the
+  platform's font directories (``system_font_directories``) with fontTools. Family, PostScript
+  name, weight, width, style and variable axis ranges come from the same OpenType name/OS/2/fvar
+  tables fontique reads. fontconfig aliases (Arial -> Liberation Sans) are not applied.
 - fontique's per-script platform fallback lists are replaced by ``SCRIPT_FALLBACK_FAMILIES``
-  (the Windows families DirectWrite uses for each script).
+  (the families DirectWrite, CoreText and common Linux packages use for each script).
 - skrifa is replaced by fontTools for cmap, metrics and glyph bounds. Bounds ignore the
   variation location unless the face is variable (then they come from the instanced glyph set).
 - The bundled catalog is the Hugging Face dataset ``mayocream/fonts`` at the same pinned
@@ -29,6 +30,7 @@ import copy
 import json
 import logging
 import os
+import sys
 import threading
 import time
 import unicodedata
@@ -70,21 +72,36 @@ SYMBOL_FALLBACK_FAMILIES = [
 ]
 
 # Script -> platform families tried after the requested families (fontique's fallback key).
+# Windows families first, then macOS, then the common Linux packages; missing ones are skipped.
 SCRIPT_FALLBACK_FAMILIES: dict[str, list[str]] = {
-    "Hani": ["Microsoft YaHei", "Yu Gothic", "MS Gothic", "SimSun", "Meiryo", "MingLiU"],
-    "Hang": ["Malgun Gothic", "Batang", "Gulim"],
-    "Arab": ["Segoe UI", "Arial", "Tahoma", "Times New Roman"],
-    "Hebr": ["Arial", "Segoe UI", "David"],
-    "Thai": ["Leelawadee UI", "Tahoma", "Cordia New"],
-    "Deva": ["Nirmala UI", "Mangal"],
-    "Zsye": ["Segoe UI Emoji", "Segoe UI Symbol"],
+    "Hani": [
+        "Microsoft YaHei", "Yu Gothic", "MS Gothic", "SimSun", "Meiryo", "MingLiU",
+        "PingFang SC", "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans CJK SC", "WenQuanYi Micro Hei",
+    ],
+    "Hang": ["Malgun Gothic", "Batang", "Gulim", "Apple SD Gothic Neo", "Noto Sans CJK KR"],
+    "Arab": ["Segoe UI", "Arial", "Tahoma", "Times New Roman", "Geeza Pro", "Noto Sans Arabic", "DejaVu Sans"],
+    "Hebr": ["Arial", "Segoe UI", "David", "Noto Sans Hebrew", "DejaVu Sans"],
+    "Thai": ["Leelawadee UI", "Tahoma", "Cordia New", "Thonburi", "Noto Sans Thai"],
+    "Deva": ["Nirmala UI", "Mangal", "Kohinoor Devanagari", "Noto Sans Devanagari"],
+    "Zsye": ["Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji"],
 }
-DEFAULT_SCRIPT_FALLBACK = ["Segoe UI", "Arial", "Times New Roman"]
-
-WINDOWS_FONT_DIRECTORIES = [
-    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",
-    Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Windows" / "Fonts",
+DEFAULT_SCRIPT_FALLBACK = [
+    "Segoe UI", "Arial", "Times New Roman", "Helvetica", "Liberation Sans", "DejaVu Sans", "Noto Sans",
 ]
+
+def system_font_directories() -> list[Path]:
+    """The platform's installed-font directories (where DirectWrite, CoreText and fontconfig look)."""
+    home = Path.home()
+    if sys.platform == "win32":
+        return [
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Windows" / "Fonts",
+        ]
+    if sys.platform == "darwin":
+        return [Path("/System/Library/Fonts"), Path("/Library/Fonts"), home / "Library" / "Fonts"]
+    data_home = os.environ.get("XDG_DATA_HOME") or str(home / ".local" / "share")
+    data_dirs = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    return [*(Path(d) / "fonts" for d in [data_home, *data_dirs] if d), home / ".fonts"]
 
 _FONT_EXTENSIONS = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -189,6 +206,18 @@ class Font:
             ascent, descent, leading = os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap
         return ascent * scale, descent * scale, leading * scale
 
+    def decoration_metrics(self, font_size: float) -> tuple[float, float, float, float]:
+        """(underline offset below the baseline, underline thickness, strikeout height above the
+        baseline, strikeout thickness) in pixels, from the post and OS/2 tables where the face has them."""
+        scale = font_size / self.units_per_em
+        post = self._tt["post"] if "post" in self._tt else None
+        os2 = self._tt["OS/2"] if "OS/2" in self._tt else None
+        underline_position = post.underlinePosition if post is not None and post.underlinePosition else -0.1 * self.units_per_em
+        underline_thickness = post.underlineThickness if post is not None and post.underlineThickness > 0 else 0.05 * self.units_per_em
+        strike_position = os2.yStrikeoutPosition if os2 is not None and os2.yStrikeoutPosition > 0 else 0.25 * self.units_per_em
+        strike_thickness = os2.yStrikeoutSize if os2 is not None and os2.yStrikeoutSize > 0 else underline_thickness
+        return -underline_position * scale, underline_thickness * scale, strike_position * scale, strike_thickness * scale
+
     def glyph_bounds(self, glyph_id: int, font_size: float) -> Optional[tuple[float, float, float, float]]:
         """Y-up outline bounds (x_min, y_min, x_max, y_max) in pixels, or None for empty glyphs."""
         if glyph_id not in self._bounds_cache:
@@ -206,18 +235,6 @@ class Font:
         if glyph_id >= len(self._tt.getGlyphOrder()):
             return []
         name = self._tt.getGlyphName(glyph_id)
-    def decoration_metrics(self, font_size: float) -> tuple[float, float, float, float]:
-        """(underline offset below the baseline, underline thickness, strikeout height above the
-        baseline, strikeout thickness) in pixels, from the post and OS/2 tables where the face has them."""
-        scale = font_size / self.units_per_em
-        post = self._tt["post"] if "post" in self._tt else None
-        os2 = self._tt["OS/2"] if "OS/2" in self._tt else None
-        underline_position = post.underlinePosition if post is not None and post.underlinePosition else -0.1 * self.units_per_em
-        underline_thickness = post.underlineThickness if post is not None and post.underlineThickness > 0 else 0.05 * self.units_per_em
-        strike_position = os2.yStrikeoutPosition if os2 is not None and os2.yStrikeoutPosition > 0 else 0.25 * self.units_per_em
-        strike_thickness = os2.yStrikeoutSize if os2 is not None and os2.yStrikeoutSize > 0 else underline_thickness
-        return -underline_position * scale, underline_thickness * scale, strike_position * scale, strike_thickness * scale
-
         # Decomposing: composite glyphs are expanded into their components' outlines.
         pen = DecomposingRecordingPen(self._glyph_set)
         try:
@@ -364,12 +381,19 @@ class FontSystem:
     def system_faces(self) -> list[SystemFace]:
         if self._faces is None:
             faces: list[SystemFace] = []
-            for directory in WINDOWS_FONT_DIRECTORIES:
+            seen: set[Path] = set()
+            for directory in system_font_directories():
                 if not directory or not directory.is_dir():
                     continue
-                for path in sorted(directory.iterdir()):
-                    if path.suffix.lower() in _FONT_EXTENSIONS:
-                        faces.extend(_scan_font_file(path))
+                # macOS and Linux keep fonts in subdirectories (Supplemental, truetype/dejavu, ...).
+                for path in sorted(directory.rglob("*")):
+                    if path.suffix.lower() not in _FONT_EXTENSIONS:
+                        continue
+                    real = path.resolve()
+                    if real in seen or not real.is_file():
+                        continue
+                    seen.add(real)
+                    faces.extend(_scan_font_file(path))
             self._faces = faces
         return self._faces
 

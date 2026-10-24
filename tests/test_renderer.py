@@ -53,6 +53,15 @@ def font(system: FontSystem) -> Font:
     pytest.skip("no usable Latin font installed")
 
 
+@pytest.fixture(scope="module")
+def latin(system: FontSystem) -> str:
+    """A Latin family every platform ships: Arial (Windows, macOS), else a Linux metric twin."""
+    for name in ("Arial", "Liberation Sans", "DejaVu Sans"):
+        if system.family_exists(name):
+            return name
+    pytest.skip("no usable Latin font installed")
+
+
 def texts(breaks, text):
     return [text[b.offset : n.offset] for b, n in zip(breaks, breaks[1:])]
 
@@ -197,8 +206,8 @@ def test_source_writing_mode_is_limited_to_chinese_and_japanese():
 # ---- shape.rs / fonts.rs ------------------------------------------------------------------------------
 
 
-def test_shape_arabic_with_fallback_preserves_context(system: FontSystem):
-    fonts = system.resolve_with_fallback_families(["Arial"], ["Segoe UI Symbol"], Attributes(), ["Arab"])
+def test_shape_arabic_with_fallback_preserves_context(system: FontSystem, latin: str):
+    fonts = system.resolve_with_fallback_families([latin], ["Segoe UI Symbol"], Attributes(), ["Arab"])
     options = ShapingOptions(direction="rtl", script="Arab", font_size=16.0)
     text = "مرحبا"
     runs = shape_script_runs(TextShaper(), text, fonts, options)
@@ -207,18 +216,18 @@ def test_shape_arabic_with_fallback_preserves_context(system: FontSystem):
     assert all(glyph.font is first for glyph in runs[0].glyphs)
 
 
-def test_font_resolution_orders_requested_family_first_then_script_fallbacks(system: FontSystem):
-    fonts = system.resolve_with_fallback_families(["Arial"], [], Attributes(), ["Hani"])
-    assert fonts[0].family_name == "Arial"
+def test_font_resolution_orders_requested_family_first_then_script_fallbacks(system: FontSystem, latin: str):
+    fonts = system.resolve_with_fallback_families([latin], [], Attributes(), ["Hani"])
+    assert fonts[0].family_name == latin
     if system.family_exists("Microsoft YaHei"):
         assert "Microsoft YaHei" in [font.family_name for font in fonts[1:]]
 
 
-def test_font_covers_ignores_whitespace_and_variation_selectors(system: FontSystem):
-    latin = system.query_family("Arial")
-    assert latin.covers("Hi there‍")
-    assert latin.covers("A️")
-    assert not latin.covers("一")  # a Latin face has no Han glyph
+def test_font_covers_ignores_whitespace_and_variation_selectors(system: FontSystem, latin: str):
+    face = system.query_family(latin)
+    assert face.covers("Hi there‍")
+    assert face.covers("A️")
+    assert not face.covers("一")  # a Latin face has no Han glyph
 
 
 # ---- layout.rs ----------------------------------------------------------------------------------------
@@ -497,12 +506,12 @@ def test_layer_image_and_cropped_frame_share_the_layer_bounds(tmp_path, shared_f
     assert cropped.layers[0].presentation.opacity == 1.0
 
 
-def test_available_fonts_lists_system_families(shared_fonts, tmp_path):
+def test_available_fonts_lists_system_families(shared_fonts, latin, tmp_path):
     renderer = Renderer(TypesettingConfig())
     families = renderer.available_fonts()
     assert families
     assert all(family.name for family in families)
-    assert any(family.name.lower() == "arial" for family in families)
+    assert any(family.name.lower() == latin.lower() for family in families)
 
 
 # ---- more layout.rs ports: readable floor, contour spans, natural pauses, last-resort hyphens -------

@@ -40,6 +40,13 @@ jobs:
         with:
           enable-cache: true
 
+      # skia-python loads libEGL at import; the renderer tests need a Latin system font.
+      - name: Install skia's EGL and fonts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 fonts-liberation fonts-dejavu-core
+
       - name: Create the environment
         run: uv venv --python ${{ matrix.python }}
 
