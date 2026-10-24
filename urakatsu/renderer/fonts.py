@@ -485,6 +485,8 @@ class FontSystem:
 
         if not resolved and families:
             resolved = self.resolve_with_fallback_families([], fallback_families, attributes, scripts, language)
+        if not resolved and scripts != ["Latn"]:
+            resolved = self.resolve_with_fallback_families([], fallback_families, attributes, ["Latn"], language)
         if not resolved:
             raise RuntimeError("no usable fonts are installed")
         if len(self._resolved) >= 256:
