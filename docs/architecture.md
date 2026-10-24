@@ -54,7 +54,7 @@ page through one stage, unload, then the next stage (`urakatsu/pipeline/batch.py
 
 | Command | What runs |
 | --- | --- |
-| `urakatsu serve` | The UI, the gRPC-web bridge and the JSON API on `--port` (8080), plus native gRPC on `--grpc-port` (50051), in one process |
+| `urakatsu serve` | The UI, the gRPC-web bridge and the JSON API on `--port` (8090), plus native gRPC on `--grpc-port` (50051), in one process |
 | `urakatsu listen` | API mode: the JSON API and native gRPC without the UI; binds `0.0.0.0` by default |
 | `urakatsu run` | One-shot CLI: `urakatsu run page.png --out out/` |
 | `urakatsu desktop` | The workspace in its own window (needs the `desktop` extra) |
@@ -91,7 +91,7 @@ bridge, so no Envoy proxy is needed. Regenerate the stubs with `urakatsu codegen
 
 Themes are light, dark or system, with a choice of accent and neutral tone. `npm run dev`
 serves the UI with hot reload and forwards API calls to the Python service
-(`URAKATSU_API`, default `http://127.0.0.1:8080`).
+(`URAKATSU_API`, default `http://127.0.0.1:8090`).
 
 ## Writing a provider
 

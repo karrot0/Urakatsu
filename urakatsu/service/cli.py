@@ -1,6 +1,7 @@
 """``urakatsu`` command line.
 
     urakatsu serve      workspace UI + gRPC-web + JSON API + native gRPC in one process
+    urakatsu dev        serve, restarted on Python changes, plus the Vite dev server (hot reload)
     urakatsu desktop    the workspace in its own window (what the Windows app runs)
     urakatsu listen     API mode: JSON API + native gRPC, no UI
     urakatsu run        one-shot pipeline on image files
@@ -23,7 +24,7 @@ from urakatsu import __version__
 
 def _add_service_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8080, help="HTTP port (UI, gRPC-web, JSON API)")
+    parser.add_argument("--port", type=int, default=8090, help="HTTP port (UI, gRPC-web, JSON API)")
     parser.add_argument("--grpc-port", type=int, default=50051, help="native gRPC port (0 to disable)")
     parser.add_argument("--device", default=None, help="auto | cpu | cuda | cuda:N | dml")
     parser.add_argument("--cors", action="append", default=None, help="allowed CORS origin (repeatable)")
@@ -39,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_service_args(serve)
     serve.add_argument("--ui-dir", type=Path, default=None, help="built UI directory (default: web/dist)")
     serve.add_argument("--no-ui", action="store_true", help="do not serve the UI")
+
+    dev = sub.add_parser("dev", help="work on Urakatsu: serve (restarted when Python changes) + the Vite dev server")
+    _add_service_args(dev)
+    # No port given: 8090, or the next free one. The UI talks gRPC-web over HTTP, so native gRPC
+    # is off; on, it would clash with a running serve.
+    dev.set_defaults(port=None, grpc_port=0)
+    dev.add_argument("--ui-port", type=int, default=None, help="Vite dev server port (default: 5173, or the next free one)")
+    dev.add_argument("--no-web", action="store_true", help="run only the service")
+    dev.add_argument("--no-reload", action="store_true", help="do not restart the service when Python files change")
 
     sub.add_parser("desktop", help="open the workspace in its own window (needs the desktop extra)")
 
@@ -95,6 +105,21 @@ def cmd_serve(args: argparse.Namespace, serve_ui: bool) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def cmd_dev(args: argparse.Namespace) -> int:
+    from urakatsu.service.dev import DevError, run
+
+    service_args = ["--grpc-port", str(args.grpc_port), "--log-level", args.log_level]
+    if args.device:
+        service_args += ["--device", args.device]
+    for origin in args.cors or []:
+        service_args += ["--cors", origin]
+    try:
+        return run(args.host, args.port, args.ui_port, service_args, web=not args.no_web, reload=not args.no_reload)
+    except DevError as error:
+        print(f"urakatsu dev: {error}", file=sys.stderr)
+        return 1
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -236,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_serve(args, serve_ui=True)
     if args.command == "listen":
         return cmd_serve(args, serve_ui=False)
+    if args.command == "dev":
+        return cmd_dev(args)
     if args.command == "run":
         return cmd_run(args)
     if args.command == "providers":

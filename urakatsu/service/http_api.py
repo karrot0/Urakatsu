@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from urakatsu.core.config import PipelineConfig
+from urakatsu.core.config import PipelineConfig, home
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.pipeline.scope import Bounds
 
@@ -115,6 +115,10 @@ def api_router(ws: Workspace) -> APIRouter:
     @router.get("/memory")
     def memory():
         return guard(ws.memory)
+
+    @router.get("/data-folder")
+    def data_folder() -> dict[str, str]:
+        return {"path": str(home())}
 
     @router.get("/config")
     def get_config() -> PipelineConfig:
@@ -226,6 +230,10 @@ def api_router(ws: Workspace) -> APIRouter:
     @router.delete("/projects/{project_id}/pages/{page_id}")
     def remove_page(project_id: str, page_id: str):
         return guard(ws.remove_page, project_id, page_id)
+
+    @router.get("/projects/{project_id}/pages/{page_id}/text-layout")
+    def text_layout(project_id: str, page_id: str, v: Optional[str] = None):
+        return guard(ws.text_layout, project_id, page_id)
 
     @router.get("/projects/{project_id}/pages/{page_id}/assets/{kind}")
     def asset(project_id: str, page_id: str, kind: str, v: Optional[str] = None):

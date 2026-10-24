@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { catalog, type InstalledModel } from "../api/catalog";
-import { assetUrl, assetVersion } from "../api/client";
+import { assetHref, assetUrl, assetVersion } from "../api/client";
 import type { Page, RasterLayer, TextBlock } from "../gen/urakatsu/v1/urakatsu_pb";
 import { matches } from "../shortcuts";
 import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, currentPage, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
@@ -1151,7 +1151,9 @@ export function Canvas() {
                 </svg>
               </div>
             )}
-            {editingBlock && <CanvasTextEditor key={editingBlock.layerId} block={editingBlock} zoom={zoom} onDone={() => setEditing(null)} />}
+            {editingBlock && (
+              <CanvasTextEditor key={editingBlock.layerId} block={editingBlock} page={page} projectId={ws.project.id} zoom={zoom} onDone={() => setEditing(null)} />
+            )}
             {selection && (!gesture || gesture.kind === "compare") && (
               <FillPrompt
                 bounds={boundsOf(selection.points)}
@@ -1274,31 +1276,91 @@ function fittedSize(text: string, width: number, height: number): number {
   return clamp(Math.sqrt((width * height) / (characters * 0.6 * 1.2)), 10, 72);
 }
 
+/** How the render laid out a text block: the size auto-fit chose and where its lines (or columns) start. */
+type BlockLayout = { font_size: number; line_starts: number[]; writing_mode: string };
+
+const textLayouts = new Map<string, Promise<Record<string, BlockLayout>>>();
+
+/** The page's text layout as rendered at its current revision (the service renders it if need be). */
+function useTextLayout(projectId: string, page: Page): Record<string, BlockLayout> | null {
+  const key = `${projectId}/${page.id}@${page.revision}`;
+  const [layouts, setLayouts] = useState<{ key: string; value: Record<string, BlockLayout> } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!textLayouts.has(key)) {
+      const url = `/api/v1/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(page.id)}/text-layout?v=${page.revision}`;
+      textLayouts.set(key, fetch(url).then((response) => (response.ok ? response.json() : {})).catch(() => ({})));
+    }
+    void textLayouts.get(key)!.then((value) => alive && setLayouts({ key, value }));
+    return () => {
+      alive = false;
+    };
+  }, [key, projectId, page.id, page.revision]);
+  return layouts?.key === key ? layouts.value : (layouts?.value ?? null);
+}
+
+/** A gradient as CSS (Photoshop's angle: 90 runs bottom to top, CSS's 0deg does). */
+function cssGradient(gradient: { kind: string; angle: number; stops: { offset: number; color: string }[] }): string {
+  const stops = [...gradient.stops].sort((a, b) => a.offset - b.offset).map((s) => `${s.color} ${Math.round(s.offset * 100)}%`).join(", ");
+  return gradient.kind === "radial" ? `radial-gradient(circle farthest-side, ${stops})` : `linear-gradient(${90 - gradient.angle}deg, ${stops})`;
+}
+
 /**
- * Editing a text block on the page, as Photoshop's text tool does: the box shows the text in the
- * layer's font, colour, alignment and direction (the browser's approximation of the render, which
- * follows once saved), with the formatting toolbar above it.
+ * Editing a text block on the page, as Photoshop's text tool does: the text shows as the render laid it
+ * out (the size auto-fit chose, the same line breaks, the layer's font, colour and border, centred), over
+ * the art without the rendered text, so it is the text itself being edited. Typing reflows in the browser
+ * until it is saved and rendered again.
  */
-function CanvasTextEditor({ block, zoom, onDone }: { block: TextBlock; zoom: number; onDone: () => void }) {
+function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: TextBlock; page: Page; projectId: string; zoom: number; onDone: () => void }) {
   const ws = useWorkspace();
   const defaultFont = useDefaultFont();
+  const layouts = useTextLayout(projectId, page);
+  const layout = layouts?.[block.layerId];
+  // The layout is the render's, usually already made for the page; past a moment, open with an estimate.
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWaited(true), 800);
+    return () => window.clearTimeout(timer);
+  }, []);
   const { box } = orientedBox(block.frame);
   const typography = block.typography;
   const text = block.translation ?? "";
-  const vertical = typography?.writingMode === "Vertical" || (!typography?.writingMode && block.ocrDirection === "Vertical" && CJK.test(text));
-  const size = (typography?.size ?? fittedSize(text, vertical ? box.h : box.w, vertical ? box.w : box.h)) * zoom;
+  const vertical = layout ? layout.writing_mode === "vertical-rl" : typography?.writingMode === "Vertical" || (!typography?.writingMode && block.ocrDirection === "Vertical" && CJK.test(text));
+  const size = (layout?.font_size ?? typography?.size ?? fittedSize(text, vertical ? box.h : box.w, vertical ? box.w : box.h)) * zoom;
   const align = { Start: "left", Center: "center", End: "right", Justify: "justify" }[typography?.alignment ?? ""] ?? "center";
   const family = typography?.preferredFont || defaultFont;
   useLayerFonts([family, ...block.translationStyles.map((style) => style.font)]);
+  if (!layouts && !waited) return null;
+
+  const strokeWidth = typography?.strokeWidth ?? 0;
+  const strokeColor = typography?.strokeColor ?? "#ffffffff";
+  const stroke = strokeWidth > 0 && (strokeColor.length !== 9 || strokeColor.slice(7) !== "00" || !!typography?.strokeGradient);
+  const fill = typography?.fillGradient && typography.fillGradient.stops.length >= 2 ? typography.fillGradient : undefined;
+  const color = typography?.color ?? "#000000ff";
+  // The art without its rendered text (the cleanup layer over the source), cropped to the box; a turned
+  // box keeps the page under it.
+  const left = (box.cx - box.w / 2) * zoom;
+  const top = (box.cy - box.h / 2) * zoom;
+  const art = box.angle
+    ? undefined
+    : [
+        page.assets.includes("cleanup") && `url("${assetHref(projectId, page.id, "cleanup", assetVersion(page, "cleanup"))}")`,
+        `url("${assetHref(projectId, page.id, "source", assetVersion(page, "source"))}")`,
+      ]
+        .filter(Boolean)
+        .join(", ");
   return (
     <div
-      className="absolute z-20"
+      className="absolute z-20 rounded-[2px] shadow-[0_0_0_1.5px_var(--overlay-block)]"
       style={{
-        left: (box.cx - box.w / 2) * zoom,
-        top: (box.cy - box.h / 2) * zoom,
+        left,
+        top,
         width: box.w * zoom,
         height: box.h * zoom,
         transform: box.angle ? `rotate(${box.angle}rad)` : undefined,
+        backgroundImage: art,
+        backgroundSize: `${page.width * zoom}px ${page.height * zoom}px`,
+        backgroundPosition: `${-left}px ${-top}px`,
       }}
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -1310,7 +1372,9 @@ function CanvasTextEditor({ block, zoom, onDone }: { block: TextBlock; zoom: num
         onCommit={(next, styles) => void ws.updateBlock(block.layerId, { translation: next, translationStyles: styles })}
         onDone={onDone}
         overlay={{
-          className: "rounded-[2px] bg-[color-mix(in_oklab,var(--surface)_90%,transparent)] shadow-[0_0_0_1.5px_var(--overlay-block)]",
+          boxClassName: "flex items-center justify-center",
+          className: vertical ? "h-full max-w-full" : "w-full max-h-full",
+          softBreaks: layout?.line_starts,
           style: {
             padding: 4 * zoom,
             fontFamily: family ? `"${family}", var(--font), sans-serif` : undefined,
@@ -1318,9 +1382,12 @@ function CanvasTextEditor({ block, zoom, onDone }: { block: TextBlock; zoom: num
             lineHeight: 1.2,
             fontWeight: typography?.fontWeight ?? undefined,
             fontStyle: typography?.fontStyle === "italic" ? "italic" : undefined,
-            color: typography?.color ?? "#000000",
             textAlign: align as CSSProperties["textAlign"],
             writingMode: vertical ? "vertical-rl" : undefined,
+            caretColor: fill ? fill.stops[0].color : color,
+            ...(fill ? { backgroundImage: cssGradient(fill), WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" } : { color }),
+            // The border as an outline behind the fill; CSS strokes one colour, so a gradient border shows its first stop.
+            ...(stroke ? { WebkitTextStroke: `${2 * strokeWidth * zoom}px ${typography?.strokeGradient?.stops[0]?.color ?? strokeColor}`, paintOrder: "stroke fill" } : {}),
           },
         }}
       />

@@ -25,6 +25,7 @@ from fakes import FakeDetector, FakeInpainter, FakeOcr, FakeTranslator, fake_con
 class FakeFrame:
     def __init__(self, size):
         self.size = size
+        self.layers = []
 
     def composite(self):
         return Image.new("RGBA", self.size, (255, 255, 255, 255))
@@ -457,3 +458,18 @@ def test_text_gradients_round_trip_and_clear(workspace):
     assert view.blocks[0].typography.fill_gradient is not None
     view = workspace.update_text_block(project, page, block.layer_id, {"typography": {"fill_gradient": None, "stroke_gradient": {"stops": [{"offset": 0, "color": "#000000ff"}]}}})
     assert view.blocks[0].typography.fill_gradient is None and view.blocks[0].typography.stroke_gradient is None
+
+
+def test_text_layout_reports_the_rendered_size_and_line_starts(workspace):
+    workspace._renderer = None  # the real renderer, not the fixture's stand-in
+    project = workspace.create_project("layout").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 20, "y": 20, "width": 120, "height": 200})
+    [block] = workspace.page(project, page).blocks
+    text = "A long enough sentence that it has to wrap onto several lines"
+    workspace.update_text_block(project, page, block.layer_id, {"translation": text})
+    layout = workspace.text_layout(project, page)[block.layer_id]
+    starts = layout["line_starts"]
+    assert layout["font_size"] > 5 and len(starts) >= 3 and starts[0] == 0
+    assert starts == sorted(starts) and starts[-1] < len(text)  # breaks may fall inside a hyphenated word
+    assert workspace.text_layout(project, page) is workspace.text_layout(project, page)  # from the render's cache

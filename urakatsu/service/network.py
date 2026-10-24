@@ -53,7 +53,7 @@ SETTINGS_PATH = "/api/v1/server"
 class NetworkSettings(BaseModel):
     autostart: bool = False  # start the listener whenever Urakatsu starts
     host: str = "127.0.0.1"
-    port: int = Field(default=8686, ge=1, le=65535)  # not 8080: `urakatsu serve` and Docker take it
+    port: int = Field(default=8686, ge=1, le=65535)  # not 8090: `urakatsu serve` takes it
     cors_origins: list[str] = Field(default_factory=list)  # "*" allows any origin
     require_key: bool = False
     api_key: str = ""

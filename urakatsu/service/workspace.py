@@ -125,6 +125,8 @@ class Workspace:
         self.automations = Automations(self)
         self.jobs: dict[str, Job] = {}
         self._renders: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
+        # The same renders' text layout per block (font size, line starts), for the on-canvas text editor.
+        self._text_layouts: dict[tuple[str, str, int], dict[str, dict[str, Any]]] = {}
         self._thumbnails: dict[str, bytes] = {}
         self._render_lock = threading.Lock()
         # Assets are served from worker threads; the renderer draws one page at a time.
@@ -201,6 +203,7 @@ class Workspace:
             self._renderer = None
             with self._render_lock:
                 self._renders.clear()
+                self._text_layouts.clear()
         self.config = config
         self.store.lossless_pages = config.storage.lossless_pages
         save_config(config)
@@ -247,6 +250,8 @@ class Workspace:
         with self._render_lock:
             for key in [k for k in self._renders if k[0] == project_id]:
                 del self._renders[key]
+            for key in [k for k in self._text_layouts if k[0] == project_id]:
+                del self._text_layouts[key]
 
     def undo(self, project_id: str) -> ProjectView:
         self.session(project_id).undo()
@@ -341,13 +346,33 @@ class Workspace:
                 self._renders.move_to_end(key)
                 return cached
         with self._draw_lock:
-            image = self.renderer().render(snapshot, page_id).composite()
+            frame = self.renderer().render(snapshot, page_id)
+            image = frame.composite()
         data = _png(image)
+        layouts = {
+            layer.entity: {"font_size": layer.kind.font_size, "line_starts": list(layer.kind.line_starts), "writing_mode": layer.kind.writing_mode.value}
+            for layer in frame.layers
+            if layer.is_text()
+        }
         with self._render_lock:
             self._renders[key] = data
+            self._text_layouts[key] = layouts
             while len(self._renders) > RENDER_CACHE:
-                self._renders.popitem(last=False)
+                evicted, _ = self._renders.popitem(last=False)
+                self._text_layouts.pop(evicted, None)
         return data
+
+    def text_layout(self, project_id: str, page_id: str) -> dict[str, dict[str, Any]]:
+        """How the render laid out each text block: the font size auto-fit chose and where each line (or
+        column) starts in the text, so the on-canvas editor shows the text as rendered. Rendered if need be."""
+        snapshot = self.session(project_id).snapshot()
+        key = (project_id, page_id, snapshot.revision)
+        with self._render_lock:
+            if key in self._text_layouts:
+                return self._text_layouts[key]
+        self.render(project_id, page_id, snapshot)
+        with self._render_lock:
+            return self._text_layouts.get(key, {})
 
     def asset(self, project_id: str, page_id: str, kind: str) -> Optional[tuple[bytes, str, int, int]]:
         snapshot = self.session(project_id).snapshot()

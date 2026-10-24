@@ -37,6 +37,12 @@ log = logging.getLogger(__name__)
 _CHECKOUT_UI = Path(__file__).resolve().parents[2] / "web" / "dist"
 DEFAULT_UI_DIR = _CHECKOUT_UI if _CHECKOUT_UI.exists() else Path(__file__).resolve().parent / "ui"
 
+# The signals that stop serve() cleanly. SIGBREAK (Windows) is how ``urakatsu dev`` stops the
+# service before a restart. uvicorn re-raises the signal it caught once it exits, so without our
+# handler the default one would end the process before ``workspace.close`` stops llama-server
+# and Suwayomi.
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, *([signal.SIGBREAK] if hasattr(signal, "SIGBREAK") else []))
+
 
 def build_app(
     workspace: Workspace,
@@ -106,7 +112,7 @@ def build_app(
 async def serve(
     workspace: Workspace,
     host: str = "127.0.0.1",
-    port: int = 8080,
+    port: int = 8090,
     grpc_port: Optional[int] = 50051,
     ui_dir: Optional[Path] = None,
     serve_ui: bool = True,
@@ -146,7 +152,7 @@ async def serve(
 
     loop = asyncio.get_running_loop()
     if shutdown is None:
-        for sig in (signal.SIGINT, signal.SIGTERM):
+        for sig in STOP_SIGNALS:
             try:
                 loop.add_signal_handler(sig, _request_stop)
             except (NotImplementedError, RuntimeError):  # Windows / non-main thread

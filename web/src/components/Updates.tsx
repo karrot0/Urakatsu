@@ -3,9 +3,9 @@
 // update downloads. Both views share one store, so dismissing in one hides it in the other.
 
 import { ArrowUpCircle, ExternalLink, RefreshCw, X } from "lucide-react";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
-import { formatBytes } from "../api/catalog";
+import { call, formatBytes } from "../api/catalog";
 import { describeError } from "../api/client";
 import { releaseName, updates, type Channel, type UpdateStatus } from "../api/updates";
 import { formatDate, formatTimestamp } from "../format";
@@ -141,6 +141,13 @@ const CHANNEL_DETAIL: Record<Channel, string> = {
 
 export function AboutSettings() {
   const { status, check, setChannel, install } = useUpdates();
+  const [dataFolder, setDataFolder] = useState<string | null>(null);
+  useEffect(() => {
+    call<{ path: string }>("/data-folder").then(
+      (next) => setDataFolder(next.path),
+      () => setDataFolder(""),
+    );
+  }, []);
   if (!status) return <p className="text-fg-2">Loading.</p>;
   const { current, latest } = status;
   const build = current.channel === "dev" ? "Development build (running from source)" : current.channel === "nightly" ? "Nightly build" : "Stable release";
@@ -159,6 +166,14 @@ export function AboutSettings() {
             </a>
           </PreferenceRow>
         )}
+      </PreferenceSection>
+
+      <PreferenceSection title="Data" description="Projects, settings, runtimes and logs are kept in the data folder. Models go to the Models folder.">
+        <PreferenceRow title="Data folder" align="start">
+          <span className="min-w-0 break-all font-mono text-xs leading-5 text-fg-2 select-text">
+            {dataFolder === null ? "Loading." : dataFolder || "Unavailable"}
+          </span>
+        </PreferenceRow>
       </PreferenceSection>
 
       <PreferenceSection title="Updates" description="Urakatsu checks GitHub for a new release every hour.">

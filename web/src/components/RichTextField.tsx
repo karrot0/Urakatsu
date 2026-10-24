@@ -80,8 +80,9 @@ export function RichTextField({
   text: string;
   styles: readonly RichStyle[];
   onCommit: (text: string, styles: RichStyle[]) => void;
-  /** On the canvas: the editable area fills its box with this look, the toolbar floats above it. */
-  overlay?: { style?: CSSProperties; className?: string };
+  /** On the canvas: the editable area sits in its box with this look (soft line breaks where the
+   * render's lines start), the toolbar floats above it. */
+  overlay?: { style?: CSSProperties; className?: string; boxClassName?: string; softBreaks?: readonly number[] };
   /** Esc or Ctrl+Enter in the on-canvas editor: saved, now close it. */
   onDone?: () => void;
 }) {
@@ -95,10 +96,11 @@ export function RichTextField({
   value.current = { text, styles };
 
   // Shows the stored text, unless it is being edited.
-  const shown = JSON.stringify([text, styles.map((s) => [s.start, s.end, s.bold, s.italic, s.underline, s.strikethrough, s.color ?? ""])]);
+  const softBreaks = overlay?.softBreaks;
+  const shown = JSON.stringify([text, styles.map((s) => [s.start, s.end, s.bold, s.italic, s.underline, s.strikethrough, s.color ?? "", s.font, s.scale ?? 1]), softBreaks ?? []]);
   useEffect(() => {
     const el = editor.current;
-    if (el && document.activeElement !== el) el.innerHTML = toHtml(text, styles);
+    if (el && document.activeElement !== el) el.innerHTML = toHtml(text, styles, softBreaks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown]);
 
@@ -230,9 +232,13 @@ export function RichTextField({
       aria-label={label}
       contentEditable
       suppressContentEditableWarning
+      // On the canvas, no spellcheck: lettering is names and sound effects, and Chrome paints marked words
+      // without their text stroke (the border), so flagged words lost theirs.
+      spellCheck={overlay ? false : undefined}
+      autoCorrect={overlay ? "off" : undefined}
       className={
         overlay
-          ? cn("h-full w-full overflow-hidden whitespace-pre-wrap break-words outline-none", overlay.className)
+          ? cn("overflow-hidden whitespace-pre-wrap break-words outline-none", overlay.className)
           : cn(fieldChrome, "max-h-[120px] min-h-11 overflow-y-auto whitespace-pre-wrap break-words p-1 text-xs leading-4 shadow-[inset_0_0_0_1px_var(--brand-line)] focus:shadow-focus")
       }
       style={overlay?.style}
@@ -261,7 +267,7 @@ export function RichTextField({
 
   if (overlay) {
     return (
-      <div className="relative h-full w-full">
+      <div className={cn("relative h-full w-full", overlay.boxClassName)}>
         <div className="absolute bottom-full left-0 mb-1.5 flex w-[264px] flex-col gap-1 rounded-[12px] bg-surface-over p-1 shadow-floating">{toolbar}</div>
         {field}
       </div>

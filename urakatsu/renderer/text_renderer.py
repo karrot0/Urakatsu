@@ -165,6 +165,8 @@ class RenderedTextMetadata:
     post_script_fonts: list[str]
     font_size: float
     color: Rgba
+    # Where each line (a column, in vertical text) starts in the text: the on-canvas editor breaks there.
+    line_starts: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -374,6 +376,7 @@ class TextRenderer:
                 post_script_fonts=[font.post_script_name for font in font_list],
                 font_size=run.font_size,
                 color=color,
+                line_starts=[line.range[0] for line in run.lines],
             ),
             diagnostics=diagnostics,
         )

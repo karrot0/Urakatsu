@@ -37,17 +37,24 @@ function css(format: Format): string {
     .join(";");
 }
 
-/** The editor's HTML for `text` formatted by `styles`. */
-export function toHtml(text: string, styles: readonly RichStyle[]): string {
+// A line break the renderer chose (the text has none there): shown, but not part of the text.
+const SOFT_BREAK = '<br data-soft="">';
+
+/** The editor's HTML for `text` formatted by `styles`, with soft line breaks before the characters at
+ * `softBreaks` (where the render's lines start). */
+export function toHtml(text: string, styles: readonly RichStyle[], softBreaks: readonly number[] = []): string {
   const chars = Array.from(text);
   const formats: (Format | undefined)[] = new Array(chars.length);
   for (const style of styles) for (let i = Math.max(0, style.start); i < Math.min(style.end, chars.length); i++) formats[i] = style;
+  // A line that starts after a newline already breaks.
+  const soft = new Set(softBreaks.filter((i) => i > 0 && i < chars.length && chars[i - 1] !== "\n"));
   let html = "";
   for (let i = 0; i < chars.length; ) {
     let j = i + 1;
-    while (j < chars.length && sameFormat(formats[j], formats[i])) j++;
+    while (j < chars.length && sameFormat(formats[j], formats[i]) && !soft.has(j)) j++;
     const piece = escapeHtml(chars.slice(i, j).join("")).replace(/\n/g, "<br>");
     const format = formats[i];
+    if (soft.has(i)) html += SOFT_BREAK;
     html += format && !sameFormat(format, PLAIN) ? `<span style="${css(format)}">${piece}</span>` : piece;
     i = j;
   }
@@ -99,6 +106,7 @@ export function fromDom(root: HTMLElement): { text: string; styles: RichStyle[] 
           formats.push(format);
         }
       } else if (child instanceof HTMLBRElement) {
+        if (child.hasAttribute("data-soft")) continue; // the renderer's line break, not a character
         chars.push("\n");
         formats.push(PLAIN);
       } else if (child instanceof HTMLElement) {
@@ -115,7 +123,7 @@ export function fromDom(root: HTMLElement): { text: string; styles: RichStyle[] 
   // The <br> that holds an empty last line open is not a character.
   let last: Node | null = root.lastChild;
   while (last && last.lastChild) last = last.lastChild;
-  if (last instanceof HTMLBRElement && chars[chars.length - 1] === "\n") {
+  if (last instanceof HTMLBRElement && !last.hasAttribute("data-soft") && chars[chars.length - 1] === "\n") {
     chars.pop();
     formats.pop();
   }

@@ -130,6 +130,7 @@ class TextMetadata:
     alignment: TextAlign
     writing_mode: WritingMode
     angle_degrees: float
+    line_starts: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

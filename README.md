@@ -156,18 +156,23 @@ cd web && npm install && npm run build && cd ..
 urakatsu serve
 ```
 
-Open http://127.0.0.1:8080. The newest llama.cpp and stable-diffusion.cpp releases install the
+Open http://127.0.0.1:8090. The newest llama.cpp and stable-diffusion.cpp releases install the
 first time a model needs them; `urakatsu runtimes update` installs them up front.
 
-To work on the UI with hot reload, keep `urakatsu serve` running and start the Vite dev server
-in a second terminal:
+To work on Urakatsu, run both servers from one terminal instead:
 
 ```bash
-cd web && npm run dev
+urakatsu dev
 ```
 
-Then open http://localhost:5173. API calls go to the service on port 8080 (set `URAKATSU_API`
-to use another).
+Then open http://localhost:5173. The UI hot-reloads as you edit `web/src`, and the service on
+port 8090 restarts when a Python file under `urakatsu/` changes. Ctrl+C stops both. If another
+program holds 8090 or 5173, the next free port is used and printed;
+`--port` and `--ui-port` ask for specific ones. `--no-web` runs only the service, and
+`--no-reload` turns the restarts off. Native gRPC is off in dev (`--grpc-port 50051` turns it on); the UI does not use it.
+
+To run the Vite dev server against a service you started yourself, start it in `web/`:
+`npm run dev` proxies to port 8090, or to `URAKATSU_API` if set.
 
 ### Test
 

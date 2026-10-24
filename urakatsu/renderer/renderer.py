@@ -288,6 +288,7 @@ class Renderer:
             alignment=meta.alignment,
             writing_mode=meta.writing_mode,
             angle_degrees=meta.angle_degrees,
+            line_starts=tuple(rendered.metadata.line_starts),
         )
         diagnostics = []
         for diagnostic in rendered.diagnostics:
