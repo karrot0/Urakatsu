@@ -1,0 +1,35 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Build output
+build/
+dist/
+target/
+# packaging/build.py copies web/dist here while it builds the wheel, then removes it
+urakatsu/service/ui/
+
+# Web UI
+web/node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Data folders, model weights and logs
+.urakatsu/
+*.gguf
+*.onnx
+*.safetensors
+*.log
+
+# Editor, tool and system files: every dotfile except the ones the repository needs
+.*
+!.github/
+!.gitignore
+Thumbs.db
+desktop.ini
+
+# Local agent instructions
+AGENTS.md
+CLAUDE.md

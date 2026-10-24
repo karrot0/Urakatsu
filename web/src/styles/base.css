@@ -1,0 +1,97 @@
+/* Element defaults, in Tailwind's base layer after its reset: utilities always win over them. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--t-14);
+  line-height: var(--lh-14);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--selected);
+}
+
+:focus-visible {
+  outline: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+/* Icons keep their size inside flex rows. */
+svg.lucide {
+  flex: none;
+}
+
+/* Scroll regions use ScrollArea; anything still scrolling natively (the page, menus, text areas) gets a quiet thin bar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--text-3) 45%, transparent) transparent;
+}
+
+kbd {
+  font-family: var(--font-code);
+  font-size: var(--t-12);
+  color: var(--text-3);
+}
+
+/* Shared animations, used through Tailwind's animate-[name_...] utilities. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Not "pulse": Tailwind ships a pulse animation of its own. */
+@keyframes soft-pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

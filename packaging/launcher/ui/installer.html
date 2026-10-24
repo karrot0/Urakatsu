@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Urakatsu Setup</title>
+    <style>
+      /* Urakatsu's UI tokens (web/src/styles.css): warm neutrals, one accent, hairline shadows. */
+      :root {
+        --surface: oklch(1 0 0);
+        --surface-sunk: oklch(0.985 0.002 85);
+        --surface-fill: oklch(0.967 0.003 85);
+        --text: oklch(0.235 0.006 85);
+        --text-2: oklch(0.582 0.007 85);
+        --text-3: oklch(0.68 0.007 85);
+        --icon-2: oklch(0.68 0.007 85);
+        --border-soft: color-mix(in oklab, oklch(0.165 0.005 85) 7%, transparent);
+        --border: color-mix(in oklab, oklch(0.165 0.005 85) 11%, transparent);
+        --hover: color-mix(in oklab, oklch(0.165 0.005 85) 6%, transparent);
+        --press: color-mix(in oklab, oklch(0.165 0.005 85) 16%, transparent);
+        --accent: oklch(0.58 0.17 250);
+        --accent-hover: oklch(0.53 0.17 250);
+        --accent-press: oklch(0.47 0.16 250);
+        --on-accent: oklch(0.99 0 0);
+        --success: oklch(0.52 0.13 150);
+        --success-weak: oklch(0.96 0.04 150);
+        --danger: oklch(0.53 0.19 20);
+        --danger-hover: oklch(0.48 0.19 20);
+        --on-danger: oklch(0.99 0 0);
+        --danger-weak: oklch(0.96 0.03 20);
+        --danger-line: oklch(0.89 0.06 20);
+        --close-hover: oklch(0.58 0.21 27);
+        --shadow-sm: 0 1px 2px rgba(25, 25, 25, 0.03), 0 0 0 1px var(--border-soft);
+        --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+        --font: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+        --font-display: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+        --font-mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
+        --ease: cubic-bezier(0.2, 1, 0.2, 1);
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --surface: oklch(0.205 0.004 85);
+          --surface-sunk: oklch(0.245 0.004 85);
+          --surface-fill: oklch(0.27 0.004 85);
+          --text: oklch(0.948 0.004 85);
+          --text-2: oklch(0.74 0.006 85);
+          --text-3: oklch(0.62 0.006 85);
+          --icon-2: oklch(0.62 0.006 85);
+          --border-soft: color-mix(in oklab, white 9%, transparent);
+          --border: color-mix(in oklab, white 14%, transparent);
+          --hover: color-mix(in oklab, white 5.5%, transparent);
+          --press: color-mix(in oklab, white 3%, transparent);
+          --accent: oklch(0.66 0.15 250);
+          --accent-hover: oklch(0.71 0.14 250);
+          --accent-press: oklch(0.62 0.15 250);
+          --on-accent: oklch(0.16 0.01 250);
+          --success: oklch(0.72 0.14 150);
+          --success-weak: oklch(0.3 0.05 150);
+          --danger: oklch(0.72 0.16 20);
+          --danger-hover: oklch(0.76 0.15 20);
+          --on-danger: oklch(0.18 0.03 20);
+          --danger-weak: oklch(0.29 0.05 20);
+          --danger-line: oklch(0.4 0.08 20);
+          --shadow-sm: 0 0 0 1px var(--border-soft);
+          color-scheme: dark;
+        }
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        color: var(--text);
+        font: 14px/20px var(--font);
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+        cursor: default;
+      }
+      svg {
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      /* ---- title bar ---- */
+      .titlebar {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 40px;
+        padding-left: 16px;
+      }
+      .titlebar .drag {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 8px;
+        height: 100%;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .mark {
+        display: block;
+        flex: none;
+        width: 18px;
+        height: 18px;
+      }
+      .window-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 46px;
+        height: 40px;
+        border: 0;
+        background: transparent;
+        color: var(--text-2);
+        transition: background-color 20ms ease-in;
+      }
+      .window-button:hover {
+        background: var(--hover);
+        color: var(--text);
+      }
+      .window-button.close:hover {
+        background: var(--close-hover);
+        color: white;
+      }
+      .window-button:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
+
+      /* ---- screens ---- */
+      main {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+      .screen {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 12px 40px 0;
+        animation: enter 180ms var(--ease);
+      }
+      @keyframes enter {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .screen {
+          animation: none;
+        }
+      }
+      .hero {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .hero .logo {
+        display: block;
+        flex: none;
+        width: 48px;
+        height: 48px;
+      }
+      .hero .status-icon {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 999px;
+      }
+      .status-icon.success {
+        background: var(--success-weak);
+        color: var(--success);
+      }
+      .status-icon.danger {
+        background: var(--danger-weak);
+        color: var(--danger);
+      }
+      h1 {
+        font: 600 24px/32px var(--font-display);
+        letter-spacing: -0.01em;
+      }
+      .lede {
+        margin-top: 2px;
+        color: var(--text-2);
+      }
+      .content {
+        flex: 1;
+        min-height: 0;
+        margin: 20px -8px 0;
+        padding: 2px 8px 16px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      .section-label {
+        margin: 20px 0 6px;
+        color: var(--text-2);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .row .actions {
+        display: flex;
+        flex: none;
+        gap: 4px;
+      }
+
+      /* ---- rows ---- */
+      .card {
+        padding: 0 16px;
+        border-radius: 10px;
+        box-shadow: var(--shadow-sm);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        min-height: 56px;
+        padding: 10px 0;
+        box-shadow: inset 0 -1px 0 var(--border-soft);
+      }
+      .row:last-child {
+        box-shadow: none;
+      }
+      .row .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .row .title {
+        font-weight: 500;
+      }
+      .row .detail {
+        margin-top: 2px;
+        overflow: hidden;
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .path {
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+      .note {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 12px;
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 16px;
+      }
+      .note svg {
+        margin-top: 0;
+      }
+      .note + .note {
+        margin-top: 8px;
+      }
+      .note svg {
+        color: var(--icon-2);
+      }
+
+      /* ---- controls ---- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 32px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 6px;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--border);
+        color: var(--text);
+        font: 500 14px/20px var(--font);
+        white-space: nowrap;
+        transition: background-color 20ms ease-in;
+      }
+      .btn:hover {
+        background: var(--hover);
+      }
+      .btn:active {
+        background: var(--press);
+      }
+      .btn.sm {
+        height: 28px;
+        padding: 0 10px;
+        font-size: 13px;
+      }
+      .btn.ghost {
+        box-shadow: none;
+        background: transparent;
+      }
+      .btn.ghost:hover {
+        background: var(--hover);
+      }
+      .btn.primary {
+        background: var(--accent);
+        box-shadow: none;
+        color: var(--on-accent);
+      }
+      .btn.primary:hover {
+        background: var(--accent-hover);
+      }
+      .btn.primary:active {
+        background: var(--accent-press);
+      }
+      .btn.danger {
+        background: var(--danger);
+        box-shadow: none;
+        color: var(--on-danger);
+      }
+      .btn.danger:hover {
+        background: var(--danger-hover);
+      }
+      .btn:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+      }
+      .switch {
+        position: relative;
+        flex: none;
+        width: 32px;
+        height: 18px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--surface-fill);
+        box-shadow: inset 0 0 0 1px var(--border);
+        transition: background-color 100ms ease-out;
+      }
+      .switch::after {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--text-2);
+        content: "";
+        transition: transform 150ms var(--ease), background-color 100ms ease-out;
+      }
+      .switch[aria-checked="true"] {
+        background: var(--accent);
+        box-shadow: none;
+      }
+      .switch[aria-checked="true"]::after {
+        background: var(--on-accent);
+        transform: translateX(14px);
+      }
+      .switch.danger[aria-checked="true"] {
+        background: var(--danger);
+      }
+      .switch:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+      }
+
+      /* ---- progress ---- */
+      .bar-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .bar {
+        position: relative;
+        flex: 1;
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--surface-fill);
+      }
+      .bar > span {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--accent);
+        transition: width 300ms var(--ease);
+      }
+      .percent {
+        width: 40px;
+        color: var(--text-2);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .steps {
+        margin-top: 20px;
+        padding: 0 16px;
+        border-radius: 10px;
+        list-style: none;
+        box-shadow: var(--shadow-sm);
+      }
+      .steps li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+        box-shadow: inset 0 -1px 0 var(--border-soft);
+        color: var(--text-3);
+      }
+      .steps li:last-child {
+        box-shadow: none;
+      }
+      .steps li.active,
+      .steps li.done {
+        color: var(--text);
+      }
+      .steps .step-title {
+        flex: 1;
+      }
+      .steps .step-detail {
+        color: var(--text-2);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dot {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        box-shadow: inset 0 0 0 1.5px var(--border);
+      }
+      li.active .dot {
+        box-shadow: inset 0 0 0 2px var(--surface-fill);
+        border: 2px solid transparent;
+        border-top-color: var(--accent);
+        animation: spin 800ms linear infinite;
+      }
+      li.done .dot {
+        background: var(--success);
+        box-shadow: none;
+        color: var(--surface);
+      }
+      li.failed .dot {
+        background: var(--danger);
+        box-shadow: none;
+        color: white;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        li.active .dot {
+          animation: none;
+          border-color: var(--accent);
+        }
+      }
+      .log {
+        height: 16px;
+        margin-top: 12px;
+        overflow: hidden;
+        color: var(--text-3);
+        font: 12px/16px var(--font-mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .details {
+        max-height: 150px;
+        padding: 12px 16px;
+        overflow: auto;
+        border-radius: 10px;
+        background: var(--danger-weak);
+        box-shadow: inset 0 0 0 1px var(--danger-line);
+        color: var(--text-2);
+        font: 12px/16px var(--font-mono);
+        white-space: pre-wrap;
+        user-select: text;
+      }
+
+      /* ---- footer ---- */
+      footer {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        height: 68px;
+        padding: 0 40px;
+        box-shadow: inset 0 1px 0 var(--border-soft);
+        background: var(--surface-sunk);
+      }
+      footer .hint {
+        flex: 1;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar">
+      <div class="drag" data-drag><img class="mark" draggable="false" src="data:image/png;base64,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" alt="" /><span>Urakatsu Setup</span></div>
+      <button class="window-button" aria-label="Minimize" onclick="send('minimize')">
+        <svg width="14" height="14" viewBox="0 0 24 24"><path d="M5 12h14" /></svg>
+      </button>
+      <button class="window-button close" aria-label="Close" onclick="send('close')">
+        <svg width="14" height="14" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+      </button>
+    </div>
+    <main id="main"></main>
+    <footer id="footer"></footer>
+
+    <script>
+      // Urakatsu's installer page. The Rust host (packaging/launcher/src/ui.rs) calls render(state)
+      // and receives commands through window.ipc.postMessage.
+      const ICONS = {
+        check: '<path d="M20 6 9 17l-5-5" />',
+        alert: '<circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" />',
+        cpu: '<rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" />',
+        folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />',
+        shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />',
+        info: '<circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />',
+        download: '<path d="M12 15V3" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" />',
+      };
+      const icon = (name, size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${ICONS[name]}</svg>`;
+      const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const LOGO = document.querySelector(".mark").src; // the app icon, embedded once in the title bar
+      const send = (cmd, data = {}) => window.ipc.postMessage(JSON.stringify({ cmd, ...data }));
+
+      let state = /*STATE*/ null;
+      let form = { desktop: true, everything: false };
+      let primary = null;
+      let shown = null; // the screen currently in the DOM
+
+      function render(next) {
+        const sameScreen = next.screen === shown;
+        shown = next.screen;
+        state = next;
+        if (next.home) form.home = next.home;
+        const view = SCREENS[next.screen](next);
+        const main = document.getElementById("main");
+        if (sameScreen && next.screen === "progress") {
+          updateProgress(next); // keep the list in place so bars animate
+        } else {
+          main.innerHTML = `<section class="screen">${view.body}</section>`;
+        }
+        document.getElementById("footer").innerHTML = view.footer;
+        primary = view.primary || null;
+        const focus = document.querySelector("[data-autofocus]");
+        if (focus && !sameScreen) focus.focus({ focusVisible: false }); // Enter works; the ring shows once the keyboard is used
+      }
+
+      const toggle = (key, value, label, danger) =>
+        `<button class="switch ${danger ? "danger" : ""}" role="switch" aria-checked="${value}" aria-label="${esc(label)}" onclick="form.${key} = !form.${key}; this.setAttribute('aria-checked', form.${key})"></button>`;
+
+      const SCREENS = {
+        welcome: (s) => {
+          const verb = { install: "Install", update: "Update", reinstall: "Reinstall" }[s.mode || "install"];
+          const lede =
+            s.mode === "update"
+              ? `Version ${esc(s.installed.version)} is installed; this installs ${esc(s.version)}. Your projects, models and settings stay.`
+              : s.mode === "reinstall"
+                ? `Version ${esc(s.version)} is already installed. Reinstalling repairs the app; your projects, models and settings stay.`
+                : `Version ${esc(s.version)}. Detect, read, translate and typeset manga on your own computer.`;
+          const others = s.others || [];
+          return {
+            body: `
+            <div class="hero">
+              <img class="logo" src="${LOGO}" alt="" draggable="false" />
+              <div>
+                <h1>${verb} Urakatsu</h1>
+                <p class="lede">${lede}</p>
+              </div>
+            </div>
+            <div class="content">
+              <div class="card">
+                <div class="row">
+                  <div class="label"><p class="title">Install location</p><p class="detail path">${esc(s.install)}</p></div>
+                </div>
+                <div class="row">
+                  <div class="label"><p class="title">Data folder</p><p class="detail"><span class="path">${esc(form.home)}</span>. ${dataSummary(s)}</p></div>
+                  <button class="btn sm" onclick="send('pick-home')">${icon("folder", 14)} Change</button>
+                </div>
+                <div class="row">
+                  <div class="label"><p class="title">Models folder</p><p class="detail"><span class="path">${esc(s.models.path)}</span>. ${modelsSummary(s.models)}</p></div>
+                  <div class="actions">
+                    ${s.models_default ? "" : `<button class="btn sm ghost" onclick="send('reset-models')">Use default</button>`}
+                    <button class="btn sm" onclick="send('pick-models')">${icon("folder", 14)} Change</button>
+                  </div>
+                </div>
+                ${
+                  s.desktop_option === false
+                    ? ""
+                    : `<div class="row">
+                  <div class="label"><p class="title">Desktop shortcut</p></div>
+                  ${toggle("desktop", form.desktop, "Desktop shortcut")}
+                </div>`
+                }
+              </div>
+              ${
+                others.length
+                  ? `<p class="section-label">Found on this computer</p>
+                     <div class="card">${others
+                       .map(
+                         (o) => `<div class="row">
+                           <div class="label"><p class="title path">${esc(o.path)}</p><p class="detail">${homeSummary(o)}</p></div>
+                           <button class="btn sm" onclick="send('use-home', { path: ${esc(JSON.stringify(o.path))} })">Use</button>
+                         </div>`,
+                       )
+                       .join("")}</div>`
+                  : ""
+              }
+              <p class="note">${icon("cpu")} ${esc(s.gpu)}</p>
+              ${s.storage ? `<p class="note">${icon("info")} ${esc(s.storage)}</p>` : ""}
+            </div>`,
+            footer: `
+            <p class="hint">${icon("shield", 12)} Installs for your account only. No administrator rights needed.</p>
+            <button class="btn ghost" onclick="send('close')">Cancel</button>
+            <button class="btn primary" data-autofocus onclick="install()">${icon("download", 14)} ${verb}</button>`,
+            primary: install,
+          };
+        },
+        progress: (s) => ({
+          body: `
+            <div>
+              <h1>${esc(s.title)}</h1>
+              <p class="lede">${esc(s.lede)}</p>
+            </div>
+            <div class="content">
+              <div class="bar-row"><div class="bar"><span id="bar" style="width:${s.percent || 0}%"></span></div><span class="percent" id="percent">${Math.round(s.percent || 0)}%</span></div>
+              <ol class="steps" id="steps">${steps(s.steps || [])}</ol>
+              <p class="log" id="log">${esc(s.line)}</p>
+            </div>`,
+          footer: `<p class="hint">${esc(s.hint || "")}</p>${s.cancellable ? `<button class="btn ghost" onclick="send('cancel')">Cancel</button>` : ""}`,
+        }),
+        done: (s) => ({
+          body: `
+            <div class="hero">
+              <span class="status-icon success">${icon("check", 24)}</span>
+              <div><h1>${esc(s.title)}</h1><p class="lede">${esc(s.lede)}</p></div>
+            </div>
+            ${(s.rows || []).length ? `<div class="content"><div class="card">${s.rows.map((r) => `<div class="row"><div class="label"><p class="title">${esc(r.title)}</p><p class="detail ${r.path ? "path" : ""}">${esc(r.detail)}</p></div></div>`).join("")}</div></div>` : ""}`,
+          footer: s.launch
+            ? `<p class="hint"></p><button class="btn ghost" onclick="send('close')">Close</button><button class="btn primary" data-autofocus onclick="send('launch')">Open Urakatsu</button>`
+            : `<p class="hint"></p><button class="btn primary" data-autofocus onclick="send('close')">Close</button>`,
+          primary: () => send(s.launch ? "launch" : "close"),
+        }),
+        error: (s) => ({
+          body: `
+            <div class="hero">
+              <span class="status-icon danger">${icon("alert", 24)}</span>
+              <div><h1>${esc(s.title)}</h1><p class="lede">${esc(s.lede)}</p></div>
+            </div>
+            <div class="content">${s.details ? `<pre class="details">${esc(s.details)}</pre>` : ""}</div>`,
+          footer: `
+            <p class="hint"></p>
+            <button class="btn ghost" onclick="send('open-log')">Open log</button>
+            <button class="btn" onclick="send('close')">Close</button>
+            ${s.retry ? `<button class="btn primary" data-autofocus onclick="send('retry')">Try again</button>` : ""}`,
+          primary: s.retry ? () => send("retry") : null,
+        }),
+        uninstall: (s) => ({
+          body: `
+            <div class="hero">
+              <img class="logo" src="${LOGO}" alt="" draggable="false" />
+              <div><h1>Uninstall Urakatsu</h1><p class="lede">Removes the app, its shortcuts and its Python environment.</p></div>
+            </div>
+            <div class="content">
+              <div class="card">
+                <div class="row">
+                  <div class="label"><p class="title">Also delete my projects, models and settings</p><p class="detail">Everything in <span class="path">${esc(s.home)}</span>. This cannot be undone.</p></div>
+                  ${toggle("everything", form.everything, "Also delete my projects, models and settings", true)}
+                </div>
+              </div>
+            </div>`,
+          footer: `
+            <p class="hint"></p>
+            <button class="btn ghost" data-autofocus onclick="send('close')">Cancel</button>
+            <button class="btn danger" onclick="send('uninstall', { everything: form.everything })">Uninstall</button>`,
+        }),
+      };
+
+      const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+      function size(bytes) {
+        if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+        if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+        return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+      }
+      const modelCount = (m) => (m.catalog || 0) + (m.downloaded || 0);
+      function modelsSummary(m) {
+        if (!modelCount(m)) return m.exists ? "No models yet. They download here when a stage first needs one." : "New folder. Models download here when a stage first needs one.";
+        const total = m.bytes == null ? "" : `, ${size(m.bytes)}`; // sizes arrive a moment after the screen
+        return `${plural(modelCount(m), "model", "models")} found${total}. Urakatsu uses them as they are.`;
+      }
+      function dataSummary(s) {
+        const what = s.storage ? "Projects and settings" : "Projects, settings and the Python environment";
+        if (!s.data.exists) return `New folder. ${what}; plan for 10 GB or more with models.`;
+        return s.data.projects ? `${plural(s.data.projects, "project", "projects")} already here; Urakatsu keeps using them.` : `Already set up here; Urakatsu keeps using it.`;
+      }
+      function homeSummary(o) {
+        const parts = [plural(o.projects, "project", "projects")];
+        const n = modelCount(o.models);
+        parts.push(n ? `${plural(n, "model", "models")}${o.models.bytes == null ? "" : `, ${size(o.models.bytes)}`}` : "no models");
+        return parts.join(" · ");
+      }
+
+      function steps(list) {
+        return list
+          .map(
+            (step) => `
+            <li class="${step.status}">
+              <span class="dot">${step.status === "done" ? icon("check", 11) : ""}</span>
+              <span class="step-title">${esc(step.title)}</span>
+              <span class="step-detail">${esc(step.detail || "")}</span>
+            </li>`,
+          )
+          .join("");
+      }
+
+      function updateProgress(s) {
+        document.getElementById("bar").style.width = `${s.percent || 0}%`;
+        document.getElementById("percent").textContent = `${Math.round(s.percent || 0)}%`;
+        document.getElementById("steps").innerHTML = steps(s.steps || []);
+        document.getElementById("log").textContent = s.line || "";
+      }
+
+      function install() {
+        send("install", { desktop: form.desktop, home: form.home });
+      }
+
+      document.querySelector("[data-drag]").addEventListener("mousedown", (e) => e.button === 0 && send("drag"));
+      document.addEventListener("contextmenu", (e) => e.preventDefault());
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && state && state.screen !== "progress") send("close");
+        if (e.key === "Enter" && primary && document.activeElement?.tagName !== "BUTTON") primary();
+      });
+      render(state);
+      send("ready"); // the host starts an update as soon as the page can show it
+    </script>
+  </body>
+</html>

@@ -1,0 +1,86 @@
+# Every push and pull request: the Python tests on Windows, macOS and Linux, the web UI's type
+# check and build, a lint for errors only, and the installers (build.yml).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.runner }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, macos-15, ubuntu-24.04]
+        python: ["3.14"]
+        include:
+          # The oldest Python pyproject.toml allows.
+          - runner: ubuntu-24.04
+            python: "3.11"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Create the environment
+        run: uv venv --python ${{ matrix.python }}
+
+      # PyTorch's CPU builds (the CUDA ones are gigabytes); the tests need no GPU and skip
+      # what needs real model weights.
+      - name: Install Urakatsu
+        run: >
+          uv pip install -e ".[torch,onnx,dev]"
+          --index-url https://download.pytorch.org/whl/cpu
+          --extra-index-url https://pypi.org/simple
+          --index-strategy unsafe-best-match
+
+      - name: Run the tests
+        run: uv run --no-sync python -m pytest -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      # Errors only: syntax errors and undefined names.
+      - run: uvx ruff check --select E9,F63,F7,F82 urakatsu tests packaging
+
+  web:
+    name: Web UI
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Type check and build
+        run: npm run build
+
+  installers:
+    name: Installers
+    uses: ./.github/workflows/build.yml

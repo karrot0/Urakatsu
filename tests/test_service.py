@@ -1,0 +1,361 @@
+"""Service transports (native gRPC, gRPC-web bridge, JSON API) over one workspace, with fakes."""
+
+import io
+import json
+
+import grpc
+import httpx
+import pytest
+from PIL import Image
+
+from urakatsu.core.registry import registry
+from urakatsu.pipeline import Pipeline
+from urakatsu.runtimes import RuntimeManager
+from urakatsu.service import convert
+from urakatsu.service.app import build_app
+from urakatsu.service.gen import urakatsu_pb2 as pb
+from urakatsu.service.gen import urakatsu_pb2_grpc as rpc
+from urakatsu.service.grpc_web import DATA_FRAME, frame, parse_frames
+from urakatsu.service.servicer import UrakatsuServicer
+from urakatsu.service.workspace import Workspace
+
+from fakes import FakeDetector, FakeInpainter, FakeOcr, FakeTranslator, fake_config, fake_processors, page_png
+
+
+class FakeFrame:
+    def __init__(self, size):
+        self.size = size
+
+    def composite(self):
+        return Image.new("RGBA", self.size, (255, 255, 255, 255))
+
+
+class FakeRenderer:
+    def render(self, snapshot, page):
+        meta = snapshot.page(page)
+        return FakeFrame((int(meta.width), int(meta.height)))
+
+    def available_fonts(self):
+        return [{"name": "Test Sans", "faces": []}]
+
+
+@pytest.fixture
+def workspace(isolated_home):
+    fakes = (FakeDetector, FakeOcr, FakeTranslator, FakeInpainter)
+    registry.discover()
+    for cls in fakes:
+        registry.add(cls)
+    ws = Workspace(device="cpu")
+    config = fake_config()
+    ws.pipeline = Pipeline(config, RuntimeManager("cpu"), registry, fake_processors())
+    ws._renderer = FakeRenderer()
+    ws.set_config(config)
+    yield ws
+    for cls in fakes:
+        registry.remove(cls.stage, cls.id)
+
+
+@pytest.mark.asyncio
+async def test_native_grpc_roundtrip(workspace):
+    server = grpc.aio.server()
+    rpc.add_UrakatsuServicer_to_server(UrakatsuServicer(workspace), server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+    try:
+        async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
+            stub = rpc.UrakatsuStub(channel)
+            caps = await stub.GetCapabilities(pb.Empty())
+            assert caps.device.backend == "cpu" and list(caps.stages) == ["detection", "ocr", "translation", "inpainting"]
+            detector = next(p for p in caps.providers if p.id == "fake-detector")
+            assert [r.name for r in detector.runtimes] == ["torch", "onnx"]
+
+            config = await stub.GetConfig(pb.Empty())
+            config.runtimes["fake-detector"] = "onnx"
+            config = await stub.SetConfig(config)
+            assert config.runtimes["fake-detector"] == "onnx"
+            config.runtimes["fake-detector"] = "llama"
+            with pytest.raises(grpc.aio.AioRpcError) as error:
+                await stub.SetConfig(config)
+            assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+            project = await stub.CreateProject(pb.CreateProjectRequest(name="grpc"))
+            page = await stub.AddPage(pb.AddPageRequest(project_id=project.id, name="p.png", data=page_png()))
+            assert page.width == 400 and "source" in page.assets
+
+            events = [e async for e in stub.Run(pb.RunRequest(project_id=project.id, operation=pb.Operation(kind="full")))]
+            assert events[-1].kind == "completed"
+            finished = [e for e in events if e.kind == "finished" and e.stage == "translation"]
+            assert finished and finished[0].page.blocks[0].translation == "EN:テスト"
+
+            page = await stub.GetPage(pb.PageRef(project_id=project.id, page_id=page.id))
+            assert [s.done for s in page.stages] == [True, True, True, True]
+            block = page.blocks[0]
+            assert block.translation_origin == "generated" and block.region_id
+
+            updated = await stub.UpdateTextBlock(
+                pb.UpdateTextBlockRequest(project_id=project.id, page_id=page.id, layer_id=block.layer_id, translation="By hand", fields=["translation"])
+            )
+            assert updated.blocks[0].translation == "By hand" and updated.blocks[0].translation_origin == "user"
+            restored = await stub.Undo(pb.ProjectRef(project_id=project.id))
+            assert restored.pages[0].blocks[0].translation == "EN:テスト" and restored.can_redo
+
+            render = await stub.GetAsset(pb.AssetRequest(project_id=project.id, page_id=page.id, kind="render"))
+            assert render.found and render.data[:8] == b"\x89PNG\r\n\x1a\n"
+            cleanup = await stub.GetAsset(pb.AssetRequest(project_id=project.id, page_id=page.id, kind="cleanup"))
+            assert cleanup.found
+
+            with pytest.raises(grpc.aio.AioRpcError) as error:
+                await stub.GetProject(pb.ProjectRef(project_id="nope"))
+            assert error.value.code() == grpc.StatusCode.NOT_FOUND
+    finally:
+        await server.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_grpc_web_bridge_and_json_api(workspace):
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        body = frame(DATA_FRAME, pb.CreateProjectRequest(name="web").SerializeToString())
+        response = await client.post("/urakatsu.v1.Urakatsu/CreateProject", content=body, headers={"content-type": "application/grpc-web+proto"})
+        frames = parse_frames(response.content)
+        assert len(frames) == 2 and b"grpc-status:0" in frames[1][1]
+        project = pb.Project.FromString(frames[0][1])
+
+        response = await client.post(f"/api/v1/projects/{project.id}/pages", files=[("files", ("page.png", page_png(), "image/png"))])
+        assert response.status_code == 201, response.text
+        page_id = response.json()[0]["id"]
+
+        response = await client.post(f"/api/v1/projects/{project.id}/run", json={"operation": "through", "stage": "ocr"})
+        job_id = response.json()["job_id"]
+        events = []
+        async with client.stream("GET", f"/api/v1/jobs/{job_id}/events") as stream:
+            async for line in stream.aiter_lines():
+                if line.startswith("data: ") and line != "data: {}":
+                    events.append(json.loads(line[6:]))
+        assert any(e["kind"] == "finished" and e["stage"] == "ocr" for e in events)
+
+        body = frame(DATA_FRAME, pb.RunRequest(project_id=project.id, operation=pb.Operation(kind="full")).SerializeToString())
+        frames = parse_frames((await client.post("/urakatsu.v1.Urakatsu/Run", content=body)).content)
+        assert b"grpc-status:0" in frames[-1][1]
+        progress = [pb.ProgressEvent.FromString(p) for flag, p in frames if flag == DATA_FRAME]
+        assert any(e.kind == "finished" and e.stage == "inpainting" for e in progress)
+
+        page = (await client.get(f"/api/v1/projects/{project.id}/pages/{page_id}")).json()
+        layer = page["blocks"][0]["layer_id"]
+        response = await client.patch(
+            f"/api/v1/projects/{project.id}/pages/{page_id}/blocks/{layer}",
+            json={"typography": {"writing_mode": "Vertical", "color": "#ff0000", "auto_fit": True}},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["blocks"][0]["typography"]["color"] == "#ff0000ff"
+
+        response = await client.get(f"/api/v1/projects/{project.id}/pages/{page_id}/assets/render")
+        assert response.status_code == 200 and response.headers["content-type"] == "image/png"
+        assert response.headers["cache-control"] == "no-cache"
+        # A URL with the page revision names one image for good, so the browser may keep it.
+        response = await client.get(f"/api/v1/projects/{project.id}/pages/{page_id}/assets/thumbnail?v=7")
+        assert response.status_code == 200 and response.headers["cache-control"] == "private, max-age=31536000, immutable"
+
+        assert (await client.get("/api/v1/config")).json()["detection"]["model"] == "fake-detector"
+        proto = convert.config_to_proto(workspace.get_config())
+        assert convert.config_from_proto(proto, workspace.get_config()) == workspace.get_config()
+        lossless = workspace.get_config().model_copy(deep=True)
+        lossless.storage.lossless_pages = True
+        assert convert.config_from_proto(convert.config_to_proto(lossless), workspace.get_config()).storage.lossless_pages
+
+        response = await client.post("/api/v1/process?operation=full", files=[("file", ("page.png", page_png(), "image/png"))])
+        assert response.status_code == 200 and response.headers["content-type"] == "image/png"
+
+
+def test_layer_operations(workspace):
+    project = workspace.create_project("layers").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    for bounds in ({"x": 10, "y": 10, "width": 40, "height": 20}, {"x": 60, "y": 60, "width": 40, "height": 20}):
+        workspace.create_text_block(project, page, bounds)
+    first, second = [block.layer_id for block in workspace.page(project, page).blocks]
+
+    view = workspace.set_layer_visibility(project, page, [first], False, 0.25)
+    block = next(b for b in view.blocks if b.layer_id == first)
+    assert (block.visible, block.opacity) == (False, 0.25)
+
+    view = workspace.move_layer(project, page, first, 1)
+    assert [b.layer_id for b in view.blocks] == [second, first]
+
+    paint = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+    paint.putpixel((5, 5), (255, 0, 0, 255))
+    buffer = io.BytesIO()
+    paint.save(buffer, format="PNG")
+    view = workspace.set_raster_layer(project, page, "paint", None, buffer.getvalue())
+    [layer] = [r for r in view.raster_layers if r.kind == "paint"]
+    data, media_type, *_ = workspace.asset(project, page, f"layer:{layer.id}")
+    assert media_type == "image/png" and Image.open(io.BytesIO(data)).getpixel((5, 5)) == (255, 0, 0, 255)
+    # A second stroke replaces the same layer rather than adding one.
+    view = workspace.set_raster_layer(project, page, "paint", None, buffer.getvalue())
+    assert [r.id for r in view.raster_layers if r.kind == "paint"] == [layer.id]
+    with pytest.raises(ValueError):
+        workspace.set_raster_layer(project, page, "paint", None, page_png(10, 10))
+
+    view = workspace.delete_layer(project, page, layer.id)
+    assert not view.raster_layers
+    view = workspace.delete_layer(project, page, second)
+    assert [b.layer_id for b in view.blocks] == [first]
+
+
+def test_layer_saves_store_full_pngs_as_sent_and_paste_patches(workspace):
+    project = workspace.create_project("patches").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+
+    def png(image):
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    full = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+    full.putpixel((10, 10), (255, 0, 0, 255))
+    full.putpixel((200, 100), (0, 0, 255, 255))
+    view = workspace.set_raster_layer(project, page, "paint", None, png(full))
+    [layer] = [r.id for r in view.raster_layers]
+    # An RGBA PNG of the page's size is stored byte for byte, not re-encoded.
+    assert workspace.asset(project, page, f"layer:{layer}")[0] == png(full)
+
+    # A patch replaces its rectangle, cleared pixels included (the eraser), and leaves the rest.
+    patch = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+    patch.putpixel((5, 5), (0, 255, 0, 255))
+    workspace.set_raster_layer(project, page, "paint", layer, png(patch), at=(195, 95))
+    stored = Image.open(io.BytesIO(workspace.asset(project, page, f"layer:{layer}")[0]))
+    assert stored.getpixel((10, 10)) == (255, 0, 0, 255)
+    assert stored.getpixel((200, 100)) == (0, 255, 0, 255)
+    assert stored.getpixel((201, 101))[3] == 0
+    with pytest.raises(ValueError):
+        workspace.set_raster_layer(project, page, "paint", layer, png(patch), at=(390, 0))
+
+
+def test_edits_mark_the_project_updated_without_writing_it_each_time(workspace, monkeypatch):
+    from urakatsu.pipeline import projects
+
+    project = workspace.create_project("touch").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    written = workspace.store._read_meta(project)["updated_at"]
+    writes = []
+    write_text = projects.files.write_text
+    monkeypatch.setattr(projects.files, "write_text", lambda path, text: (writes.append(path.name), write_text(path, text)))
+    for x in range(3):
+        workspace.create_text_block(project, page, {"x": 10 + x, "y": 10, "width": 40, "height": 20})
+    assert "project.json" not in writes  # the scene state is written per edit, project.json is not
+    assert workspace.project_view(project).updated_at > written
+    assert next(s for s in workspace.store.list() if s.id == project).updated_at > written
+    monkeypatch.undo()
+    workspace.store.flush()
+    assert workspace.store._read_meta(project)["updated_at"] > written
+
+
+def test_a_stroke_changes_only_its_layers_asset_version(workspace):
+    project = workspace.create_project("versions").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+
+    def stroke(x):
+        paint = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+        paint.putpixel((x, 5), (255, 0, 0, 255))
+        buffer = io.BytesIO()
+        paint.save(buffer, format="PNG")
+        return workspace.set_raster_layer(project, page, "paint", None, buffer.getvalue())
+
+    first = stroke(5)
+    [layer] = [r.id for r in first.raster_layers]
+    second = stroke(6)
+    before, after = first.asset_versions, second.asset_versions
+    # The client keys its asset cache on these: one stroke must refetch its layer and nothing else.
+    assert after[f"layer:{layer}"] != before[f"layer:{layer}"]
+    assert after["source"] == before["source"] and after["thumbnail"] == before["source"]
+    assert after["render"] == str(second.revision) != before["render"]
+    # Undo brings back the earlier pixels, and with them the earlier version.
+    workspace.undo(project)
+    assert workspace.page(project, page).asset_versions[f"layer:{layer}"] == before[f"layer:{layer}"]
+    assert convert.page_to_proto(second).asset_versions[f"layer:{layer}"] == after[f"layer:{layer}"]
+
+
+def test_chapter_export_packs_rendered_pages_in_chapter_order(workspace):
+    import zipfile
+
+    from urakatsu.pipeline.projects import DEFAULT_CHAPTER_ID
+
+    project = workspace.create_project("My: Series").id
+    first = workspace.add_page(project, "b?.jpg", page_png()).id
+    workspace.add_page(project, "a.png", page_png(), index=0)
+    data, name = workspace.export_chapter(project, DEFAULT_CHAPTER_ID, "cbz")
+    assert name == "My_ Series - Chapter 1.cbz"
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        entries = archive.infolist()
+        assert [e.filename for e in entries] == ["0001_a.png", "0002_b_.png"]
+        assert all(e.compress_type == zipfile.ZIP_STORED for e in entries)
+        assert archive.read(entries[1]) == workspace.render(project, first)
+    with pytest.raises(ValueError):
+        workspace.export_chapter(project, DEFAULT_CHAPTER_ID, "pdf")
+    empty = workspace.create_chapter(project, "Empty").chapters[-1].id
+    with pytest.raises(ValueError):
+        workspace.export_chapter(project, empty, "zip")
+
+
+def test_editing_a_generated_style_keeps_only_what_the_user_set():
+    from urakatsu.scene import components as c
+    from urakatsu.service.workspace import _typography
+
+    generated = c.Typography(
+        origin=c.generated(c.Generation(producer="detector")),
+        color=(255, 255, 255, 255),
+        writing_mode=c.WritingMode.VERTICAL,
+    )
+    recolored = _typography({"color": "#000000ff"}, generated)
+    assert isinstance(recolored.origin, c.UserOrigin)
+    assert recolored.color == (0, 0, 0, 255)
+    assert recolored.writing_mode is None  # the detector's hint goes back to automatic
+    assert _typography({"writing_mode": "Vertical"}, generated).writing_mode == c.WritingMode.VERTICAL
+    authored = _typography({"writing_mode": "Vertical"}, None)
+    assert _typography({"color": "#ff0000ff"}, authored).writing_mode == c.WritingMode.VERTICAL  # the user's own choice stays
+
+
+@pytest.mark.asyncio
+async def test_grpc_typography_field_mask_merges_only_named_properties(workspace):
+    from urakatsu.scene import components as c
+
+    servicer = UrakatsuServicer(workspace)
+    project = workspace.create_project("p").id
+    page = workspace.add_page(project, "1.png", page_png()).id
+    layer = workspace.create_text_block(project, page, {"x": 1, "y": 1, "width": 40, "height": 20}).blocks[0].layer_id
+    workspace.update_text_block(project, page, layer, {"typography": {"preferred_font": "Comic", "writing_mode": "Vertical"}})
+    request = pb.UpdateTextBlockRequest(
+        project_id=project,
+        page_id=page,
+        layer_id=layer,
+        typography=pb.Typography(color="#123456ff", auto_fit=True),  # every other property blank
+        fields=["typography", "typography.color"],
+    )
+    await servicer.UpdateTextBlock(request, None)
+    style = workspace.session(project).snapshot().component(layer, c.Typography)
+    assert style.color == (0x12, 0x34, 0x56, 255)
+    assert style.preferred_font == "Comic" and style.writing_mode == c.WritingMode.VERTICAL
+
+
+def test_frame_edit_clears_a_stored_angle_so_the_frame_sets_the_rotation(workspace):
+    import math
+
+    from urakatsu.renderer.bubble import geometry_frame
+    from urakatsu.scene import components as c
+
+    project = workspace.create_project("p").id
+    page = workspace.add_page(project, "1.png", page_png()).id
+    layer = workspace.create_text_block(project, page, {"x": 10, "y": 10, "width": 40, "height": 20}).blocks[0].layer_id
+    session = workspace.session(project)
+    edit = session.snapshot().edit()
+    edit.set(layer, c.TextLayout(kind=c.TextLayoutKind.PARAGRAPH, angle_degrees=0.0))
+    session.commit(edit.finish())
+    # The box turned 30 degrees about its center (30, 20).
+    turn = math.radians(30)
+    corners = [(-20, -10), (20, -10), (20, 10), (-20, 10)]
+    frame = [{"x": 30 + x * math.cos(turn) - y * math.sin(turn), "y": 20 + x * math.sin(turn) + y * math.cos(turn)} for x, y in corners]
+    workspace.update_text_block(project, page, layer, {"frame": frame})
+    snapshot = session.snapshot()
+    layout = snapshot.component(layer, c.TextLayout)
+    assert layout.angle_degrees is None and isinstance(layout.origin, c.UserOrigin)
+    placed = geometry_frame(snapshot.component(layer, c.Geometry), layout.angle_degrees)
+    assert round(placed.angle_degrees) == 30 and round(placed.bounds.width) == 40

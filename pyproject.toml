@@ -1,0 +1,65 @@
+[project]
+name = "urakatsu"
+version = "0.1.0"
+description = "Modular, plug-and-play manga translation pipeline (detection, OCR, translation, inpainting, rendering) with gRPC and HTTP service modes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.1",
+    "opencv-python-headless>=4.9",
+    "pydantic>=2.6",
+    "httpx>=0.27",
+    "grpcio>=1.60",
+    "grpcio-tools>=1.60",
+    "protobuf>=4.25",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "tomli-w>=1.0",
+    "scipy>=1.11",
+    "skia-python>=124.0",
+    "uharfbuzz>=0.40",
+    "fonttools>=4.47",
+    "python-bidi>=0.6",
+    "uniseg>=0.8",
+    "pyphen>=0.15",
+    "jieba>=0.42",
+    "regex>=2024.1",
+    "jinja2>=3.1",
+    "psutil>=7.0",
+    "nvidia-ml-py>=13.0",
+]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.31"]
+onnx-gpu = ["onnxruntime-gpu>=1.31"]
+onnx-directml = ["onnxruntime-directml>=1.24"]  # DirectML, any GPU on Windows (AMD, Intel)
+torch = ["torch>=2.14", "torchvision>=0.29.0a0", "transformers>=5.20", "safetensors>=0.8", "tokenizers>=0.23", "rfdetr>=1.11"]
+tesseract = ["pytesseract>=0.3.10"]
+# The desktop app (packaging/launcher installs it with uv). Linux uses pywebview's Qt backend,
+# which installs from wheels; its GTK backend needs PyGObject built against system headers.
+desktop = ["pywebview>=6.2; sys_platform != 'linux'", "pywebview[qt]>=6.2; sys_platform == 'linux'"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+urakatsu = "urakatsu.service.cli:main"
+
+[project.entry-points."urakatsu.providers"]
+
+[project.entry-points."urakatsu.source_systems"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["urakatsu*"]
+
+[tool.setuptools.package-data]
+urakatsu = ["service/proto/**/*.proto", "service/ui/**/*", "desktop/*.html", "desktop/*.ico", "desktop/*.png", "sources/mana/*.js"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

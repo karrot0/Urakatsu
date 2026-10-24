@@ -1,0 +1,76 @@
+# Builds the installer for Windows, macOS and Linux (packaging/build.py) and uploads each as an
+# artifact named installer-<system>. CI runs it on every change; Release publishes its output.
+
+name: Build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  installer:
+    name: Installer (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: windows
+            runner: windows-2025
+          - system: macos
+            runner: macos-15
+          # The oldest supported Ubuntu: the binary then runs on any newer glibc.
+          - system: linux
+            runner: ubuntu-22.04
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install WebKitGTK and GTK
+        if: matrix.system == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packaging/launcher
+
+      - name: Install the web UI's dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build the installer
+        run: uv run --no-project --python 3.14 packaging/build.py
+
+      - name: Test the launcher
+        # The wheel build.py embedded, relative to the launcher (cargo runs build.rs there).
+        run: |
+          export URAKATSU_WHEEL="../../build/desktop/wheel/$(ls build/desktop/wheel)"
+          cargo test --release --locked --manifest-path packaging/launcher/Cargo.toml
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ matrix.system }}
+          path: dist/*
+          if-no-files-found: error

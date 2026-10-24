@@ -1,0 +1,456 @@
+syntax = "proto3";
+
+package urakatsu.v1;
+
+// Urakatsu service: one contract for native gRPC, gRPC-web (browser) and the JSON mirror.
+// Documents are scenes; pages are presented as views (text blocks, bubbles, layers).
+service Urakatsu {
+  rpc GetCapabilities(Empty) returns (Capabilities);
+  rpc GetConfig(Empty) returns (Config);
+  rpc SetConfig(Config) returns (Config);
+  rpc ListTranslationModels(Empty) returns (TranslationModelList);
+
+  rpc ListProjects(Empty) returns (ProjectList);
+  rpc CreateProject(CreateProjectRequest) returns (Project);
+  rpc GetProject(ProjectRef) returns (Project);
+  rpc RenameProject(RenameProjectRequest) returns (Project);
+  rpc DeleteProject(ProjectRef) returns (Empty);
+  rpc Undo(ProjectRef) returns (Project);
+  rpc Redo(ProjectRef) returns (Project);
+
+  // Projects are organized as chapters of pages; each call commits one undoable revision.
+  rpc CreateChapter(CreateChapterRequest) returns (Project);
+  rpc RenameChapter(RenameChapterRequest) returns (Project);
+  rpc DeleteChapter(ChapterRef) returns (Project);
+  rpc ArrangeProject(ArrangeProjectRequest) returns (Project);
+
+  rpc AddPage(AddPageRequest) returns (Page);
+  rpc RemovePage(PageRef) returns (Project);
+  rpc GetPage(PageRef) returns (Page);
+  rpc GetAsset(AssetRequest) returns (Asset);
+
+  rpc UpdateTextBlock(UpdateTextBlockRequest) returns (Page);
+  rpc CreateTextBlock(CreateTextBlockRequest) returns (Page);
+  rpc DeleteTextBlock(TextBlockRef) returns (Page);
+
+  // Layers of any kind (text or raster), as the layers panel and paint tools edit them.
+  rpc SetLayerVisibility(LayerVisibilityRequest) returns (Page);
+  rpc MoveLayer(MoveLayerRequest) returns (Page);
+  rpc SetRasterLayer(SetRasterLayerRequest) returns (Page);
+  rpc DeleteLayer(TextBlockRef) returns (Page);
+
+  rpc Run(RunRequest) returns (stream ProgressEvent);
+  rpc Stop(JobRef) returns (Empty);
+  rpc ListJobs(Empty) returns (JobList);
+
+  rpc ListFonts(Empty) returns (FontList);
+}
+
+message Empty {}
+
+// ---- capabilities -------------------------------------------------------------
+
+message Device {
+  int32 index = 1;
+  string name = 2;
+  string description = 3;
+  string backend = 4;
+  string device_type = 5;
+  int64 memory_total = 6;
+  int64 memory_free = 7;
+}
+
+message RuntimeOption {
+  string name = 1;
+  bool available = 2;
+  string reason = 3;
+}
+
+message ProviderInfo {
+  string id = 1;
+  string name = 2;
+  string stage = 3;
+  string description = 4;
+  repeated RuntimeOption runtimes = 5;  // runtimes this provider can run on
+  string default_runtime = 6;
+  bool available = 7;
+  string unavailable_reason = 8;
+  repeated string weights = 9;
+  string settings_schema_json = 10;
+  string defaults_json = 11;
+  bool prompted = 12;                   // inpainting: generative fill follows a prompt
+  bool instructed = 13;                 // ... written as an edit instruction, not a description
+}
+
+message Capabilities {
+  string version = 1;
+  Device device = 2;
+  repeated Device devices = 3;
+  string platform = 4;
+  string runtimes_json = 5;
+  repeated ProviderInfo providers = 6;
+  repeated string stages = 7;
+  string store_root = 8;
+  int64 store_bytes = 9;
+  map<string, string> loaded = 10;  // stage -> provider id currently resident
+  repeated Language languages = 11; // translation target languages
+}
+
+message Language {
+  string tag = 1;
+  string name = 2;
+}
+
+// ---- configuration --------------------------------------------------------------
+
+message ModelSelection {
+  string provider = 1;
+  string model = 2;
+  string quantization = 3;
+  bool vision = 4;
+  bool reasoning = 5;
+}
+
+message Config {
+  string device = 1;
+  string detection = 2;
+  string ocr = 3;
+  string inpainting = 4;
+  ModelSelection translation = 5;
+  string generation_json = 6;       // GenerationConfig
+  string target_language = 7;
+  string instructions = 8;
+  map<string, string> processor_json = 9;   // vision model id -> settings JSON
+  map<string, string> providers_json = 10;  // translation provider id -> settings JSON
+  map<string, string> runtimes = 11;        // provider id -> runtime name
+  repeated string font_families = 12;
+  string fill = 13;                         // generative fill model; empty uses inpainting
+  bool lossless_pages = 14;                 // StorageConfig.lossless_pages
+}
+
+message TranslationModel {
+  string provider = 1;
+  string provider_name = 2;
+  string model = 3;
+  string name = 4;
+  repeated Quantization quantizations = 5;
+  bool vision = 6;
+  bool reasoning = 7;
+}
+
+message Quantization {
+  string id = 1;
+  string name = 2;
+  bool downloaded = 3;
+}
+
+message TranslationModelList {
+  repeated TranslationModel models = 1;
+}
+
+// ---- documents -------------------------------------------------------------------
+
+message Point {
+  double x = 1;
+  double y = 2;
+}
+
+message Box {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message Typography {
+  string preferred_font = 1;
+  optional int32 font_weight = 2;
+  string font_style = 3;            // normal | italic | oblique | "" (auto)
+  optional double size = 4;
+  bool auto_fit = 5;
+  optional string color = 6;        // #rrggbbaa
+  optional string stroke_color = 7;
+  optional double stroke_width = 8;
+  string alignment = 9;             // Start | Center | End | Justify | ""
+  string writing_mode = 10;         // Horizontal | Vertical | ""
+  bool authored = 11;               // output only: set by the user, not a pipeline guess (a guessed writing mode is only a hint)
+}
+
+// A text layer with its semantic content and analysis region (document view).
+message TextBlock {
+  string layer_id = 1;
+  string content_id = 2;
+  string region_id = 3;             // recognized-from analysis region, if any
+  string balloon_id = 4;            // flows-in bubble region, if any
+  string layout_kind = 5;           // point | paragraph
+  repeated Point frame = 6;         // presentation frame polygon
+  Box bounds = 7;
+  double angle = 8;
+  string source_text = 9;
+  string source_origin = 10;        // user | generated
+  string source_language = 11;
+  string translation = 12;
+  string translation_origin = 13;
+  string translation_language = 14;
+  string ocr_direction = 15;        // Auto | Horizontal | Vertical
+  Typography typography = 16;
+  bool visible = 17;
+  string role = 18;
+  double opacity = 19;
+}
+
+message Region {
+  string id = 1;
+  string kind = 2;                  // dev.koharu.region.text | bubble | panel
+  string label = 3;
+  repeated Point polygon = 4;
+  Box bounds = 5;
+  double confidence = 6;
+}
+
+message RasterLayer {
+  string id = 1;
+  string name = 2;
+  string kind = 3;                  // cleanup | paint
+  bool visible = 4;
+  double opacity = 5;
+}
+
+message LayerVisibilityRequest {
+  string project_id = 1;
+  string page_id = 2;
+  repeated string layer_ids = 3;
+  optional bool visible = 4;
+  optional double opacity = 5;      // 0..1
+}
+
+// Moves a layer among its siblings; positive delta draws it later (on top).
+message MoveLayerRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string layer_id = 3;
+  int32 delta = 4;
+}
+
+// Replaces a raster layer's pixels with a page-sized PNG. Without layer_id the
+// last layer of `kind` is used, and a paint layer is created on first use.
+message SetRasterLayerRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string kind = 3;                  // cleanup | paint
+  string layer_id = 4;
+  bytes png = 5;
+  // With `patch`, `png` covers only the rectangle at (x, y) and replaces the layer's pixels there
+  // (copied, not blended: an eraser stroke clears pixels). Without it, `png` is the whole layer.
+  bool patch = 6;
+  int32 x = 7;
+  int32 y = 8;
+}
+
+message StageStatus {
+  string stage = 1;
+  bool done = 2;
+  string model = 3;
+}
+
+message Page {
+  string id = 1;
+  string name = 2;
+  int32 width = 3;
+  int32 height = 4;
+  repeated TextBlock blocks = 5;
+  repeated Region regions = 6;
+  repeated RasterLayer raster_layers = 7;
+  repeated string assets = 8;       // available views: source, cleanup, render, mask, thumbnail
+  repeated StageStatus stages = 9;
+  int64 revision = 10;
+  // Cache key per asset kind (source, thumbnail, cleanup, layer:<id>, render): a content address,
+  // so an edit refetches only the assets it changed. The render follows the revision.
+  map<string, string> asset_versions = 11;
+}
+
+message Project {
+  string id = 1;
+  string name = 2;
+  double created_at = 3;
+  double updated_at = 4;
+  int64 revision = 5;
+  repeated Page pages = 6;
+  bool can_undo = 7;
+  bool can_redo = 8;
+  // In order; page_ids reference `pages`, whose order is the chapters' pages flattened.
+  repeated Chapter chapters = 9;
+}
+
+message Chapter {
+  string id = 1;
+  string name = 2;
+  repeated string page_ids = 3;
+}
+
+message ProjectSummary {
+  string id = 1;
+  string name = 2;
+  int32 pages = 3;
+  double created_at = 4;
+  double updated_at = 5;
+  int32 chapters = 6;
+}
+
+message ProjectList {
+  repeated ProjectSummary projects = 1;
+}
+
+message CreateProjectRequest {
+  string name = 1;
+}
+
+message RenameProjectRequest {
+  string project_id = 1;
+  string name = 2;
+}
+
+message ProjectRef {
+  string project_id = 1;
+}
+
+message PageRef {
+  string project_id = 1;
+  string page_id = 2;
+}
+
+message CreateChapterRequest {
+  string project_id = 1;
+  string name = 2;
+  optional int32 index = 3;
+}
+
+message RenameChapterRequest {
+  string project_id = 1;
+  string chapter_id = 2;
+  string name = 3;
+}
+
+message ChapterRef {
+  string project_id = 1;
+  string chapter_id = 2;
+}
+
+message ChapterLayout {
+  string chapter_id = 1;
+  repeated string page_ids = 2;
+}
+
+// The whole new structure: every chapter exactly once, every page exactly once.
+message ArrangeProjectRequest {
+  string project_id = 1;
+  repeated ChapterLayout chapters = 2;
+}
+
+message TextBlockRef {
+  string project_id = 1;
+  string page_id = 2;
+  string layer_id = 3;
+}
+
+message AddPageRequest {
+  string project_id = 1;
+  string name = 2;
+  bytes data = 3;
+  // Position within the chapter; default is its end.
+  optional int32 index = 4;
+  // Target chapter; default is the last chapter.
+  string chapter_id = 5;
+}
+
+message AssetRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string kind = 3;                  // source | cleanup | render | mask | thumbnail
+}
+
+message Asset {
+  bytes data = 1;
+  string content_type = 2;
+  int32 width = 3;
+  int32 height = 4;
+  bool found = 5;
+}
+
+message UpdateTextBlockRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string layer_id = 3;
+  optional string source_text = 4;
+  optional string translation = 5;
+  Typography typography = 6;        // applied when "typography" is listed in fields
+  repeated Point frame = 7;         // applied when "frame" is listed in fields
+  optional bool visible = 8;
+  repeated string fields = 9;       // which of: source_text, translation, typography, frame, visible
+}
+
+message CreateTextBlockRequest {
+  string project_id = 1;
+  string page_id = 2;
+  Box bounds = 3;
+}
+
+// ---- processing -------------------------------------------------------------------
+
+message Operation {
+  string kind = 1;                  // full | through | only | stages
+  string stage = 2;
+  repeated string stages = 3;
+}
+
+message RunRequest {
+  string project_id = 1;
+  repeated string page_ids = 2;     // empty -> whole project
+  Operation operation = 3;
+  optional Box region = 4;          // limits work to part of one page
+  repeated string entity_ids = 5;   // OCR / translation only
+  bytes inpainting_mask = 6;        // user painted mask (PNG, L) for one page
+  optional string fill_prompt = 7;  // set: generative fill of inpainting_mask by the fill model (empty removes)
+}
+
+message ProgressEvent {
+  string job_id = 1;
+  string kind = 2;                  // started | loading | running | finished | skipped | failed | stopped | completed
+  string page_id = 3;
+  string stage = 4;
+  string model = 5;
+  double elapsed_ms = 6;
+  string message = 7;
+  int32 completed = 8;
+  int32 total = 9;
+  repeated string pages = 10;
+  repeated string stages = 11;
+  Page page = 12;                   // page view after a committed stage
+}
+
+message JobRef {
+  string job_id = 1;
+}
+
+message Job {
+  string id = 1;
+  string project_id = 2;
+  string status = 3;
+  int32 completed = 4;
+  int32 total = 5;
+  double started_at = 6;
+  string error = 7;
+}
+
+message JobList {
+  repeated Job jobs = 1;
+}
+
+message FontFamily {
+  string name = 1;
+  repeated string faces = 2;
+}
+
+message FontList {
+  repeated FontFamily families = 1;
+}

@@ -1,0 +1,156 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./styles/theme.css";
+@import "./styles/base.css" layer(base);
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn's roles, derived from the Urakatsu tokens (styles/theme.css). They are defined
+   once: the tokens behind them change with .dark and the theme attributes on <html>. */
+:root {
+  --background: var(--surface);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface-over);
+  --popover-foreground: var(--text);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: var(--surface-fill);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-sunk);
+  --muted-foreground: var(--text-2);
+  --accent: var(--hover);
+  --accent-foreground: var(--text);
+  --destructive: var(--danger);
+  --input: var(--border);
+  --ring: var(--brand);
+  --chart-1: var(--brand);
+  --chart-2: var(--success);
+  --chart-3: var(--warning);
+  --chart-4: var(--danger);
+  --chart-5: var(--info);
+  --radius: 10px;
+  --sidebar: var(--surface-sunk);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--on-brand);
+  --sidebar-accent: var(--hover);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border-soft);
+  --sidebar-ring: var(--brand);
+}
+
+@theme inline {
+  --font-sans: var(--font);
+  --font-heading: var(--font);
+  --font-mono: var(--font-code);
+
+  /* shadcn */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Urakatsu tokens as utilities: bg-surface-sunk, text-fg-2, border-line-soft, bg-brand-weak ... */
+  --color-surface: var(--surface);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-surface-fill: var(--surface-fill);
+  --color-surface-over: var(--surface-over);
+  --color-canvas: var(--canvas);
+  --color-fg: var(--text);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-fg-disabled: var(--text-dis);
+  --color-icon: var(--icon);
+  --color-icon-2: var(--icon-2);
+  --color-line: var(--border);
+  --color-line-soft: var(--border-soft);
+  --color-line-strong: var(--border-strong);
+  --color-hover: var(--hover);
+  --color-hover-faint: var(--hover-faint);
+  --color-press: var(--press);
+  --color-selected: var(--selected);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-press: var(--brand-press);
+  --color-brand-weak: var(--brand-weak);
+  --color-brand-line: var(--brand-line);
+  --color-on-brand: var(--on-brand);
+  --color-success: var(--success);
+  --color-success-weak: var(--success-weak);
+  --color-success-line: var(--success-line);
+  --color-warning: var(--warning);
+  --color-warning-weak: var(--warning-weak);
+  --color-warning-line: var(--warning-line);
+  --color-danger: var(--danger);
+  --color-danger-weak: var(--danger-weak);
+  --color-danger-line: var(--danger-line);
+  --color-info: var(--info);
+  --color-info-weak: var(--info-weak);
+  --color-info-line: var(--info-line);
+
+  /* Radius by component class: pills, controls, cards, modals. */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-pill: var(--r-pill);
+  --radius-control: var(--r-control);
+  --radius-card: var(--r-card);
+  --radius-modal: var(--r-modal);
+
+  /* Elevation: two faint layers plus a hairline, never a border and a shadow together. */
+  --shadow-raised: var(--shadow-sm);
+  --shadow-floating: var(--shadow-md);
+  --shadow-overlay: var(--shadow-lg);
+  --shadow-dialog: var(--shadow-modal);
+  --shadow-focus: var(--focus-ring);
+  --shadow-invalid: var(--invalid-ring);
+
+  --ease-settle: cubic-bezier(0.2, 1, 0.2, 1);
+  --spacing-bar: var(--bar);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
