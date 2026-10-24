@@ -656,10 +656,9 @@ def test_rich_text_runs_get_their_own_face_colour_and_bars():
 def test_vertical_rich_text_underline_is_a_sideline():
     from urakatsu.renderer.text_renderer import DecorationRun, TextRenderer, TextStyleRun
 
-    try:
-        fonts = Fonts()
-        fonts.resolve("Yu Gothic", None, None, [], "日本語", "ja")
-    except Exception:  # pragma: no cover - depends on installed fonts
+    # resolve() falls back rather than failing, so look for a face that covers the text.
+    fonts = Fonts()
+    if not any(font.covers("日本語") for font in fonts.resolve("Yu Gothic", None, None, [], "日本語", "ja")):
         pytest.skip("no Japanese font")
     text = "日本語の文章"
     styles = [TextStyleRun(start=0, end=3, underline=True), TextStyleRun(start=3, end=6, strikethrough=True)]
@@ -676,9 +675,7 @@ def test_rich_text_runs_take_their_own_family_and_relative_size():
     from urakatsu.renderer.text_renderer import GlyphRun, TextRenderer, TextStyleRun
 
     fonts = Fonts()
-    try:
-        fonts.resolve("Times New Roman", None, None, [], "A")
-    except Exception:  # pragma: no cover - depends on installed fonts
+    if not fonts.system.family_exists("Times New Roman"):
         pytest.skip("no Times New Roman")
     text = "small\nBIG\nserif"
     styles = [TextStyleRun(start=6, end=9, scale=2.0), TextStyleRun(start=10, end=15, font="Times New Roman")]

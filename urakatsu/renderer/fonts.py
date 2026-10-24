@@ -311,6 +311,8 @@ def _scan_font_file(path: Path) -> list[SystemFace]:
     index_count = len(tables)
     for index, tt in enumerate(tables):
         try:
+            if not any(table in tt for table in ("glyf", "CFF ", "CFF2")):
+                continue
             names = [n for n in (_name(tt, 16), _name(tt, 1)) if n]
             family_names = list(dict.fromkeys(names))
             if not family_names:
