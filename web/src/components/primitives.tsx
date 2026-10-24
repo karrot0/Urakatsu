@@ -189,6 +189,7 @@ export function NumberField({
   disabled,
   stepper = true,
   suffix,
+  format,
 }: {
   value: number | null;
   onCommit: (value: number | null) => void;
@@ -200,6 +201,8 @@ export function NumberField({
   disabled?: boolean;
   stepper?: boolean;
   suffix?: ReactNode;
+  /** How the number is shown, e.g. { useGrouping: false } for a port. */
+  format?: Intl.NumberFormatOptions;
 }) {
   const [draft, setDraft] = useState<number | null>(value);
   useEffect(() => setDraft(value), [value]);
@@ -213,6 +216,7 @@ export function NumberField({
       max={max}
       step={step}
       disabled={disabled}
+      format={format}
       onValueChange={(next) => setDraft(next)}
       onValueCommitted={(next) => onCommit(next)}
     >

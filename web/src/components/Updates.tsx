@@ -9,6 +9,7 @@ import { formatBytes } from "../api/catalog";
 import { describeError } from "../api/client";
 import { releaseName, updates, type Channel, type UpdateStatus } from "../api/updates";
 import { formatDate, formatTimestamp } from "../format";
+import { NetworkServerSettings } from "./NetworkServer";
 import { useWorkspace } from "../state/workspace";
 import { PreferencePage, PreferenceRow, PreferenceSection } from "./SettingsPage";
 import { Segmented } from "./ui";
@@ -146,7 +147,7 @@ export function AboutSettings() {
   const working = status.install.status === "downloading" || status.install.status === "installing";
 
   return (
-    <PreferencePage title="About" description="Which Urakatsu this is, and how it updates.">
+    <PreferencePage title="About" description="Which Urakatsu this is, how it updates, and who else can reach it.">
       <PreferenceSection title="This version">
         <PreferenceRow title="Version" description={build}>
           <span className="tabular-nums">{current.version}</span>
@@ -208,6 +209,8 @@ export function AboutSettings() {
           </PreferenceRow>
         )}
       </PreferenceSection>
+
+      <NetworkServerSettings />
     </PreferencePage>
   );
 }

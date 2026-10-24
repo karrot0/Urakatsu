@@ -43,6 +43,25 @@ WebKitGTK 4.1 (`libwebkit2gtk-4.1-0`), which desktop installs of current distrib
   or the CPU build (which runs on Apple silicon's GPU through MPS). ONNX Runtime comes with
   CUDA for NVIDIA and with DirectML for any other GPU on Windows.
 
+## Network server
+
+The app window talks to a private server on `127.0.0.1`. Settings, About, Network server shares
+the same workspace on another address too, like LM Studio's local server
+(`urakatsu/service/network.py`): for a phone or another computer, or a script calling the API.
+
+- **Reachable from:** this computer only (`127.0.0.1`), or the local network (`0.0.0.0`).
+  Settings lists every address it answers on.
+- **Port:** 8686 by default.
+- **API key:** when required, API and gRPC-web calls send `Authorization: Bearer <key>` or
+  `X-API-Key: <key>`. A browser opens `http://<address>:<port>/?key=<key>` once; the key is
+  kept in a cookie.
+- **CORS origins:** the web pages allowed to call it from a browser; none by default, `*` for any.
+- **Share the workspace UI:** off shares the API only (`/api/v1`, docs at `/api/docs`).
+- **Start with Urakatsu** starts it whenever the app (or `urakatsu serve`) starts.
+
+The settings live in `URAKATSU_HOME/server.json`, and can only be changed from this computer:
+the network server never serves `/api/v1/server`.
+
 ## Command-line options
 
 | Option | Effect |

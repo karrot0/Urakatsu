@@ -25,6 +25,7 @@ from .catalog_api import catalog_router
 from .gen import urakatsu_pb2_grpc as rpc
 from .grpc_web import GrpcWebBridge
 from .http_api import api_router
+from .network import NetworkServer, network_router
 from .servicer import UrakatsuServicer
 from .sources_api import sources_router
 from .updates_api import updates_router
@@ -62,6 +63,9 @@ def build_app(
 
     bridge = GrpcWebBridge(servicer)
     app.add_api_route(bridge.route, bridge.handle, methods=["POST", "OPTIONS"], include_in_schema=False)
+    # The workspace shared on another address (Settings > About), started from serve().
+    app.state.network = NetworkServer(app, grpc_web_prefix=bridge.route.split("{")[0])
+    app.include_router(network_router(app.state.network), prefix="/api/v1")
 
     @app.get("/api/health", include_in_schema=False)
     def health():
@@ -149,6 +153,8 @@ async def serve(
                 signal.signal(sig, _request_stop)
 
     server_task = asyncio.create_task(server.serve())
+    if app.state.network.settings.autostart:
+        await app.state.network.start()
     stop_task = asyncio.create_task(stop_event.wait())
     try:
         done, _ = await asyncio.wait({server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -157,6 +163,7 @@ async def serve(
             await server_task
     finally:
         stop_task.cancel()
+        await app.state.network.stop()
         if grpc_server is not None:
             await grpc_server.stop(grace=2.0)
         await app.state.agents.close()
