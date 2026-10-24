@@ -67,7 +67,9 @@ class DetectionStage(StageProcessor):
         if image is None:
             raise ProcessingError(f"page {page} has no source image")
         output: LayoutDetections = await provider.detect(image)
-        return build_patch(input, image, output, generation(PRODUCER, MODEL_ID))
+        provider_id = getattr(provider, "id", MODEL_NAME)
+        model = MODEL_ID if provider_id == MODEL_NAME else provider_id
+        return build_patch(input, image, output, generation(PRODUCER, model))
 
 
 # ---- scene helpers -----------------------------------------------------------------------------
@@ -1338,4 +1340,3 @@ def mask_containment(container: LayoutMask, value: LayoutMask, bounds) -> np.flo
         return F32_ZERO
     intersection = int(np.count_nonzero(value_plane & container_plane))
     return np.float32(intersection) / np.float32(value_area)
-

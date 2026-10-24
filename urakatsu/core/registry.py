@@ -21,8 +21,11 @@ if TYPE_CHECKING:  # pragma: no cover
 log = logging.getLogger(__name__)
 
 BUILTIN_MODULES = (
-    # detection
+    # detection: Koharu layout first (the default), then the opt-in text detectors
     "urakatsu.providers.detection.koharu_layout_rfdetr_seg_2xl",
+    "urakatsu.providers.detection.comic_text_detector",
+    "urakatsu.providers.detection.comic_text_bubble_detector",
+    "urakatsu.providers.detection.dbnet_resnet34",
     # OCR, in display order
     "urakatsu.providers.ocr.paddle_ocr_vl",
     "urakatsu.providers.ocr.manga_ocr",
