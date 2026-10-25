@@ -11,6 +11,7 @@ def processors() -> dict[Stage, StageProcessor]:
     from .detection import DetectionStage
     from .inpainting import InpaintingStage
     from .ocr import OcrStage
+    from .sound_effects import SoundEffectsStage
     from .translation import TranslationStage
 
     return {
@@ -18,6 +19,7 @@ def processors() -> dict[Stage, StageProcessor]:
         Stage.OCR: OcrStage(),
         Stage.TRANSLATION: TranslationStage(),
         Stage.INPAINTING: InpaintingStage(),
+        Stage.SOUND_EFFECTS: SoundEffectsStage(),
     }
 
 

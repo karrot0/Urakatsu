@@ -14,6 +14,7 @@ import { BRUSH_SIZES, DEFAULT_SHORTCUTS, NUDGES, TOOLS, useWorkspace, type Short
 import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./ModelsStorage";
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
+import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
 import { SourcesSettings } from "./SourcesSettings";
 import { AboutSettings } from "./Updates";
 import { TOOL_INFO } from "./ToolBelt";
@@ -292,6 +293,68 @@ function FillModelRow({ providers, draft, update }: { providers: ProviderInfo[];
   );
 }
 
+const SOUND_EFFECT_MODES: { mode: SoundEffectMode; title: string; description: string }[] = [
+  { mode: "off", title: "Leave as drawn", description: "The original lettering stays in the art." },
+  { mode: "typeset", title: "Typeset", description: "Erased and lettered in a comic font, like dialogue." },
+  { mode: "redraw", title: "Redraw", description: "An image model redraws it in the target language, in the original style." },
+];
+
+/** What happens to onomatopoeia drawn into the art (not a Koharu setting: Koharu leaves them). */
+function SoundEffectsSection({ providers, draft, update }: { providers: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const mode = (draft.soundEffects || "off") as SoundEffectMode;
+  const fillId = draft.fill || draft.inpainting;
+  const fill = providers.find((p) => p.id === fillId);
+  const redraw = providers.find((p) => p.id === (draft.soundEffectsModel || fillId));
+  const options: Option[] = [
+    { value: "", label: "Same as generative fill", detail: fill ? (fill.prompted ? fill.name : `${fill.name}, removes only`) : undefined },
+    ...providers.map((p) => ({ value: p.id, label: p.name, disabled: !p.available || !p.prompted, detail: !p.available ? "Unavailable" : p.prompted ? "Follows prompts" : "Removes only" })),
+  ];
+  return (
+    <PreferenceSection title="Sound effects" description="Onomatopoeia drawn into the art, such as ドン or 쾅. Applies to pages detected after you change it.">
+      <div role="radiogroup" aria-label="Sound effects" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
+        {SOUND_EFFECT_MODES.map((option) => {
+          const active = mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update({ soundEffects: option.mode })}
+              className={cn(
+                "flex min-w-0 cursor-pointer flex-col gap-2 rounded-card bg-surface p-2 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:shadow-focus",
+                active ? "shadow-[inset_0_0_0_2px_var(--brand)]" : "hover:bg-hover-faint",
+              )}
+            >
+              <SoundEffectPreview mode={option.mode} className="block w-full overflow-hidden rounded-control" />
+              <span className="px-0.5">
+                <span className="block font-medium">{option.title}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-fg-2">{option.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {mode === "redraw" && (
+        <PreferenceRow
+          title="Redraw model"
+          description="An image model that follows prompts. Edit models such as Qwen Image Edit keep the style best. Expect about 30 seconds per sound effect on a mid-range GPU."
+        >
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <div className={CONTROL_PAIR}>
+              <Select label="Redraw model" value={draft.soundEffectsModel} options={options} onChange={(soundEffectsModel) => update({ soundEffectsModel })} />
+              {redraw && redraw.id !== draft.inpainting && redraw.id !== draft.fill && <RuntimeSelect provider={redraw} draft={draft} update={update} />}
+            </div>
+            {redraw && !redraw.prompted && (
+              <p className="text-xs leading-4 text-warning">{redraw.name} only removes lettering, so redrawing will fail. Pick a model that follows prompts.</p>
+            )}
+          </div>
+        </PreferenceRow>
+      )}
+    </PreferenceSection>
+  );
+}
+
 function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const caps = ws.capabilities;
@@ -309,6 +372,18 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
       <PreferenceSection title="Hardware">
         <PreferenceRow title="Device" description="Where models run. Automatic picks the fastest available.">
           <Select label="Device" value={draft.device} options={devices} onChange={(device) => update({ device })} />
+        </PreferenceRow>
+        <PreferenceRow title="Unload idle models" description="Frees GPU and system memory once no stage has used the models for this long. The next run loads them again. Empty keeps them loaded.">
+          <NumberField
+            label="Unload idle models after"
+            value={draft.idleUnloadMinutes || null}
+            placeholder="Never"
+            min={1}
+            max={1440}
+            step={5}
+            suffix={<span className="pr-1.5 text-xs text-fg-3">min</span>}
+            onCommit={(minutes) => update({ idleUnloadMinutes: minutes ?? 0 })}
+          />
         </PreferenceRow>
       </PreferenceSection>
       <PreferenceSection title="Vision models">
@@ -334,6 +409,13 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
       {(() => {
         // A separate fill model has its own options; the same model shares the inpainting ones.
         const provider = draft.fill && draft.fill !== draft.inpainting ? byStage("inpainting").find((p) => p.id === draft.fill) : undefined;
+        return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
+      })()}
+      <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
+      {(() => {
+        // A redraw model of its own has its own options; one shared with inpainting or fill shows them above.
+        const id = draft.soundEffects === "redraw" ? draft.soundEffectsModel : "";
+        const provider = id && id !== draft.inpainting && id !== draft.fill ? byStage("inpainting").find((p) => p.id === id) : undefined;
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
       <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">

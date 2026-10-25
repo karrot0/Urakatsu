@@ -1102,6 +1102,23 @@ export function Canvas() {
                 }}
               />
             )}
+            {ws.job?.previews
+              ?.filter((preview) => preview.page === page.id)
+              .map((preview, index, shown) => (
+                // A diffusion model's result so far, laid over its crop until the stage commits.
+                <div
+                  key={`${preview.box.x},${preview.box.y},${preview.box.width},${preview.box.height}`}
+                  className="pointer-events-none absolute"
+                  style={{ left: preview.box.x * zoom, top: preview.box.y * zoom, width: preview.box.width * zoom, height: preview.box.height * zoom }}
+                >
+                  <img className="h-full w-full select-none" src={preview.url} alt="" draggable={false} />
+                  {index === shown.length - 1 && preview.steps > 0 && (
+                    <span className="absolute left-1.5 top-1.5 rounded-pill bg-surface-over px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-fg-2 shadow-floating">
+                      {preview.step}/{preview.steps}
+                    </span>
+                  )}
+                </div>
+              ))}
             <svg
               ref={svg}
               // touch-none: a pen or finger drag draws instead of scrolling the page (which would cancel the stroke).

@@ -35,6 +35,8 @@ class StageInput:
     region: Optional[Bounds]
     images: ImageCache
     inpainting_mask: Optional[InpaintingMask] = None
+    # ``SoundEffectsConfig.mode`` for this run: detection and the sound effects stage read it.
+    sound_effects: str = "off"
 
     def contains_entity(self, entity: str) -> bool:
         return contains_entity(self.scene, self.page, self.entities, self.region, entity)

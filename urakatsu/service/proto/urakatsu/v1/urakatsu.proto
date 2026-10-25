@@ -127,6 +127,9 @@ message Config {
   repeated string font_families = 12;
   string fill = 13;                         // generative fill model; empty uses inpainting
   bool lossless_pages = 14;                 // StorageConfig.lossless_pages
+  string sound_effects = 15;                // SoundEffectsConfig.mode: off | typeset | redraw (empty keeps it)
+  string sound_effects_model = 16;          // redraw model; empty uses the generative fill model
+  optional int32 idle_unload_minutes = 17;  // unload models after this many idle minutes; 0 never (unset keeps it)
 }
 
 message TranslationModel {
@@ -456,7 +459,7 @@ message RunRequest {
 
 message ProgressEvent {
   string job_id = 1;
-  string kind = 2;                  // started | loading | running | finished | skipped | failed | stopped | completed
+  string kind = 2;                  // started | loading | running | step | finished | skipped | failed | stopped | completed
   string page_id = 3;
   string stage = 4;
   string model = 5;
@@ -467,6 +470,12 @@ message ProgressEvent {
   repeated string pages = 10;
   repeated string stages = 11;
   Page page = 12;                   // page view after a committed stage
+  // kind "step" only: a diffusion sampling step, with a JPEG of the result so far that
+  // belongs at preview_box (page pixels). Live only: never replayed to late subscribers.
+  int32 step = 13;
+  int32 steps = 14;
+  bytes preview = 15;
+  Box preview_box = 16;
 }
 
 message JobRef {

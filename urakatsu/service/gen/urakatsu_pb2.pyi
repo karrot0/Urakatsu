@@ -124,7 +124,7 @@ class ModelSelection(_message.Message):
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., quantization: _Optional[str] = ..., vision: _Optional[bool] = ..., reasoning: _Optional[bool] = ...) -> None: ...
 
 class Config(_message.Message):
-    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages")
+    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes")
     class ProcessorJsonEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -160,6 +160,9 @@ class Config(_message.Message):
     FONT_FAMILIES_FIELD_NUMBER: _ClassVar[int]
     FILL_FIELD_NUMBER: _ClassVar[int]
     LOSSLESS_PAGES_FIELD_NUMBER: _ClassVar[int]
+    SOUND_EFFECTS_FIELD_NUMBER: _ClassVar[int]
+    SOUND_EFFECTS_MODEL_FIELD_NUMBER: _ClassVar[int]
+    IDLE_UNLOAD_MINUTES_FIELD_NUMBER: _ClassVar[int]
     device: str
     detection: str
     ocr: str
@@ -174,7 +177,10 @@ class Config(_message.Message):
     font_families: _containers.RepeatedScalarFieldContainer[str]
     fill: str
     lossless_pages: bool
-    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ...) -> None: ...
+    sound_effects: str
+    sound_effects_model: str
+    idle_unload_minutes: int
+    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ...) -> None: ...
 
 class TranslationModel(_message.Message):
     __slots__ = ("provider", "provider_name", "model", "name", "quantizations", "vision", "reasoning")
@@ -714,7 +720,7 @@ class RunRequest(_message.Message):
     def __init__(self, project_id: _Optional[str] = ..., page_ids: _Optional[_Iterable[str]] = ..., operation: _Optional[_Union[Operation, _Mapping]] = ..., region: _Optional[_Union[Box, _Mapping]] = ..., entity_ids: _Optional[_Iterable[str]] = ..., inpainting_mask: _Optional[bytes] = ..., fill_prompt: _Optional[str] = ...) -> None: ...
 
 class ProgressEvent(_message.Message):
-    __slots__ = ("job_id", "kind", "page_id", "stage", "model", "elapsed_ms", "message", "completed", "total", "pages", "stages", "page")
+    __slots__ = ("job_id", "kind", "page_id", "stage", "model", "elapsed_ms", "message", "completed", "total", "pages", "stages", "page", "step", "steps", "preview", "preview_box")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
     PAGE_ID_FIELD_NUMBER: _ClassVar[int]
@@ -727,6 +733,10 @@ class ProgressEvent(_message.Message):
     PAGES_FIELD_NUMBER: _ClassVar[int]
     STAGES_FIELD_NUMBER: _ClassVar[int]
     PAGE_FIELD_NUMBER: _ClassVar[int]
+    STEP_FIELD_NUMBER: _ClassVar[int]
+    STEPS_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_BOX_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     kind: str
     page_id: str
@@ -739,7 +749,11 @@ class ProgressEvent(_message.Message):
     pages: _containers.RepeatedScalarFieldContainer[str]
     stages: _containers.RepeatedScalarFieldContainer[str]
     page: Page
-    def __init__(self, job_id: _Optional[str] = ..., kind: _Optional[str] = ..., page_id: _Optional[str] = ..., stage: _Optional[str] = ..., model: _Optional[str] = ..., elapsed_ms: _Optional[float] = ..., message: _Optional[str] = ..., completed: _Optional[int] = ..., total: _Optional[int] = ..., pages: _Optional[_Iterable[str]] = ..., stages: _Optional[_Iterable[str]] = ..., page: _Optional[_Union[Page, _Mapping]] = ...) -> None: ...
+    step: int
+    steps: int
+    preview: bytes
+    preview_box: Box
+    def __init__(self, job_id: _Optional[str] = ..., kind: _Optional[str] = ..., page_id: _Optional[str] = ..., stage: _Optional[str] = ..., model: _Optional[str] = ..., elapsed_ms: _Optional[float] = ..., message: _Optional[str] = ..., completed: _Optional[int] = ..., total: _Optional[int] = ..., pages: _Optional[_Iterable[str]] = ..., stages: _Optional[_Iterable[str]] = ..., page: _Optional[_Union[Page, _Mapping]] = ..., step: _Optional[int] = ..., steps: _Optional[int] = ..., preview: _Optional[bytes] = ..., preview_box: _Optional[_Union[Box, _Mapping]] = ...) -> None: ...
 
 class JobRef(_message.Message):
     __slots__ = ("job_id",)

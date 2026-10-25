@@ -76,6 +76,37 @@ export interface JobState {
   total: number;
   current?: { page: string; stage: string; model: string; kind: string };
   message?: string;
+  /** Live diffusion previews, the newest per crop, until their page's stage finishes. */
+  previews?: StepPreview[];
+}
+
+export interface StepPreview {
+  page: string;
+  /** Object URL of the JPEG frame; revoked when it is replaced or cleared. */
+  url: string;
+  box: { x: number; y: number; width: number; height: number };
+  step: number;
+  steps: number;
+}
+
+/** Keeps the newest preview per crop of `event` in `job.previews`. */
+function addPreview(job: JobState, event: ProgressEvent) {
+  const box = event.previewBox;
+  if (!box || event.preview.length === 0) return;
+  const same = (p: StepPreview) => p.page === event.pageId && p.box.x === box.x && p.box.y === box.y && p.box.width === box.width && p.box.height === box.height;
+  const kept = (job.previews ?? []).filter((p) => {
+    if (same(p)) URL.revokeObjectURL(p.url);
+    return !same(p);
+  });
+  const url = URL.createObjectURL(new Blob([event.preview as BlobPart], { type: "image/jpeg" }));
+  job.previews = [...kept, { page: event.pageId, url, box: { x: box.x, y: box.y, width: box.width, height: box.height }, step: event.step, steps: event.steps }];
+}
+
+/** Drops the previews of `page` (all of them without one). */
+function clearPreviews(job: JobState, page?: string) {
+  if (!job.previews) return;
+  for (const p of job.previews) if (!page || p.page === page) URL.revokeObjectURL(p.url);
+  job.previews = page ? job.previews.filter((p) => p.page !== page) : undefined;
 }
 
 export interface RunOptions {
@@ -575,6 +606,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         });
         for await (const event of stream) {
           job.id = event.jobId;
+          if (event.kind === "step") {
+            addPreview(job, event);
+            setState((s) => ({ ...s, job: { ...job } }));
+            continue;
+          }
+          if (event.pageId && event.kind !== "loading" && event.kind !== "running") clearPreviews(job, event.pageId);
           job.events.push(event);
           if (event.total) job.total = event.total;
           if (event.completed) job.completed = event.completed;
@@ -591,6 +628,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         if (job.status === "running") job.status = "completed";
         job.current = undefined;
+        clearPreviews(job);
         const fresh = await client.getProject({ projectId: project.id });
         setState((s) => ({
           ...s,
@@ -602,6 +640,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         job.status = "failed";
         job.message = describeError(error);
         job.current = undefined;
+        clearPreviews(job);
         setState((s) => ({ ...s, job: { ...job, events: [...job.events] } }));
         fail(error);
       }

@@ -3,6 +3,10 @@
 A stage runs on one page: detection, then OCR and translation, or detection, then
 inpainting. Rendering is not a stage: the renderer prepares a frame from the
 current scene snapshot on demand.
+
+``SOUND_EFFECTS`` is not in Koharu: with sound effects set to ``redraw`` it redraws each
+translated sound effect with an image model, so it waits for translation and inpainting.
+In any other mode a run leaves it out (``pipeline.py``).
 """
 
 from __future__ import annotations
@@ -16,10 +20,11 @@ class Stage(str, Enum):
     OCR = "ocr"
     TRANSLATION = "translation"
     INPAINTING = "inpainting"
+    SOUND_EFFECTS = "sound_effects"
 
     @classmethod
     def all(cls) -> list["Stage"]:
-        return [cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING]
+        return [cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.SOUND_EFFECTS]
 
     @classmethod
     def parse(cls, value: "str | Stage") -> "Stage":
@@ -38,6 +43,7 @@ PREREQUISITES: dict[Stage, tuple[Stage, ...]] = {
     Stage.OCR: (Stage.DETECTION,),
     Stage.TRANSLATION: (Stage.OCR,),
     Stage.INPAINTING: (Stage.DETECTION,),
+    Stage.SOUND_EFFECTS: (Stage.TRANSLATION, Stage.INPAINTING),
 }
 
 
@@ -76,6 +82,7 @@ class Operation:
                 Stage.OCR: [Stage.DETECTION, Stage.OCR],
                 Stage.TRANSLATION: [Stage.DETECTION, Stage.OCR, Stage.TRANSLATION],
                 Stage.INPAINTING: [Stage.DETECTION, Stage.INPAINTING],
+                Stage.SOUND_EFFECTS: Stage.all(),
             }[Stage.parse(self.stage)]  # type: ignore[arg-type]
         elif self.kind == "only":
             selected = [Stage.parse(self.stage)]  # type: ignore[arg-type]

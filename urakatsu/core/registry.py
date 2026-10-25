@@ -71,6 +71,8 @@ class Registry:
     def get(self, stage: Stage | str, provider_id: str) -> type["Provider"]:
         self.discover()
         stage = Stage.parse(stage)
+        if stage is Stage.SOUND_EFFECTS:  # its model is an inpainting provider that follows prompts
+            stage = Stage.INPAINTING
         try:
             return self._providers[stage][provider_id]
         except KeyError as error:

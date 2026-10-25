@@ -8,11 +8,16 @@
   out-of-memory: release the lane, unload the other models, wait, retry once. Any
   other failure unloads the failing stage and fails the run.
 - Stopping is cooperative and discards an uncommitted result.
+- Idle unload (an Urakatsu addition): once no run has used the models for
+  ``PipelineConfig.idle_unload_minutes``, every loaded model is unloaded, so a model used
+  once does not hold device memory other programs need. The next run loads it again.
 """
 
 from __future__ import annotations
 
 import asyncio
+import gc
+import io
 import logging
 import time
 from dataclasses import dataclass, field
@@ -21,7 +26,7 @@ from typing import Optional
 
 from urakatsu.core.config import PipelineConfig
 from urakatsu.core.errors import ModelLoadError, ProcessingError, UrakatsuError, is_out_of_memory
-from urakatsu.core.progress import Progress, ProgressKind, ProgressSink
+from urakatsu.core.progress import Progress, ProgressKind, ProgressSink, StepPreview, StepSink, reporting_steps
 from urakatsu.core.registry import Registry, registry as default_registry
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.core.stop import StopToken
@@ -92,6 +97,8 @@ class Pipeline:
         self._stage_processors = stage_processors
         self._accelerator = asyncio.Semaphore(1)
         self._execution = asyncio.Lock()
+        self._last_used = time.monotonic()
+        self._idle_watch: Optional[asyncio.Task] = None
 
     @property
     def _processors(self) -> dict[Stage, StageProcessor]:
@@ -110,6 +117,8 @@ class Pipeline:
         """Applies new settings; providers whose selection, runtime or settings changed are unloaded."""
         previous = self.config
         self.config = config
+        if config.idle_unload_minutes != previous.idle_unload_minutes:
+            self._watch_idle(restart=True)
         if config.device != previous.device:
             self.runtimes.select_device(config.device)
             self.unload_all()
@@ -154,7 +163,50 @@ class Pipeline:
 
     async def execute(self, session: Session, request: Request) -> Report:
         async with self._execution:
-            return await _Execution(self, session, request).run()
+            try:
+                return await _Execution(self, session, request).run()
+            finally:
+                self.touch()
+
+    # -- idle unload -----------------------------------------------------------------------------
+
+    def touch(self) -> None:
+        """Marks the models as used now, restarting the idle countdown. Code that runs a provider
+        outside ``execute`` (the agent's local model) calls it too."""
+        self._last_used = time.monotonic()
+        self._watch_idle()
+
+    def _watch_idle(self, restart: bool = False) -> None:
+        """Starts the countdown task; ``restart`` replaces a running one (the timeout changed)."""
+        if self._idle_watch is not None and not self._idle_watch.done():
+            if not restart:
+                return
+            self._idle_watch.cancel()
+        try:
+            self._idle_watch = asyncio.get_running_loop().create_task(self._unload_when_idle())
+        except RuntimeError:  # no event loop: nothing to schedule the countdown on
+            self._idle_watch = None
+
+    async def _unload_when_idle(self) -> None:
+        while True:
+            timeout = self.config.idle_unload_minutes * 60
+            if timeout <= 0 or not self.loaded():
+                return
+            remaining = self._last_used + timeout - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+                continue
+            async with self._execution:  # no run starts while the models unload
+                if time.monotonic() - self._last_used < timeout:
+                    continue
+                unloaded = self.unload_all()
+            if unloaded:
+                gc.collect()
+                from urakatsu.runtimes.torch_runtime import release_cache
+
+                release_cache()
+                log.info("unloaded %s after %g idle minutes", ", ".join(stage.value for stage in unloaded), self.config.idle_unload_minutes)
+            return
 
     # -- stage runner ----------------------------------------------------------------------------
 
@@ -209,7 +261,8 @@ class Pipeline:
             return _STOPPED
         _emit(progress, Progress(kind=ProgressKind.RUNNING, page=input.page, stage=stage, model=provider.id))
         try:
-            patch = await processor.process(input, provider)
+            with reporting_steps(_step_sink(progress, input.page, stage, provider.id)):
+                patch = await processor.process(input, provider)
         except Exception as error:
             return _Attempt(ErrorKind.PROCESSING, error)
         return _SKIPPED if patch.is_empty() else patch
@@ -240,6 +293,27 @@ _SKIPPED = object()
 _STOPPED = object()
 
 
+PREVIEW_QUALITY = 80
+
+
+def _step_sink(sink: Optional[ProgressSink], page: str, stage: Stage, model: str) -> Optional[StepSink]:
+    """Turns a provider's sampling previews (reported from its worker thread) into STEP events on the loop."""
+    if sink is None:
+        return None
+    loop = asyncio.get_running_loop()
+
+    def report(step: StepPreview) -> None:
+        jpeg = None
+        if step.image is not None and step.box is not None:
+            buffer = io.BytesIO()
+            step.image.convert("RGB").save(buffer, format="JPEG", quality=PREVIEW_QUALITY)
+            jpeg = buffer.getvalue()
+        event = Progress(kind=ProgressKind.STEP, page=page, stage=stage, model=model, step=step.step, steps=step.total, preview=jpeg, preview_box=step.box if jpeg else None)
+        loop.call_soon_threadsafe(_emit, sink, event)
+
+    return report
+
+
 def _emit(sink: Optional[ProgressSink], progress: Progress) -> None:
     if sink is not None:
         try:
@@ -259,6 +333,11 @@ class _Execution:
         self.base = self.scene.revision
         try:
             stages = request.operation.resolve()
+            if pipeline.config.sound_effects.mode != "redraw" and Stage.SOUND_EFFECTS in stages:
+                # The sound effects stage only exists in a run while sound effects are redrawn.
+                stages = [stage for stage in stages if stage is not Stage.SOUND_EFFECTS]
+                if not stages:
+                    raise ValueError("sound effects are not set to redraw (Settings, Pipeline, Sound effects)")
             self.scope = NormalizedScope(self.scene, request.scope, stages)
         except (ValueError, KeyError) as error:
             raise PipelineError(ErrorKind.INVALID_INPUT, None, str(error)) from error
@@ -308,7 +387,8 @@ class _Execution:
         self.busy.add(stage)
         images = self.images.setdefault(page, ImageCache())
         mask = self.inpainting_mask if (stage is Stage.INPAINTING and self.inpainting_mask and self.inpainting_mask.page == page) else None
-        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask)
+        sound_effects = self.pipeline.config.sound_effects.mode
+        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects)
 
     def _apply(self, completion: _Completion) -> None:
         outcome = completion.outcome

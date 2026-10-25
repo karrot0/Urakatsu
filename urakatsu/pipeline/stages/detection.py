@@ -26,6 +26,7 @@ from urakatsu.scene import At, AssetInput, AssetMetadata, Edit, Patch, RemovePol
 from urakatsu.scene import components as c
 
 from .base import StageInput, StageProcessor, finish, generation
+from .sound_effects import LABEL as SOUND_EFFECT_LABEL, group_sound_effects, write_sound_effect_mask, write_sound_effects
 
 MODEL_ID = "mayocream/koharu-layout-rfdetr-seg-2xl-1152"
 MODEL_NAME = "koharu-layout-rfdetr-seg-2xl"
@@ -149,9 +150,17 @@ def write_page(
     sort_by_layout(detections)
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
-    regions = write_regions(input.scene, edit, page, rgb, detections, gen)
+    if input.sound_effects != "off":
+        # Not in Koharu: sound effects become text blocks (pipeline/stages/sound_effects.py).
+        groups = group_sound_effects(detections)
+        regions = write_regions(input.scene, edit, page, rgb, [d for d in detections if d.label != SOUND_EFFECT_LABEL], gen)
+        write_sound_effects(edit, page, rgb, groups, input.sound_effects, gen)
+    else:
+        regions = write_regions(input.scene, edit, page, rgb, detections, gen)
     link_dialogue_regions(edit, regions, gen)
     write_masks(input, edit, page, detections, (output.image_width, output.image_height))
+    if input.sound_effects != "off":
+        write_sound_effect_mask(input, edit, page, detections, (output.image_width, output.image_height))
 
 
 def _intersects(bbox, region: Bounds) -> bool:

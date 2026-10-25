@@ -10,6 +10,8 @@
 - ``runtimes`` selects the runtime for any provider that supports more than one.
 - ``typesetting`` holds the renderer's font family list (``TypesettingConfig``).
 - ``storage`` holds how page images are stored (``StorageConfig``; not an upstream setting).
+- ``sound_effects`` says what happens to detected onomatopoeia (``SoundEffectsConfig``; not an
+  upstream setting: Koharu keeps them as regions that nothing downstream uses).
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import tomli_w
 from pydantic import BaseModel, Field
@@ -109,8 +111,27 @@ class StorageConfig(BaseModel):
     lossless_pages: bool = False
 
 
+SOUND_EFFECT_MODES = ("off", "typeset", "redraw")
+
+
+class SoundEffectsConfig(BaseModel):
+    """What happens to detected sound effects.
+
+    ``off`` keeps Koharu's behaviour. ``typeset`` turns each one into a text block that is read,
+    translated, erased and lettered like any other. ``redraw`` reads and translates them too, then
+    the sound effects stage has an image model redraw each one in the target language, in its
+    original style (``pipeline/stages/sound_effects.py``). ``model`` is that image model: an
+    inpainting provider that follows prompts; empty uses the generative fill model.
+    """
+
+    mode: Literal["off", "typeset", "redraw"] = "off"
+    model: str = ""
+
+
 class PipelineConfig(BaseModel):
     device: str = "auto"  # auto | cpu | cuda | cuda:N | metal
+    # Loaded models are unloaded after this many minutes without a run; 0 keeps them loaded.
+    idle_unload_minutes: int = Field(default=15, ge=0)
     detection: ModelChoice = Field(default_factory=lambda: ModelChoice(model="koharu-layout-rfdetr-seg-2xl"))
     ocr: ModelChoice = Field(default_factory=lambda: ModelChoice(model="paddleocr-vl-1.6"))
     translation: TranslationConfig = Field(default_factory=TranslationConfig)
@@ -121,15 +142,22 @@ class PipelineConfig(BaseModel):
     runtimes: dict[str, str] = Field(default_factory=dict)
     typesetting: TypesettingConfig = Field(default_factory=TypesettingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    sound_effects: SoundEffectsConfig = Field(default_factory=SoundEffectsConfig)
 
     def provider_for(self, stage: Stage) -> str:
         if stage is Stage.TRANSLATION:
             return self.translation.model.provider
+        if stage is Stage.SOUND_EFFECTS:
+            return self.redraw_provider()
         return {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model
 
     def fill_provider(self) -> str:
         """The inpainting provider generative fill runs: ``fill``, else the inpainting model."""
         return self.fill.model or self.inpainting.model
+
+    def redraw_provider(self) -> str:
+        """The inpainting provider that redraws sound effects: ``sound_effects.model``, else the fill model."""
+        return self.sound_effects.model or self.fill_provider()
 
     def set_provider(self, stage: Stage, provider: str) -> None:
         if stage is Stage.TRANSLATION:

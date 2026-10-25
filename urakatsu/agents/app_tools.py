@@ -10,6 +10,7 @@ import asyncio
 import math
 from typing import Any, Optional
 
+from urakatsu.core.progress import ProgressKind
 from urakatsu.core.stage import Operation, Stage
 
 from .image_edit import QUALITIES, Box, edit_region
@@ -465,6 +466,8 @@ async def run_pipeline(context: ToolContext, args: dict[str, Any]) -> Any:
     job = await context.workspace.start_run(project, operation, page_ids)
     try:
         async for progress in context.workspace.events(job.id):
+            if progress.kind is ProgressKind.STEP:  # live previews are for the canvas, not the assistant
+                continue
             context.emit(
                 {
                     "type": "progress",

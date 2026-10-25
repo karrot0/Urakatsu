@@ -19,13 +19,15 @@ from __future__ import annotations
 import asyncio
 import functools
 import io
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+from urakatsu.core.progress import StepPreview, reporting_steps, step_sink
 from urakatsu.pipeline.images import ImageCache
 from urakatsu.pipeline.scope import Bounds
 from urakatsu.providers.base import Provider
@@ -298,7 +300,8 @@ def inpaint_tiled(
         crop_image = Image.fromarray(output[top:bottom, left:right].copy(), "RGB")
         crop_mask = crop_tile_mask(pending, tile)
 
-        generated = inference(crop_image, crop_mask)
+        with placed_previews(crop_image, crop_mask, (left, top)):
+            generated = inference(crop_image, crop_mask)
         if generated.size != (crop_width, crop_height):
             generated = generated.resize((crop_width, crop_height), Image.Resampling.LANCZOS)
         composite_generated(output, labels, tile, np.asarray(generated.convert("RGB")))
@@ -319,12 +322,42 @@ def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference) -> Image.
     left, top = max(left - margin, 0), max(top - margin, 0)
     right, bottom = min(right + margin, width), min(bottom + margin, height)
     crop_mask = np.where(mask[top:bottom, left:right] >= 127, 255, 0).astype(np.uint8)
-    generated = fill(Image.fromarray(output[top:bottom, left:right].copy(), "RGB"), crop_mask)
+    crop = Image.fromarray(output[top:bottom, left:right].copy(), "RGB")
+    with placed_previews(crop, crop_mask, (left, top)):
+        generated = fill(crop, crop_mask)
     if generated.size != (right - left, bottom - top):
         generated = generated.resize((right - left, bottom - top), Image.Resampling.LANCZOS)
     keep = crop_mask >= 127
     output[top:bottom, left:right][keep] = np.asarray(generated.convert("RGB"))[keep]
     return Image.fromarray(output, "RGB")
+
+
+# Longest side of a step preview: the browser stretches it over the crop, so full size buys nothing.
+PREVIEW_SIDE = 768
+
+
+@contextmanager
+def placed_previews(crop: Image.Image, mask: np.ndarray, origin: tuple[int, int]) -> Iterator[None]:
+    """Reports each sampling preview as it would land on the page: inside ``mask``, at the crop."""
+    outer = step_sink()
+    if outer is None:
+        yield
+        return
+    scale = min(1.0, PREVIEW_SIDE / max(crop.width, crop.height))
+    size = (max(1, round(crop.width * scale)), max(1, round(crop.height * scale)))
+    base = crop.convert("RGB").resize(size, Image.Resampling.BILINEAR)
+    keep = Image.fromarray(mask.astype(np.uint8), "L").resize(size, Image.Resampling.BILINEAR)
+    box = (origin[0], origin[1], crop.width, crop.height)
+
+    def place(preview: StepPreview) -> None:
+        if preview.image is None:
+            outer(preview)
+            return
+        frame = preview.image.convert("RGB").resize(size, Image.Resampling.BILINEAR)
+        outer(preview.placed(Image.composite(frame, base, keep), box))
+
+    with reporting_steps(place):
+        yield
 
 
 def fill_uniform_regions(output: np.ndarray, pending: np.ndarray, text_mask: np.ndarray, regions: list[FlatFillRegion]) -> None:

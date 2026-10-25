@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import GenerationConfig, ModelSelection, PipelineConfig, TypesettingConfig
+from urakatsu.core.config import SOUND_EFFECT_MODES, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -205,6 +205,7 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
     selection = config.translation.model
     message = pb.Config(
         device=config.device,
+        idle_unload_minutes=config.idle_unload_minutes,
         detection=config.detection.model,
         ocr=config.ocr.model,
         inpainting=config.inpainting.model,
@@ -221,6 +222,8 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         instructions=config.translation.instructions or "",
         font_families=list(config.typesetting.font_families),
         lossless_pages=config.storage.lossless_pages,
+        sound_effects=config.sound_effects.mode,
+        sound_effects_model=config.sound_effects.model,
     )
     for key, value in config.processor.items():
         message.processor_json[key] = json.dumps(value)
@@ -247,6 +250,10 @@ def _json_map(entries, label: str) -> dict[str, dict[str, Any]]:
 def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfig:
     config = base.model_copy(deep=True)
     config.device = message.device or config.device
+    if message.HasField("idle_unload_minutes"):
+        if message.idle_unload_minutes < 0:
+            raise ValueError("idle_unload_minutes cannot be negative")
+        config.idle_unload_minutes = message.idle_unload_minutes
     if message.detection:
         config.detection.model = message.detection
     if message.ocr:
@@ -271,6 +278,10 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
     if message.font_families:
         config.typesetting = TypesettingConfig(font_families=list(message.font_families))
     config.storage = config.storage.model_copy(update={"lossless_pages": message.lossless_pages})
+    if message.sound_effects:
+        if message.sound_effects not in SOUND_EFFECT_MODES:
+            raise ValueError(f"unknown sound effects mode {message.sound_effects!r}; expected one of {list(SOUND_EFFECT_MODES)}")
+        config.sound_effects = SoundEffectsConfig(mode=message.sound_effects, model=message.sound_effects_model)
     config.processor = _json_map(message.processor_json, "processor")
     config.providers = _json_map(message.providers_json, "provider")
     config.runtimes = dict(message.runtimes)
@@ -376,7 +387,13 @@ def progress_to_proto(job_id: str, progress: Progress, page: Optional[PageView] 
         total=progress.total,
         pages=list(progress.pages),
         stages=[s.value for s in progress.stages],
+        step=progress.step,
+        steps=progress.steps,
+        preview=progress.preview or b"",
     )
+    if progress.preview_box is not None:
+        x, y, width, height = progress.preview_box
+        message.preview_box.CopyFrom(pb.Box(x=x, y=y, width=width, height=height))
     if page is not None:
         message.page.CopyFrom(page_to_proto(page))
     return message

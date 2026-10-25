@@ -340,7 +340,9 @@ class Desktop:
         script = f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue; Start-Process -FilePath '{quoted}' -ArgumentList '--quiet'"
         import subprocess
 
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # A hidden console, not DETACHED_PROCESS: Windows PowerShell started without a console
+        # exits at once (status 0) without running its command, so the installer never ran.
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
             creationflags=flags,

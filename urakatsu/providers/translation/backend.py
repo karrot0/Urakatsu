@@ -34,6 +34,8 @@ class TranslationRequest:
     instructions: Optional[str] = None
     context: list[TranslationContext] = field(default_factory=list)
     image: Optional[Image.Image] = None
+    # Indexes of segments that are sound effects drawn into the art (not in Koharu).
+    sound_effects: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         self.segments = [str(segment) for segment in self.segments]

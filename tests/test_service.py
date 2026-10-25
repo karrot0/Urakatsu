@@ -66,7 +66,7 @@ async def test_native_grpc_roundtrip(workspace):
         async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
             stub = rpc.UrakatsuStub(channel)
             caps = await stub.GetCapabilities(pb.Empty())
-            assert caps.device.backend == "cpu" and list(caps.stages) == ["detection", "ocr", "translation", "inpainting"]
+            assert caps.device.backend == "cpu" and list(caps.stages) == ["detection", "ocr", "translation", "inpainting", "sound_effects"]
             detector = next(p for p in caps.providers if p.id == "fake-detector")
             assert [r.name for r in detector.runtimes] == ["torch", "onnx"]
 

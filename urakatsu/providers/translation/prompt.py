@@ -28,7 +28,10 @@ def prompts(request: TranslationRequest) -> tuple[str, str]:
         "source_language": request.source_language.tag if request.source_language else None,
         "target_language": request.target_language.tag,
         "context": [{"source": c.source, "translation": c.translation} for c in request.context],
-        "segments": [{"id": index, "text": text} for index, text in enumerate(request.segments)],
+        "segments": [
+            {"id": index, "text": text, **({"kind": "sound_effect"} if index in request.sound_effects else {})}
+            for index, text in enumerate(request.segments)
+        ],
     }
     # serde_json::to_string: compact, non-ASCII kept as-is.
     user = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -185,6 +188,14 @@ def translation_system_prompt(request: TranslationRequest) -> str:
             "\n\nContext requirements:\n"
             "Use the supplied context only to preserve terminology, character voice, and dialogue continuity.\n"
             "Do not translate or return the context entries."
+        )
+    if request.sound_effects:
+        prompt += (
+            "\n\nSound effect requirements:\n"
+            'Segments with `"kind": "sound_effect"` are onomatopoeia drawn into the artwork, read by OCR (the reading may be cut short or slightly off).\n'
+            f"- Translate each into one short {target} sound effect as a comic letterer would write it, in capitals "
+            "(for English: BAM, THUD, CREAK, SHFF), or the usual equivalent for a gesture or mood word (STARE, GLARE, SILENCE).\n"
+            "- Keep it to one to three words, with no quotes, notes or explanation."
         )
     if request.image is not None:
         prompt += (

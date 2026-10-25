@@ -219,6 +219,7 @@ class ModelDirectory:
             raise ValueError("only the local model the translation stage uses can run the agent; select it under Settings, Translation")
         provider: Any = self.workspace.pipeline.provider(Stage.TRANSLATION)
         await provider.load()
+        self.workspace.pipeline.touch()  # an agent turn uses the model too; idle unload reloads it next turn
         server = getattr(provider, "_server", None)
         if server is None:
             raise AgentError("the local model did not start")

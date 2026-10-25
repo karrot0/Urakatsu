@@ -298,6 +298,7 @@ export const STAGE_LABEL: Record<string, string> = {
   ocr: "Text recognition",
   inpainting: "Inpainting",
   translation: "Translation",
+  sound_effects: "Sound effects",
 };
 
 export const RUNTIME_LABEL: Record<CatalogRuntime, string> = {

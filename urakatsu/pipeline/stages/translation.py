@@ -14,6 +14,7 @@ from urakatsu.scene import Authored, Patch, SourceText, Translation
 from urakatsu.scene.components import is_user
 
 from .base import StageInput, StageProcessor, finish, generation
+from .sound_effects import is_sound_effect
 
 PRODUCER = "dev.koharu.pipeline.translation"
 ELLIPSIS = "…"
@@ -38,6 +39,7 @@ class TranslationStage(StageProcessor):
             segments=[text for _, text in targets],
             target_language=target_language,
             instructions=provider.settings.translation.instructions,
+            sound_effects=frozenset(i for i, (content, _) in enumerate(targets) if is_sound_effect(scene, content)),
         )
         if provider.vision_enabled():
             image = input.images.get(scene, input.page, "source")

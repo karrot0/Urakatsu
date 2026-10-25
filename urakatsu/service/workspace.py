@@ -98,7 +98,8 @@ class Job:
     task: Optional[asyncio.Task] = None
 
     def publish(self, progress: Progress) -> None:
-        self.events.append(progress)
+        if progress.kind is not ProgressKind.STEP:  # previews are live only, never replayed
+            self.events.append(progress)
         if progress.total:
             self.total = progress.total
         if progress.completed:
