@@ -40,8 +40,8 @@ use ui::Ui;
 const WHEEL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/urakatsu.whl"));
 const WHEEL_NAME: &str = env!("URAKATSU_WHEEL_NAME");
 const VERSION: &str = env!("URAKATSU_VERSION");
-/// The newest Python every dependency ships wheels for (onnxruntime-gpu stops at 3.14).
 const PYTHON: &str = "3.14";
+const START_TOLERANCE: f64 = 2.0;
 type Res<T> = Result<T, String>;
 
 trait Context<T> {
@@ -1097,7 +1097,6 @@ fn uninstall_files(paths: &Paths, everything: bool) {
     platform::uninstall_app(&paths.install);
 }
 
-/// Whether the app is open: it records its process in `app\desktop.json` from startup on.
 /// Deletes a file or folder, retrying for a few seconds: a just-closed app's WebView2 helper
 /// processes and log handles let go of their files a moment after the window disappears.
 fn remove(path: &Path) {
@@ -1118,11 +1117,17 @@ fn app_running(paths: &Paths) -> bool {
     let Ok(text) = fs::read_to_string(paths.state.join("desktop.json")) else {
         return false;
     };
-    let Some(pid) = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|v| v["pid"].as_u64())
-    else {
+    let Some(record) = serde_json::from_str::<Value>(&text).ok() else {
         return false;
     };
-    platform::alive(pid as u32)
+    let Some(pid) = record["pid"].as_u64().map(|pid| pid as u32) else {
+        return false;
+    };
+    if !platform::alive(pid) {
+        return false;
+    }
+    match (record["started"].as_f64(), platform::started(pid)) {
+        (Some(recorded), Some(actual)) => (actual - recorded).abs() < START_TOLERANCE,
+        _ => true,
+    }
 }

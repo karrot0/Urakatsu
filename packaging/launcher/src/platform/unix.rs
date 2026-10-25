@@ -179,6 +179,10 @@ pub fn alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
+pub fn started(_pid: u32) -> Option<f64> {
+    None
+}
+
 /// A last-resort error box, for failures before or without the setup window.
 pub fn error_box(title: &str, text: &str) {
     rfd::MessageDialog::new()

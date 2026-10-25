@@ -154,6 +154,28 @@ pub fn alive(pid: u32) -> bool {
     }
 }
 
+pub fn started(pid: u32) -> Option<f64> {
+    use windows::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const FILETIME_TO_UNIX: f64 = 11_644_473_600.0; // seconds from 1601 to 1970
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let times = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user);
+        let _ = CloseHandle(handle);
+        times.ok()?;
+        let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+        Some(ticks as f64 / 1e7 - FILETIME_TO_UNIX)
+    }
+}
+
 /// A last-resort error box, for failures before or without the setup window.
 pub fn error_box(title: &str, text: &str) {
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();

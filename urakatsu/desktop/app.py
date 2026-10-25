@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+import psutil
 
 from urakatsu import __version__
 from urakatsu.core.config import home
@@ -34,6 +35,7 @@ log = logging.getLogger("urakatsu.desktop")
 TITLE = "Urakatsu"
 PREFERRED_PORT = 47811  # fixed, so the window's origin (and its saved theme and shortcuts) stays the same
 APP_ID = "Urakatsu.Desktop"
+START_TOLERANCE = 2.0  # seconds a process's start time may differ from its record (the launcher reads it from FILETIME)
 
 
 # ---- the server ---------------------------------------------------------------------------------
@@ -144,21 +146,51 @@ def _alive(pid: int) -> bool:
         kernel32.CloseHandle(ctypes.c_void_p(handle))
 
 
+def _started(pid: int) -> Optional[float]:
+    """When a process began (seconds since the epoch), or None when it is gone or unreadable."""
+    try:
+        return psutil.Process(pid).create_time()
+    except psutil.Error:
+        return None
+
+
+def _is_urakatsu(pid: int) -> bool:
+    """Whether a process was started as this app, for a record that predates ``started``."""
+    try:
+        return "urakatsu.desktop" in psutil.Process(pid).cmdline()[1:]  # pythonw -m urakatsu.desktop
+    except psutil.AccessDenied:
+        return True  # alive but unreadable: believe the record
+    except psutil.Error:
+        return False
+
+
 def running_instance() -> bool:
-    """Whether another Urakatsu window is open (or still setting up) for this data folder."""
+    """Whether another Urakatsu window is open (or still setting up) for this data folder.
+
+    An app that was killed leaves its record behind, and Windows hands its process id to the next
+    program that starts (a terminal, a browser), so the id alone proves nothing: the process must
+    also have begun when the record says this app did.
+    """
     try:
         record = json.loads(_instance_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     pid = record.get("pid")
-    return isinstance(pid, int) and pid != os.getpid() and _alive(pid)
+    if not isinstance(pid, int) or pid == os.getpid() or not _alive(pid):
+        return False
+    started = record.get("started")
+    if not isinstance(started, (int, float)):
+        return _is_urakatsu(pid)
+    actual = _started(pid)
+    return actual is not None and abs(actual - started) < START_TOLERANCE
 
 
 def _claim_instance(port: Optional[int] = None) -> None:
     """Recorded at startup (so a second launch during the GPU setup finds this one), then with the port."""
     path = _instance_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"pid": os.getpid(), "port": port}), encoding="utf-8")
+    record = {"pid": os.getpid(), "port": port, "started": _started(os.getpid())}
+    path.write_text(json.dumps(record), encoding="utf-8")
 
 
 def _release_instance() -> None:
