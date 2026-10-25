@@ -37,6 +37,7 @@ BUILTIN_MODULES = (
     "urakatsu.providers.inpainting.flux2_klein",
     "urakatsu.providers.inpainting.rorem_mixed",
     "urakatsu.providers.inpainting.diffusion_recipe",
+    "urakatsu.providers.inpainting.nano_banana",
     # translation (local llama.cpp + hosted providers)
     "urakatsu.providers.translation",
 )

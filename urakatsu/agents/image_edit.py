@@ -8,6 +8,8 @@ image model can, from an instruction ("translate this SFX into English, keep its
   images endpoint (``POST {CODEX_BASE_URL}/images/edits``, as ``codex-rs/ext/image-generation``
   sends it: ``gpt-image-2``, the input as a data URL, the result as ``b64_json``). It has its
   own usage limit on the plan, and no mask: the model redraws everything it is sent.
+  The second is ``UrakatsuCloudImageEditor``: Nano Banana 2.1 on Urakatsu Cloud, for a key with
+  image permission (``urakatsu.remote.cloud.image_access``), billed to the cloud account.
 - Because of that, the tool sends a crop, not the page (``plan_window``): the region plus a
   margin of context, widened over real page pixels to one of the model's output shapes
   (``SIZES``) and padded with white only where the page ends. The answer is scaled back to
@@ -31,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import httpx
+import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from urakatsu.providers.translation.remote.base import decode_response
@@ -128,6 +131,39 @@ class ChatGptImageEditor(ImageEditor):
         except (KeyError, IndexError, TypeError, ValueError, OSError) as error:
             raise AgentError(f"ChatGPT returned no image ({error})") from error
         return result.convert("RGB")
+
+
+# Nano Banana draws 1K images; a crop no longer than this is one image on the cloud's meter.
+CLOUD_SIDE = 1024
+
+
+class UrakatsuCloudImageEditor(ImageEditor):
+    """Nano Banana 2.1 on Urakatsu Cloud, through the ``nano-banana-2.1`` provider's cloud client.
+
+    The whole crop is the edit area (the tool keeps only the region afterwards), sent at most
+    ``CLOUD_SIDE`` pixels on its long side so it counts as one image, and scaled back to ``size``.
+    Nano Banana has no quality setting, so ``quality`` is not sent."""
+
+    name = "Urakatsu Cloud"
+
+    async def edit(self, image: Image.Image, prompt: str, size: tuple[int, int], quality: str = "auto") -> Image.Image:
+        from urakatsu.providers.inpainting.nano_banana import NanoBananaProvider
+        from urakatsu.remote import CLOUD
+
+        sent = image.convert("RGB")
+        if max(sent.size) > CLOUD_SIDE:
+            scale = CLOUD_SIDE / max(sent.size)
+            sent = sent.resize((max(1, round(sent.width * scale)), max(1, round(sent.height * scale))), Image.Resampling.LANCZOS)
+        everywhere = np.full((sent.height, sent.width), 255, np.uint8)
+        provider = NanoBananaProvider({}, None, CLOUD)
+        try:
+            await provider.load()
+            result = await asyncio.to_thread(provider._fill, sent, everywhere, prompt)
+        except Exception as error:
+            raise AgentError(f"Urakatsu Cloud image edit failed: {error}") from error
+        finally:
+            provider.unload()
+        return result.convert("RGB").resize(size, Image.Resampling.LANCZOS)
 
 
 def _png(image: Image.Image) -> bytes:

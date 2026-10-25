@@ -69,7 +69,7 @@ async def test_native_grpc_roundtrip(workspace):
             caps = await stub.GetCapabilities(pb.Empty())
             assert caps.device.backend == "cpu" and list(caps.stages) == ["detection", "ocr", "translation", "inpainting", "sound_effects"]
             detector = next(p for p in caps.providers if p.id == "fake-detector")
-            assert [r.name for r in detector.runtimes] == ["torch", "onnx", "remote"]
+            assert [r.name for r in detector.runtimes] == ["torch", "onnx", "remote", "cloud"]
 
             config = await stub.GetConfig(pb.Empty())
             config.runtimes["fake-detector"] = "onnx"

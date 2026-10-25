@@ -1,0 +1,42 @@
+Urakatsu
+Copyright (c) 2026 Urakatsu contributors
+
+Urakatsu's own code is licensed under the MIT License. See LICENSE.
+
+Urakatsu is a refactored version of Koharu, an ML-powered manga translator written in Rust:
+https://github.com/koharu-rs/koharu
+
+Its pipeline, scene model and typesetting follow Koharu, and parts of this project are derived
+from Koharu's source. Koharu is copyright (c) 2025-2026 Mayo Takanashi and Koharu contributors,
+and is dual-licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Urakatsu uses Koharu under the MIT License, and the notice and license text below are included
+as that license requires. The full texts of both licenses are at
+https://github.com/koharu-rs/koharu/blob/main/LICENSE-MIT and
+https://github.com/koharu-rs/koharu/blob/main/LICENSE-APACHE
+
+The Koharu name and logo identify that project. Their use here credits where Urakatsu comes from
+and does not imply endorsement by Koharu's authors.
+
+----------------------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2025-2026 Mayo Takanashi and Koharu contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

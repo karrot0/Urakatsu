@@ -23,7 +23,7 @@ Like the pipeline, it keeps one model per stage (loading another for a stage unl
 first), runs one load or inference at a time (one accelerator lane), and on out-of-memory
 unloads the other stages' models and retries once. A model's id is a hash of its stage,
 provider and settings, so apps that ask for the same model share it. Each provider runs on the
-runtime this machine's configuration picks for it (``pipeline.toml``), never ``remote``.
+runtime this machine's configuration picks for it (``pipeline.toml``), never ``remote`` or ``cloud``.
 
 Failures come back as ``{"error", "kind"}``; ``kind`` (unavailable, load, out_of_memory,
 processing) lets the client raise the error the pipeline expects.
@@ -56,7 +56,7 @@ from urakatsu.core.stage import Stage
 from urakatsu.providers.base import Provider
 from urakatsu.runtimes.manager import RuntimeManager
 
-from . import PROTOCOL, REMOTE, wire
+from . import OFFLOADED, PROTOCOL, wire
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +95,11 @@ def failure(error: BaseException) -> dict[str, str]:
 def failed(error: BaseException, status: int = 500) -> JSONResponse:
     body = failure(error)
     return JSONResponse(body, status_code=503 if body["kind"] == "unavailable" else status)
+
+
+def local(cls: type[Provider]) -> bool:
+    """Whether a worker can run ``cls`` itself (not a model only Urakatsu Cloud runs)."""
+    return not cls.runtimes or any(runtime not in OFFLOADED for runtime in cls.runtimes)
 
 
 def model_id(stage: Stage, provider: str, settings: dict[str, Any]) -> str:
@@ -165,19 +170,22 @@ class Worker:
             {"id": cls.id, "name": cls.name, "stage": Stage.parse(cls.stage).value, "runtimes": list(cls.runtimes)}
             for stage in STAGES
             for cls in self.registry.list(stage)
+            if local(cls)
         ]
         return {"protocol": PROTOCOL, "version": __version__, "device": self.runtimes.device.label(), "providers": providers}
 
     def runtime_for(self, cls: type[Provider]) -> Optional[str]:
-        """This machine's choice for ``cls``; ``remote`` here would only send the work on again."""
+        """This machine's choice for ``cls``; ``remote`` or ``cloud`` here would only send the work on again."""
         runtime = self.config.runtime_for(cls.id)
-        return runtime if runtime and runtime != REMOTE and runtime in cls.runtimes else None
+        return runtime if runtime and runtime not in OFFLOADED and runtime in cls.runtimes else None
 
     async def load(self, request: LoadRequest) -> Model:
         stage = Stage.parse(request.stage)
         if stage not in STAGES:
             raise ValueError(f"a worker runs detection, OCR and inpainting models, not {stage.value}")
         cls = self.registry.get(stage, request.provider)
+        if not local(cls):
+            raise ValueError(f"{cls.id} runs only on Urakatsu Cloud, not on a worker")
         identifier = model_id(stage, cls.id, request.settings)
         existing = self.models.get(identifier)
         if existing is not None and existing.state != "failed":

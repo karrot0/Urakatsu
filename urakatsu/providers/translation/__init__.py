@@ -39,6 +39,7 @@ from .remote import (  # noqa: F401  (each import registers one hosted provider)
     openai,
     openai_compatible,
     openrouter,
+    urakatsu_cloud,
 )
 
 if TYPE_CHECKING:  # pragma: no cover

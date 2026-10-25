@@ -190,6 +190,16 @@ worker runs the same model code on its own runtime, downloads the weights itself
 one model per stage loaded. Loads and inference run as background jobs that the app polls, so
 no request stays open long enough for a tunnel to cut it, however slow the model is.
 
+Or let Urakatsu Cloud run them: make a key at [urakatsu.com](https://urakatsu.com/dashboard/keys),
+enter it under Settings, Providers, Urakatsu Cloud, and set a model's runtime to Urakatsu Cloud.
+The same key translates with the Urakatsu Cloud translation provider. The free plan covers 50
+pages a week.
+
+Nano Banana 2.1, Google's image model, is an inpainting model for generative fill and sound
+effects. Run it on your own Gemini API key (from Google AI Studio, in its options or
+`GEMINI_API_KEY`; runtime Gemini API), or on Urakatsu Cloud with a key that has image
+generation allowed. Only the area you select changes.
+
 PaddleOCR-VL, FLUX.2 Klein and RORem can also use a llama-server or sd-server that someone
 else started: keep their runtime on `llama` or `diffusion` and set Server URL. That server must
 be started with the model's weights (PaddleOCR-VL also needs its `--mmproj` and a context of at
@@ -250,4 +260,5 @@ typesetting, and runs on [llama.cpp](https://github.com/ggml-org/llama.cpp),
 [PyTorch](https://pytorch.org/), [Suwayomi Server](https://github.com/Suwayomi/Suwayomi-Server)
 and [Bun](https://bun.sh/).
 
-Licensed under the [MIT license](LICENSE).
+Licensed under the [MIT license](LICENSE). Koharu's copyright and license notices, which
+Urakatsu keeps, are in [NOTICE](NOTICE).

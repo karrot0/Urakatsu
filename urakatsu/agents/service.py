@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any, Optional
 
 from .agent import agent_classes, get_agent
 from .chatgpt import ChatGptAuth
 from .commands import COMMANDS, parse as parse_command
-from .image_edit import ChatGptImageEditor
+from .image_edit import ChatGptImageEditor, ImageEditor, UrakatsuCloudImageEditor
 from .models import ModelDirectory
 from .session import ConversationStore, Turns
 from .tools import ToolContext
@@ -48,8 +49,7 @@ class AgentService:
         text = text.strip()
         if not text:
             raise ValueError("the message is empty")
-        # Image edits use the ChatGPT account whichever model chats; it says so when signed out.
-        context = ToolContext(self.workspace, project_id=project_id, page_id=page_id, image_editor=ChatGptImageEditor(self.chatgpt))
+        context = ToolContext(self.workspace, project_id=project_id, page_id=page_id, image_editor=await self.image_editor())
         parsed = parse_command(text)
         command = None
         if parsed is not None:
@@ -64,6 +64,18 @@ class AgentService:
             conversation = self.store.create(agent, model, project_id)
         self.turns.start(conversation, text, get_agent(conversation.agent), backend, context, command)
         return conversation.id
+
+    async def image_editor(self) -> Optional[ImageEditor]:
+        """The image model edit_image uses, whichever model chats: the signed-in ChatGPT account
+        (its plan's own limit), else Nano Banana on Urakatsu Cloud when the key may generate
+        images; ``None`` hides the tool."""
+        if self.chatgpt.signed_in():
+            return ChatGptImageEditor(self.chatgpt)
+        from urakatsu.remote import cloud
+
+        if (await asyncio.to_thread(cloud.image_access)).ok:
+            return UrakatsuCloudImageEditor()
+        return None
 
     def commands(self) -> list[dict[str, str]]:
         return [command.describe() for command in COMMANDS.values()]

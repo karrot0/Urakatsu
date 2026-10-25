@@ -861,8 +861,12 @@ async def test_slash_command_runs_the_tool_without_a_model(workspace, project, m
     project_id, page_id = project
     first, second = [b.layer_id for b in workspace.page(project_id, page_id).blocks]
     editor = SolidEditor()
-    monkeypatch.setattr(agent_service, "ChatGptImageEditor", lambda auth: editor)
     agents = AgentService(workspace)
+
+    async def image_editor():
+        return editor
+
+    monkeypatch.setattr(agents, "image_editor", image_editor)
 
     async def no_model(ref):
         raise AssertionError("a command needs no model")
@@ -896,3 +900,77 @@ async def test_a_stream_of_only_keep_alives_fails_as_transient(monkeypatch):
     with pytest.raises(AgentError, match="keep-alives") as caught:
         await collect(backend)
     assert failure_kind(caught.value) == "transient"
+
+
+# ---- edit_image on Urakatsu Cloud ---------------------------------------------------------------
+
+
+def test_edit_image_is_offered_only_with_an_image_model(workspace):
+    from urakatsu.agents.agent import Assistant
+
+    toolset = Assistant().toolset()
+    without = [spec.name for spec in toolset.specs(ToolContext(workspace))]
+    with_editor = [spec.name for spec in toolset.specs(ToolContext(workspace, image_editor=SolidEditor()))]
+    assert "edit_image" not in without and "edit_image" in with_editor
+    assert "edit_image" in [spec.name for spec in toolset.specs()]  # no context: every tool
+    instructions = Assistant().instructions(ToolContext(workspace))
+    assert "allow image generation on their Urakatsu Cloud key" in instructions
+
+
+async def test_the_image_model_is_chatgpt_then_urakatsu_cloud_then_none(workspace, monkeypatch):
+    from urakatsu.agents.image_edit import UrakatsuCloudImageEditor
+    from urakatsu.core.types import Availability
+    from urakatsu.remote import cloud
+
+    agents = AgentService(workspace)
+    access = {"value": Availability.no("this API key cannot generate images")}
+    monkeypatch.setattr(cloud, "image_access", lambda: access["value"])
+    monkeypatch.setattr(agents.chatgpt, "signed_in", lambda: False)
+    assert await agents.image_editor() is None
+    access["value"] = Availability.yes()
+    assert isinstance(await agents.image_editor(), UrakatsuCloudImageEditor)
+    monkeypatch.setattr(agents.chatgpt, "signed_in", lambda: True)
+    assert isinstance(await agents.image_editor(), ChatGptImageEditor)
+
+
+def test_image_access_asks_the_cloud_and_reuses_the_answer(monkeypatch):
+    from urakatsu.remote import cloud
+
+    cloud.reset()
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")
+    asked = []
+
+    def get(url, headers, timeout):
+        asked.append((url, headers["Authorization"]))
+        body = {"plan": "free", "imageGeneration": {"allowed": False, "available": False, "reason": "this API key cannot generate images"}}
+        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cloud.httpx, "get", get)
+    first = cloud.image_access()
+    assert not first.ok and first.reason == "this API key cannot generate images"
+    assert cloud.image_access() == first and len(asked) == 1  # cached
+    assert asked[0] == (f"{cloud.url()}/v1/account", "Bearer uk_live_test")
+    cloud.reset()
+
+
+async def test_the_cloud_editor_sends_one_1k_image_with_everything_editable(monkeypatch):
+    from urakatsu.agents.image_edit import CLOUD_SIDE, UrakatsuCloudImageEditor
+    from urakatsu.remote import cloud
+    from urakatsu.remote.client import RemoteModel
+
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")
+    monkeypatch.setattr(cloud, "hosted", lambda: frozenset({"nano-banana-2.1"}))
+
+    sent = []
+    monkeypatch.setattr(RemoteModel, "load", lambda self: None)
+    monkeypatch.setattr(RemoteModel, "unload", lambda self: None)
+
+    def fill(self, image, mask, prompt):
+        sent.append((image.size, mask.min(), prompt))
+        return Image.new("RGB", image.size, (0, 0, 255))
+
+    monkeypatch.setattr(RemoteModel, "fill", fill)
+    result = await UrakatsuCloudImageEditor().edit(Image.new("RGB", (1536, 1024), "white"), "translate it", (1536, 1024))
+    (size, lowest, prompt), = sent
+    assert max(size) == CLOUD_SIDE and size == (1024, 683) and lowest == 255 and prompt == "translate it"
+    assert result.size == (1536, 1024) and result.getpixel((10, 10)) == (0, 0, 255)

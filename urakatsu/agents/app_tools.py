@@ -342,7 +342,8 @@ def _region_box(args: dict[str, Any], blocks: dict[str, Any]) -> tuple[int, int,
 
 @tool(
     "edit_image",
-    "Redraw part of a page's art with an image model (the signed-in ChatGPT account's) and add the result as a new "
+    "Redraw part of a page's art with an image model (the signed-in ChatGPT account's, else Nano Banana on Urakatsu "
+    "Cloud) and add the result as a new "
     "'edit' raster layer above the art. For lettering typesetting cannot redo, above all sound effects: give the "
     "region in page pixels, or the layer_ids of text blocks whose frames cover it, and an instruction saying exactly "
     "what to change, e.g. \"Translate the sound effect ドドド into English as RUMBLE, hand-lettered in the same style, "
@@ -351,7 +352,8 @@ def _region_box(args: dict[str, Any], blocks: dict[str, Any]) -> tuple[int, int,
     "mode 'page' redraws the whole page, translating all of its lettering into the art and hiding every text block; "
     "the model draws at most 1536 pixels on the long side, so large pages come back softer. base 'source' (default) "
     "is the original scan with its original lettering; 'current' is the page as edited (cleanup, paint, earlier "
-    "edits) without text. Takes up to a few minutes and uses the ChatGPT plan's image limit; one undo removes it.",
+    "edits) without text. Takes up to a few minutes and uses the ChatGPT plan's image limit, or one image of the "
+    "Urakatsu Cloud plan; one undo removes it.",
     {
         "page_id": _PAGE_ID,
         "instruction": {"type": "string"},
@@ -369,11 +371,12 @@ def _region_box(args: dict[str, Any], blocks: dict[str, Any]) -> tuple[int, int,
     },
     required=("instruction",),
     mutates=True,
+    available=lambda context: context.image_editor is not None,
 )
 async def edit_image(context: ToolContext, args: dict[str, Any]) -> Any:
     project, page_id = context.project(), context.page(args.get("page_id"))
     if context.image_editor is None:
-        raise ValueError("no image model is available; sign in with ChatGPT")
+        raise ValueError("no image model is available; sign in with ChatGPT, or allow image generation on your Urakatsu Cloud key")
     instruction = str(args["instruction"]).strip()
     if not instruction:
         raise ValueError("the instruction is empty")

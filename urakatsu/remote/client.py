@@ -6,7 +6,8 @@ worker (``Provider.__init__`` binds them here). The worker runs the provider's o
 its runtime, so a remote run produces what a local one would.
 
 - Where: ``remote_url`` in the provider's settings, else ``URAKATSU_REMOTE_URL``; the token is
-  ``remote_api_key``, else ``URAKATSU_REMOTE_API_KEY``, sent as a bearer token.
+  ``remote_api_key``, else ``URAKATSU_REMOTE_API_KEY``, sent as a bearer token. On the ``cloud``
+  runtime, Urakatsu Cloud and the account key instead (``cloud``).
 - Loading and every inference call are jobs on the worker: the request returns at once, and the
   client polls with ``wait`` (the worker holds each poll open up to ``POLL_WAIT`` seconds, so it
   answers as soon as the job ends), then fetches the result. No request stays open longer than
@@ -31,7 +32,7 @@ from PIL import Image
 from urakatsu.core.errors import ModelLoadError, OutOfMemory, ProcessingError, ProviderUnavailable
 from urakatsu.core.results import LayoutDetections
 
-from . import PROTOCOL, wire
+from . import CLOUD, PROTOCOL, cloud, wire
 
 if TYPE_CHECKING:  # pragma: no cover
     from urakatsu.providers.base import Provider
@@ -43,8 +44,9 @@ KEY_ENV = "URAKATSU_REMOTE_API_KEY"
 TIMEOUT = httpx.Timeout(30.0, read=None)
 # Seconds the worker may hold a poll open (it caps this at its ``MAX_WAIT``).
 POLL_WAIT = 20.0
-# Settings that say where to connect, not how the model runs: the worker uses its own.
-CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "server_url", "server_api_key"})
+# Settings that say where to connect or hold the user's own keys, not how the model runs: the
+# worker uses its own, and a key never leaves this machine.
+CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "server_url", "server_api_key", "api_key"})
 
 # Tests swap this for one that returns a client bound to an in-process worker.
 client_factory: Callable[[str, dict[str, str]], httpx.Client] = lambda url, headers: httpx.Client(
@@ -65,9 +67,17 @@ def error_for(kind: Optional[str], message: str) -> Exception:
     return ProcessingError(text)
 
 
-def worker_error(response: httpx.Response, action: str) -> Exception:
+def worker_error(response: httpx.Response, action: str, on_cloud: bool = False) -> Exception:
     if response.status_code == 401:
+        if on_cloud:
+            return ProviderUnavailable(f"Urakatsu Cloud rejected the key when asked to {action}; make a new one at {cloud.KEYS_URL}")
         return ProviderUnavailable(f"the worker rejected the token when asked to {action}; check the remote API key")
+    if response.status_code == 402:
+        try:
+            message = str(response.json().get("error"))
+        except (ValueError, AttributeError):
+            message = response.text[:500]
+        return ProviderUnavailable(f"Urakatsu Cloud: {message}")
     try:
         body = response.json()
         return error_for(body.get("kind"), str(body.get("error") or response.text))
@@ -87,15 +97,26 @@ class RemoteModel:
 
     # -- connection -----------------------------------------------------------------------------
 
+    @property
+    def on_cloud(self) -> bool:
+        return self.provider.runtime_name == CLOUD
+
     def url(self) -> str:
+        if self.on_cloud:
+            return cloud.url()
         url = getattr(self.provider.settings, "remote_url", None) or os.environ.get(URL_ENV) or ""
         return url.strip().rstrip("/")
 
     def headers(self) -> dict[str, str]:
-        key = getattr(self.provider.settings, "remote_api_key", None) or os.environ.get(KEY_ENV)
+        key = cloud.api_key() if self.on_cloud else getattr(self.provider.settings, "remote_api_key", None) or os.environ.get(KEY_ENV)
         return {"Authorization": f"Bearer {key.strip()}"} if key and key.strip() else {}
 
     def model_settings(self) -> dict[str, Any]:
+        """What the worker gets: the model's settings; on Urakatsu Cloud only which catalog model,
+        since the cloud runs its models with its own settings."""
+        if self.on_cloud:
+            model = getattr(self.provider.settings, "model", None)
+            return {"model": model} if model else {}
         return self.provider.settings.model_dump(mode="json", exclude=CONNECTION_SETTINGS)
 
     # -- lifecycle ------------------------------------------------------------------------------
@@ -104,6 +125,8 @@ class RemoteModel:
         url = self.url()
         if not url:
             raise ProviderUnavailable(f"{self.provider.name}: set the worker URL in Settings, Pipeline (runtime remote)")
+        if self.on_cloud and cloud.api_key() is None:
+            raise ProviderUnavailable(f"{self.provider.name}: add your Urakatsu Cloud key in Settings, Providers ({cloud.KEYS_URL})")
         self.close()
         self.client = client_factory(url, self.headers())
         try:
@@ -178,7 +201,7 @@ class RemoteModel:
         if response.status_code == 404 and path.startswith("/v1/models/"):
             raise ModelGone()
         if response.status_code >= 400:
-            raise worker_error(response, action)
+            raise worker_error(response, action, self.on_cloud)
         return response.json() if response.headers.get("content-type", "").startswith("application/json") else response.content
 
     def _call(self, operation: str, **kwargs: Any) -> Any:

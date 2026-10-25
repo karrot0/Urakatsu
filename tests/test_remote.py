@@ -1,7 +1,9 @@
-"""The remote runtime (a worker running providers for another app) and attached servers."""
+"""The remote runtime (a worker running providers for another app), the cloud runtime (the same
+client against Urakatsu Cloud), and attached servers."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -18,7 +20,8 @@ from urakatsu.core.errors import OutOfMemory, ProviderUnavailable, is_out_of_mem
 from urakatsu.core.registry import Registry
 from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
 from urakatsu.providers.base import DetectionProvider, InpaintingProvider, OcrProvider, TranslationProvider
-from urakatsu.remote import REMOTE, client as remote_client, wire
+from urakatsu.core.config import save_config
+from urakatsu.remote import CLOUD, REMOTE, client as remote_client, cloud, wire
 from urakatsu.remote.worker import Worker, create_app
 from urakatsu.runtimes.manager import RuntimeManager
 
@@ -141,12 +144,12 @@ def remote(cls, **settings):
 
 
 def test_vision_providers_declare_remote_but_never_default_to_it():
-    assert EchoOcr.runtimes_declared() == (REMOTE,)
+    assert EchoOcr.runtimes_declared() == (REMOTE, CLOUD)
     assert EchoOcr.default_runtime() is None
     info = EchoInpainter.info()
-    assert [r.name for r in info.runtimes] == [REMOTE]
+    assert [r.name for r in info.runtimes] == [REMOTE, CLOUD]
     assert info.settings_schema["properties"]["remote_url"]["runtimes"] == [REMOTE]
-    assert REMOTE not in LocalTranslator.runtimes_declared()
+    assert REMOTE not in LocalTranslator.runtimes_declared() and CLOUD not in LocalTranslator.runtimes_declared()
     assert "remote_url" not in LocalTranslator.info().settings_schema.get("properties", {})
 
 
@@ -387,3 +390,160 @@ def test_a_job_whose_model_was_unloaded_while_it_waited_reports_it(worker):
     assert lost["state"] == "failed" and lost["failure"]["kind"] == "gone"
     assert http.get(f"/v1/jobs/{second.json()['job']}/result").status_code == 409
     assert http.get("/v1/jobs/nope").status_code == 404
+
+
+# ---- Urakatsu Cloud ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cloud_account(monkeypatch):
+    """A saved account key, and a cloud that hosts the echo detector and OCR."""
+    monkeypatch.delenv(cloud.KEY_ENV, raising=False)
+    monkeypatch.setenv(cloud.URL_ENV, "http://cloud.test/")
+    config = PipelineConfig()
+    config.providers[cloud.PROVIDER] = {"api_key": " uk_live_123 "}
+    save_config(config)
+    monkeypatch.setattr(cloud, "hosted", lambda: frozenset({"echo-detector", "echo-ocr"}))
+    return "uk_live_123"
+
+
+def test_cloud_needs_the_account_key(monkeypatch):
+    monkeypatch.delenv(cloud.KEY_ENV, raising=False)
+    availability = EchoOcr.runtime_availability(CLOUD)
+    assert not availability.ok and "Urakatsu Cloud key" in availability.reason
+    assert not EchoOcr.available(CLOUD).ok
+
+
+def test_cloud_offers_only_the_models_it_hosts(cloud_account):
+    assert EchoOcr.runtime_availability(CLOUD).ok
+    hosted_not = EchoInpainter.runtime_availability(CLOUD)
+    assert not hosted_not.ok and hosted_not.reason == "not running on Urakatsu Cloud right now"
+    assert "remote_url" not in [k for k, v in EchoOcr.info().settings_schema["properties"].items() if CLOUD in v.get("runtimes", [])]
+
+
+def test_cloud_answers_unknown_when_it_cannot_be_reached(monkeypatch):
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_env")
+    monkeypatch.setattr(cloud, "hosted", lambda: None)  # offline: the load reports the real error
+    assert EchoOcr.runtime_availability(CLOUD).ok
+
+
+async def test_cloud_runtime_sends_the_account_key_to_the_cloud(worker, cloud_account, monkeypatch):
+    _, http, _ = worker
+    urls: list[str] = []
+    real = remote_client.client_factory
+
+    def factory(url, headers):
+        urls.append(url)
+        return real(url, {"Authorization": f"Bearer {TOKEN}"} if headers == {"Authorization": f"Bearer {cloud_account}"} else headers)
+
+    monkeypatch.setattr(remote_client, "client_factory", factory)
+    ocr = EchoOcr({}, None, CLOUD)
+    await ocr.load()
+    assert urls == ["http://cloud.test"]
+    assert await ocr.recognize([page()]) == ["64x48:RGB"]
+
+
+async def test_cloud_without_a_key_says_where_to_add_it(monkeypatch):
+    monkeypatch.delenv(cloud.KEY_ENV, raising=False)
+    provider = EchoOcr({}, None, CLOUD)
+    with pytest.raises(ProviderUnavailable, match="Urakatsu Cloud key"):
+        await provider._remote.load()
+
+
+def test_cloud_quota_and_rejected_keys_read_as_such():
+    spent = remote_client.worker_error(httpx.Response(402, json={"error": "your weekly OCR quota is used up", "kind": "unavailable"}), "recognize", True)
+    assert isinstance(spent, ProviderUnavailable) and str(spent) == "Urakatsu Cloud: your weekly OCR quota is used up"
+    rejected = remote_client.worker_error(httpx.Response(401, json={"error": "bad key"}), "load", True)
+    assert isinstance(rejected, ProviderUnavailable) and cloud.KEYS_URL in str(rejected)
+
+
+async def test_cloud_translation_uses_the_cloud_and_the_account_key(cloud_account):
+    from urakatsu.providers.translation.backend import TranslationRequest
+    from urakatsu.providers.translation.language import Language
+    from urakatsu.providers.translation.remote.urakatsu_cloud import UrakatsuCloudTranslator
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "urakatsu/translate", "name": "Urakatsu Translate", "vision": True}]})
+        content = json.dumps({"translations": [{"id": 0, "text": "Hello"}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    transport = httpx.MockTransport(handler)
+    (listed,) = UrakatsuCloudTranslator.list_models({}, transport=transport)
+    assert (listed.provider, listed.model, listed.name, listed.vision) == (cloud.PROVIDER, "urakatsu/translate", "Urakatsu Translate", True)
+    assert "authorization" not in seen[0].headers  # listed before the account is set up
+
+    selection = {"model": {"provider": cloud.PROVIDER, "model": "urakatsu/translate", "vision": True}, "generation": {}}
+    translator = UrakatsuCloudTranslator({"api_key": cloud_account, "translation": selection})
+    translator.transport = transport
+    assert await translator.translate(TranslationRequest(segments=["こんにちは"], target_language=Language.ENGLISH)) == ["Hello"]
+    assert str(seen[-1].url) == "http://cloud.test/v1/chat/completions"
+    assert seen[-1].headers["authorization"] == f"Bearer {cloud_account}"
+
+
+def test_nano_banana_runs_on_a_gemini_key_or_urakatsu_cloud(cloud_account, monkeypatch):
+    from urakatsu.providers.inpainting.nano_banana import NanoBananaProvider
+
+    assert NanoBananaProvider.runtimes_declared() == ("gemini", CLOUD)
+    info = NanoBananaProvider.info()
+    assert info.prompted and info.instructed and list(info.settings_schema["properties"]) == ["api_key"]
+    # Hosted once the cloud lists it; the inference methods then go to the cloud.
+    monkeypatch.setattr(cloud, "hosted", lambda: frozenset({"nano-banana-2.1"}))
+    assert NanoBananaProvider.runtime_availability(CLOUD).ok
+    provider = NanoBananaProvider({}, None, CLOUD)
+    assert provider._fill.__self__ is provider._remote and provider._inpaint.__self__ is provider._remote
+    assert not NanoBananaProvider.runtime_availability(REMOTE).ok
+    # The user's own Gemini key stays on this machine.
+    assert "api_key" not in NanoBananaProvider({"api_key": "g-secret"}, None, CLOUD)._remote.model_settings()
+
+
+class CloudOnly(InpaintingProvider):
+    id = "cloud-only"
+    runtimes = (CLOUD,)
+    remotable = False
+
+
+def test_a_worker_does_not_offer_or_load_cloud_only_models():
+    from urakatsu.remote.worker import LoadRequest
+
+    registry = Registry()
+    registry._discovered = True
+    registry.add(EchoInpainter)
+    registry.add(CloudOnly)
+    instance = Worker(PipelineConfig(device="cpu"), RuntimeManager("cpu"), registry)
+    assert [p["id"] for p in instance.info()["providers"]] == ["echo-inpainter"]
+    with pytest.raises(ValueError, match="only on Urakatsu Cloud"):
+        asyncio.run(instance.load(LoadRequest(stage="inpainting", provider="cloud-only")))
+
+
+def test_the_cloud_address_comes_from_settings_then_the_environment(monkeypatch):
+    monkeypatch.setenv(cloud.URL_ENV, "http://env.test/")
+    assert cloud.url({"server_url": " http://local.test:8787/ "}) == "http://local.test:8787"
+    assert cloud.url({}) == "http://env.test"
+    monkeypatch.delenv(cloud.URL_ENV)
+    assert cloud.url({}) == cloud.URL
+
+
+def test_on_the_cloud_only_the_model_choice_is_sent(cloud_account):
+    provider = EchoInpainter({"remote_url": "http://x", "model": "org/weights"}, None, CLOUD)
+    assert provider._remote.model_settings() == {"model": "org/weights"}
+    assert EchoInpainter({}, None, CLOUD)._remote.model_settings() == {}
+    assert "remote_url" not in remote(EchoInpainter)._remote.model_settings()  # a worker still gets the options
+
+
+def test_only_models_a_cloud_worker_runs_are_offered(monkeypatch):
+    cloud.reset()
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")
+
+    def get(url, timeout):
+        body = {"providers": [{"id": "echo-ocr", "online": True}, {"id": "echo-detector", "online": False}]}
+        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cloud.httpx, "get", get)
+    assert EchoOcr.runtime_availability(CLOUD).ok
+    off = EchoDetector.runtime_availability(CLOUD)
+    assert not off.ok and off.reason == "not running on Urakatsu Cloud right now"
+    cloud.reset()

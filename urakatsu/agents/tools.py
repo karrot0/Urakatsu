@@ -57,6 +57,8 @@ class Tool:
     handler: Handler
     # Tools that edit the project or settings; the UI reloads after them.
     mutates: bool = False
+    # Whether the model is offered the tool in this context (edit_image needs an image model).
+    available: Optional[Callable[["ToolContext"], bool]] = None
 
     def spec(self) -> ToolSpec:
         return ToolSpec(self.name, self.description, self.parameters)
@@ -74,6 +76,7 @@ def tool(
     properties: Optional[dict[str, Any]] = None,
     required: tuple[str, ...] = (),
     mutates: bool = False,
+    available: Optional[Callable[[ToolContext], bool]] = None,
 ) -> Callable[[Handler], Tool]:
     """Declares a tool from a handler; ``properties`` are the argument JSON schema's properties."""
 
@@ -81,7 +84,7 @@ def tool(
         parameters: dict[str, Any] = {"type": "object", "properties": properties or {}, "additionalProperties": False}
         if required:
             parameters["required"] = list(required)
-        return Tool(name, description, parameters, handler, mutates)
+        return Tool(name, description, parameters, handler, mutates, available)
 
     return wrap
 
@@ -93,8 +96,9 @@ class Toolset:
     def __iter__(self):
         return iter(self._tools.values())
 
-    def specs(self) -> list[ToolSpec]:
-        return [t.spec() for t in self._tools.values()]
+    def specs(self, context: Optional[ToolContext] = None) -> list[ToolSpec]:
+        """The tools to offer; with a ``context``, only those available in it."""
+        return [t.spec() for t in self._tools.values() if context is None or t.available is None or t.available(context)]
 
     def get(self, name: str) -> Optional[Tool]:
         return self._tools.get(name)

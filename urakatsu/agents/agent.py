@@ -66,8 +66,13 @@ class Assistant(Agent):
             "keep them, and every edit can be undone.",
             "When asked to improve translations, keep names, honorifics and terms consistent across pages "
             "(search_text helps), keep lines short enough for their balloons, and preserve the speaker's tone.",
-            "Sound effects and other stylized lettering are redrawn in the art with edit_image, not typeset. You cannot "
-            "see the page, so take the region from text block frames (get_page) or ask the user where it is.",
+            (
+                "Sound effects and other stylized lettering are redrawn in the art with edit_image, not typeset. You "
+                "cannot see the page, so take the region from text block frames (get_page) or ask the user where it is."
+                if context.image_editor is not None
+                else "Sound effects and other stylized lettering need an image model, and none is available: tell the "
+                "user to sign in with ChatGPT, or to allow image generation on their Urakatsu Cloud key."
+            ),
             "Before long or broad operations (running the whole project, deleting blocks, changing settings), say "
             "what you are about to do. Keep replies brief; the user sees your tool calls.",
         ]

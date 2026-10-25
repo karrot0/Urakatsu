@@ -101,11 +101,11 @@ def test_automatic_inpainting_skips_committed_cleanup(tmp_path):
 def test_stage_is_registered_for_inpainting_and_providers_are_listed():
     from urakatsu.core.registry import registry
 
-    assert {cls.id for cls in registry.list(Stage.INPAINTING)} == {"lama", "aot-inpainting", "flux2-klein", "rorem-mixed", "diffusion-model"}
-    # Every inpainter can also run on a worker (the remote runtime).
-    assert LamaProvider.runtimes_declared() == ("torch", "remote")
-    assert Flux2KleinProvider.runtimes_declared() == ("diffusion", "remote")
-    assert RoremMixedProvider.runtimes_declared() == ("diffusion", "remote")
+    assert {cls.id for cls in registry.list(Stage.INPAINTING)} == {"lama", "aot-inpainting", "flux2-klein", "rorem-mixed", "diffusion-model", "nano-banana-2.1"}
+    # Every inpainter can also run on a worker (the remote runtime) or on Urakatsu Cloud.
+    assert LamaProvider.runtimes_declared() == ("torch", "remote", "cloud")
+    assert Flux2KleinProvider.runtimes_declared() == ("diffusion", "remote", "cloud")
+    assert RoremMixedProvider.runtimes_declared() == ("diffusion", "remote", "cloud")
 
 
 # ---- inpaint_tiled (Rust tests in stages/inpainting.rs) ------------------------------------------

@@ -73,6 +73,9 @@ class OpenAiCompatibleTranslator(RemoteTranslator):
             for model_id in (field(cls.id, entry, "id") for entry in entries)
         ]
 
+    def base_url(self) -> Optional[str]:
+        return self.settings.base_url
+
     async def _translate(self, request: TranslationRequest, generation: GenerationConfig) -> list[str]:
         key = self.optional_api_key()
         system, user = prompt.prompts(request)
@@ -106,7 +109,7 @@ class OpenAiCompatibleTranslator(RemoteTranslator):
             },
         }
         response = await self.post(
-            endpoint(self.settings.base_url, "chat/completions"),
+            endpoint(self.base_url(), "chat/completions"),
             headers=_auth_headers(key),
             json_body=body,
         )

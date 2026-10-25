@@ -20,7 +20,7 @@ import { AboutSettings } from "./Updates";
 import { TOOL_INFO } from "./ToolBelt";
 import { ACCENTS, NEUTRALS } from "../theme";
 import { Badge, Segmented } from "./ui";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "cn";
@@ -86,50 +86,50 @@ export function SettingsPage() {
 
   return (
     <InstalledContext.Provider value={installed}>
-    <div className="settings grid h-screen grid-cols-[256px_minmax(0,1fr)] bg-surface-sunk">
-      <nav className="flex flex-col gap-0.5 px-2 pt-[calc(--spacing(3)+var(--window-controls-top))] pb-3" aria-label="Settings sections" data-titlebar>
-        <Button variant="ghost" className="mb-4 justify-start font-normal" onClick={() => ws.setSettingsOpen(false)}>
-          <ArrowLeft size={16} /> {ws.settingsFromModels ? "Back to models" : ws.settingsFromSources ? "Back to sources" : ws.project ? "Back to editor" : "Back to projects"}
-        </Button>
-        <p className="px-2 pb-1 text-xs leading-5 text-fg-3">Settings</p>
-        {TABS.map(([id, label, Icon]) => (
-          <button
-            key={id}
-            className={cn(
-              "flex h-9 cursor-pointer items-center gap-2 rounded-control px-2 text-left transition-colors duration-[20ms] ease-in focus-visible:shadow-focus focus-visible:outline-none",
-              tab === id ? "bg-selected font-medium text-fg [&_svg]:text-brand" : "text-fg-2 hover:bg-hover hover:text-fg [&_svg]:text-icon-2",
-            )}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={() => setTab(id)}
-          >
-            <Icon size={16} /> {label}
-          </button>
-        ))}
-      </nav>
-      <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-tl-modal bg-surface shadow-raised">
-        <header className="flex h-12 flex-none items-center justify-between pl-8 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
-          <h1 className="text-sm font-semibold">Settings</h1>
-          <span className="flex h-full items-center pr-8 text-xs leading-4 tracking-[0.005em] text-fg-3" role="status">
-            {status === "saving" ? "Saving" : status === "saved" ? "All changes saved" : ""}
-            <TitleBarInset side="right" />
-          </span>
-        </header>
-        <ScrollArea className="flex-1">
-          <div className="mx-auto w-full max-w-[820px] px-8 pt-10 pb-16">
-            {tab === "appearance" && <Appearance />}
-            {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
-            {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
-            {tab === "providers" && draft && <Providers draft={draft} update={update} />}
-            {tab === "translation" && draft && <Translation draft={draft} update={update} />}
-            {tab === "typesetting" && draft && <Typesetting draft={draft} update={update} />}
-            {tab === "shortcuts" && <Shortcuts />}
-            {tab === "runtimes" && <Runtimes />}
-            {tab === "sources" && <SourcesSettings />}
-            {tab === "about" && <AboutSettings />}
-          </div>
-        </ScrollArea>
-      </main>
-    </div>
+      <div className="settings grid h-screen grid-cols-[256px_minmax(0,1fr)] bg-surface-sunk">
+        <nav className="flex flex-col gap-0.5 px-2 pt-[calc(--spacing(3)+var(--window-controls-top))] pb-3" aria-label="Settings sections" data-titlebar>
+          <Button variant="ghost" className="mb-4 justify-start font-normal" onClick={() => ws.setSettingsOpen(false)}>
+            <ArrowLeft size={16} /> {ws.settingsFromModels ? "Back to models" : ws.settingsFromSources ? "Back to sources" : ws.project ? "Back to editor" : "Back to projects"}
+          </Button>
+          <p className="px-2 pb-1 text-xs leading-5 text-fg-3">Settings</p>
+          {TABS.map(([id, label, Icon]) => (
+            <button
+              key={id}
+              className={cn(
+                "flex h-9 cursor-pointer items-center gap-2 rounded-control px-2 text-left transition-colors duration-[20ms] ease-in focus-visible:shadow-focus focus-visible:outline-none",
+                tab === id ? "bg-selected font-medium text-fg [&_svg]:text-brand" : "text-fg-2 hover:bg-hover hover:text-fg [&_svg]:text-icon-2",
+              )}
+              aria-current={tab === id ? "page" : undefined}
+              onClick={() => setTab(id)}
+            >
+              <Icon size={16} /> {label}
+            </button>
+          ))}
+        </nav>
+        <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-tl-modal bg-surface shadow-raised">
+          <header className="flex h-12 flex-none items-center justify-between pl-8 shadow-[inset_0_-1px_0_var(--border-soft)]" data-titlebar>
+            <h1 className="text-sm font-semibold">Settings</h1>
+            <span className="flex h-full items-center pr-8 text-xs leading-4 tracking-[0.005em] text-fg-3" role="status">
+              {status === "saving" ? "Saving" : status === "saved" ? "All changes saved" : ""}
+              <TitleBarInset side="right" />
+            </span>
+          </header>
+          <ScrollArea className="flex-1">
+            <div className="mx-auto w-full max-w-[820px] px-8 pt-10 pb-16">
+              {tab === "appearance" && <Appearance />}
+              {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
+              {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
+              {tab === "providers" && draft && <Providers draft={draft} update={update} />}
+              {tab === "translation" && draft && <Translation draft={draft} update={update} />}
+              {tab === "typesetting" && draft && <Typesetting draft={draft} update={update} />}
+              {tab === "shortcuts" && <Shortcuts />}
+              {tab === "runtimes" && <Runtimes />}
+              {tab === "sources" && <SourcesSettings />}
+              {tab === "about" && <AboutSettings />}
+            </div>
+          </ScrollArea>
+        </main>
+      </div>
     </InstalledContext.Provider>
   );
 }
@@ -257,16 +257,33 @@ const VISION: { stage: "detection" | "ocr" | "inpainting"; title: string; descri
   { stage: "inpainting", title: "Inpainting", description: "Removes the original lettering." },
 ];
 
-// The runtime that runs a model on a Urakatsu worker elsewhere (urakatsu/remote).
+// The runtimes that run a model elsewhere: a Urakatsu worker, or Urakatsu Cloud (urakatsu/remote).
 const REMOTE = "remote";
+const CLOUD = "cloud";
+// A model on a hosted API (Nano Banana on the Gemini API) declares the API as its runtime.
+const GEMINI = "gemini";
+const RUNTIME_LABELS: Record<string, string> = { [CLOUD]: "Urakatsu Cloud", [GEMINI]: "Gemini API" };
+const CLOUD_KEYS_URL = "https://urakatsu.com/dashboard/keys";
+const CLOUD_PROVIDER = "urakatsu-cloud";
 
-/** Whether a model can run at all: here, or on a worker when this machine cannot run it. */
+/** Whether a model can run at all: here, on a worker, or on Urakatsu Cloud when this machine cannot run it. */
 function usable(p: ProviderInfo): boolean {
-  return p.available || p.runtimes.some((r) => r.name === REMOTE);
+  return p.available || p.runtimes.some((r) => r.name === REMOTE || ((r.name === CLOUD || r.name === GEMINI) && r.available));
+}
+
+/** Short reason a runtime is unavailable; the cloud's reasons come from urakatsu/remote/cloud.py. */
+function runtimeDetail(r: ProviderInfo["runtimes"][number]): string | undefined {
+  if (r.available) return r.name === REMOTE ? "On a worker" : r.name === CLOUD ? "Your plan" : undefined;
+  if (r.name === CLOUD) return r.reason.includes("key") ? "Add a key" : r.reason.includes("not running") ? "Not running" : "Unavailable";
+  if (r.name === GEMINI) return "Add a key";
+  return "Unavailable";
 }
 
 function unavailableDetail(p: ProviderInfo): string | undefined {
-  return p.available ? undefined : usable(p) ? "Remote only" : "Unavailable";
+  if (p.available) return undefined;
+  // A model that runs only on an API or Urakatsu Cloud (Nano Banana) needs a key.
+  if (p.runtimes.length > 0 && p.runtimes.every((r) => r.name === CLOUD || r.name === GEMINI)) return "Add a key";
+  return usable(p) ? "Remote only" : "Unavailable";
 }
 
 function providerOptions(providers: ProviderInfo[]): Option[] {
@@ -284,9 +301,9 @@ function RuntimeSelect({ provider, draft, update }: { provider?: ProviderInfo; d
       size="md"
       label={`${provider.name} runtime`}
       value={selectedRuntime(provider, draft)}
-      options={provider.runtimes.map((r) => ({ value: r.name, label: r.name, disabled: !r.available, detail: r.available ? (r.name === REMOTE ? "On a worker" : undefined) : "Unavailable" }))}
+      options={provider.runtimes.map((r) => ({ value: r.name, label: RUNTIME_LABELS[r.name] ?? r.name, disabled: !r.available, detail: runtimeDetail(r) }))}
       onChange={(runtime) => update({ runtimes: { ...draft.runtimes, [provider.id]: runtime } })}
-      className="w-[120px] flex-none"
+      className="w-[140px] flex-none"
     />
   );
 }
@@ -487,6 +504,8 @@ function SchemaSection({
   const schema = parseJson(provider.settingsSchemaJson) as { properties?: Record<string, SchemaProperty> };
   // Fields for one runtime (a worker's address, an attached server) show only while it is selected.
   const runtime = selectedRuntime(provider, draft);
+  // Urakatsu Cloud runs its models with its own settings: the model's options do not apply there.
+  if (map === "processorJson" && runtime === CLOUD) return null;
   const fields = Object.entries(schema.properties ?? {}).filter(([key, property]) => key !== "translation" && (!property.runtimes || property.runtimes.includes(runtime)));
   if (fields.length === 0) return null;
   const values = { ...parseJson(provider.defaultsJson), ...parseJson(draft[map][provider.id]) };
@@ -605,7 +624,9 @@ function SecretInput({ label, value, onChange }: { label: string; value: string;
 
 function Providers({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
-  const remote = (ws.capabilities?.providers ?? []).filter((p) => p.stage === "translation" && p.id !== "local");
+  const remote = (ws.capabilities?.providers ?? [])
+    .filter((p) => p.stage === "translation" && p.id !== "local")
+    .sort((a, b) => Number(b.id === CLOUD_PROVIDER) - Number(a.id === CLOUD_PROVIDER));
   return (
     <PreferencePage title="Providers" description="Keys and endpoints for hosted translation services. Keys are stored in your local settings file.">
       {remote.map((provider) => {
@@ -620,7 +641,16 @@ function Providers({ draft, update }: { draft: Config; update: (patch: Partial<C
             update={update}
             title={provider.name}
             description={provider.description}
-            action={<Badge tone={keys > 0 ? "success" : "neutral"}>{keys > 1 ? `${keys} keys` : keys === 1 ? "Configured" : "Not configured"}</Badge>}
+            action={
+              <div className="flex items-center gap-2">
+                {provider.id === CLOUD_PROVIDER && (
+                  <a className={buttonVariants({ variant: "ghost", size: "sm" })} href={CLOUD_KEYS_URL} target="_blank" rel="noreferrer">
+                    Get a key
+                  </a>
+                )}
+                <Badge tone={keys > 0 ? "success" : "neutral"}>{keys > 1 ? `${keys} keys` : keys === 1 ? "Configured" : "Not configured"}</Badge>
+              </div>
+            }
           />
         );
       })}

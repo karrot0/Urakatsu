@@ -156,7 +156,7 @@ async def run_turn(
 ) -> str:
     """Runs model steps and tool calls until the model stops calling tools; returns the final status."""
     toolset = agent.toolset()
-    specs = toolset.specs()
+    specs = toolset.specs(context)
     budget = ContextBudget(backend.context_window)
     context.emit = publish
     text: list[str] = []

@@ -13,7 +13,10 @@ Remote (not in Koharu): detection, OCR and inpainting providers also declare the
 runtime, which runs the same provider on a Urakatsu worker on another machine
 (``urakatsu.remote``). It is never picked by default: it needs ``remote_url``. Settings fields
 that only apply to some runtimes name them in their schema (``"runtimes"``), and the Settings
-page shows them only for those.
+page shows them only for those. The ``cloud`` runtime is the same client against Urakatsu
+Cloud (``urakatsu.remote.cloud``): available once the account key is set, for the providers
+the cloud hosts. A provider can also declare ``cloud`` as its only runtime (Nano Banana), for a
+model only Urakatsu Cloud runs.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from pydantic import BaseModel, Field
 from urakatsu.core.errors import ProviderUnavailable
 from urakatsu.core.stage import Stage
 from urakatsu.core.types import Availability
-from urakatsu.remote import REMOTE
+from urakatsu.remote import CLOUD, OFFLOADED, REMOTE
 from urakatsu.runtimes.store import DownloadProgress, WeightSource
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -131,7 +134,7 @@ class Provider(ABC):
         self._loaded = False
         self._lock = asyncio.Lock()
         self._remote = None
-        if self.runtime_name == REMOTE:
+        if self.runtime_name in OFFLOADED:
             from urakatsu.remote.client import RemoteModel
 
             # The stages call the inference methods directly (inpainting per tile), so the
@@ -148,14 +151,20 @@ class Provider(ABC):
 
     @classmethod
     def runtimes_declared(cls) -> tuple[str, ...]:
-        return (*cls.runtimes, REMOTE) if cls.remotable else tuple(cls.runtimes)
+        return (*cls.runtimes, REMOTE, CLOUD) if cls.remotable else tuple(cls.runtimes)
 
     @classmethod
     def runtime_availability(cls, runtime: str) -> Availability:
         from urakatsu.runtimes.manager import RuntimeManager
 
+        if runtime in OFFLOADED and not cls.remotable and runtime not in cls.runtimes:
+            return Availability.no(f"{cls.id} cannot run on a worker")
         if runtime == REMOTE:
-            return Availability.yes() if cls.remotable else Availability.no(f"{cls.id} cannot run on a worker")
+            return Availability.yes()
+        if runtime == CLOUD:
+            from urakatsu.remote import cloud
+
+            return cloud.availability(cls.id)
 
         base = RuntimeManager.availability(runtime)
         if not base.ok:
@@ -167,7 +176,7 @@ class Provider(ABC):
 
     @classmethod
     def default_runtime(cls) -> Optional[str]:
-        """The first available local runtime: ``remote`` is only ever chosen on purpose."""
+        """The first available local runtime: ``remote`` and ``cloud`` are only ever chosen on purpose."""
         declared = tuple(cls.runtimes)
         for runtime in declared:
             if cls.runtime_availability(runtime).ok:
@@ -178,7 +187,7 @@ class Provider(ABC):
     def available(cls, runtime: Optional[str] = None) -> Availability:
         """Whether ``runtime`` can run; without one, whether a local runtime can."""
         declared = tuple(cls.runtimes)
-        if runtime == REMOTE:
+        if runtime in OFFLOADED:
             return cls.runtime_availability(runtime)
         if not declared:
             missing = [m for m in cls.requires.get("", ()) if importlib.util.find_spec(m) is None]
