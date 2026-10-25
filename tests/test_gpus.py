@@ -181,3 +181,13 @@ def test_other_gpus_report_memory_from_the_windows_counters(monkeypatch):
     monkeypatch.setattr(memory, "_sample", lambda: (dedicated, {f"pid_10_{luid}_phys_0": GB}, {f"{luid}_phys_0": 8 * GB}))
     pool = memory._windows_adapter(xtx, {10})
     assert (pool.total, pool.used, pool.app, pool.spilled) == (24 * GB, 8 * GB, 3 * GB, GB)
+
+
+def test_macs_get_the_build_for_their_processor(monkeypatch):
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    assert preferred_variants([Device.cpu()]) == ["macos-arm64"]
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    assert preferred_variants([Device.cpu()]) == ["macos-x64"]

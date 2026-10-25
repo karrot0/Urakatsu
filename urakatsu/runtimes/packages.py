@@ -96,6 +96,7 @@ LLAMA_CPP = Package(
         Variant("linux-vulkan", (r"llama-b\d+-bin-ubuntu-vulkan-x64\.tar\.gz",)),
         Variant("linux-cpu", (r"llama-b\d+-bin-ubuntu-x64\.tar\.gz",)),
         Variant("macos-arm64", (r"llama-b\d+-bin-macos-arm64\.tar\.gz",)),
+        Variant("macos-x64", (r"llama-b\d+-bin-macos-x64\.tar\.gz",)),
     ),
 )
 
@@ -157,12 +158,13 @@ def preferred_variants(devices: list[Device]) -> list[str]:
     """Variant ids to try, best first, for the GPU the pipeline picks (as Koharu's ``discover``).
 
     CUDA for NVIDIA, ROCm for a supported AMD GPU once the ROCm libraries the builds load are
-    present (``rocm.available``), then Vulkan for any GPU, then the CPU.
+    present (``rocm.available``), then Vulkan for any GPU, then the CPU. On macOS, the build for
+    the Mac's processor: Apple silicon, or Intel (``macos-x64``, which only llama.cpp publishes).
     """
     system = platform.system()
     prefix = {"Windows": "win", "Linux": "linux", "Darwin": "macos"}.get(system, "")
     if prefix == "macos":
-        return ["macos-arm64"]
+        return ["macos-arm64"] if platform.machine().lower() in ("arm64", "aarch64") else ["macos-x64"]
     from . import rocm
     from .hardware import rank
 
