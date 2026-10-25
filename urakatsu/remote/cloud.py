@@ -1,4 +1,4 @@
-"""Urakatsu Cloud: hosted detection, OCR, inpainting and translation at urakatsu.com.
+"""Urakatsu Cloud: hosted detection, OCR, inpainting and translation at urakatsu.com."""
 
 from __future__ import annotations
 
