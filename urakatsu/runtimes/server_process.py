@@ -7,6 +7,9 @@ device memory the way dropping a model does.
 A server never outlives Urakatsu: on Windows each one joins a job object that kills its
 members when the Urakatsu process ends, however it ends (a crash or a killed process
 included); elsewhere the servers still running at interpreter exit are killed.
+
+``AttachedServer`` (not in Koharu) is the same surface for a server someone else started, such as
+llama-server or sd-server in a notebook: closing it only closes the connection.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ log = logging.getLogger(__name__)
 
 STARTUP_TIMEOUT = 600.0  # seconds: large models load slowly from disk
 STOP_TIMEOUT = 10.0
+ATTACH_TIMEOUT = 60.0  # seconds a running server may take to answer ready (it may still be loading)
 
 
 def device_env(device: Device, variant: str) -> dict[str, str]:
@@ -216,3 +220,54 @@ class ServerProcess:
 
     def __del__(self) -> None:  # a provider that is garbage-collected must not leak its server
         self.kill()
+
+
+class AttachedServer:
+    """A server at ``base_url`` that this process did not start, with ``ServerProcess``'s surface.
+
+    ``api_key`` goes in a bearer header (llama-server's ``--api-key``, or a proxy in front of the
+    server). Readiness is waited for like a started server's, for up to ``ATTACH_TIMEOUT``.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        base_url: str,
+        ready: Callable[[httpx.Client], bool],
+        api_key: Optional[str] = None,
+        transport: Optional[httpx.BaseTransport] = None,
+    ):
+        self.name = name
+        self.base_url = base_url.strip().rstrip("/")
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ModelLoadError(f"{name}: {base_url!r} is not an http:// or https:// address")
+        headers = {"Authorization": f"Bearer {api_key.strip()}"} if api_key and api_key.strip() else {}
+        self.client = httpx.Client(base_url=self.base_url, headers=headers, timeout=httpx.Timeout(30.0, read=None), transport=transport)
+        log.info("attaching to %s at %s", name, self.base_url)
+        deadline = time.monotonic() + ATTACH_TIMEOUT
+        last: Optional[Exception] = None
+        while True:
+            try:
+                if ready(self.client):
+                    return
+                last = None
+            except (httpx.HTTPError, ValueError) as error:
+                last = error
+            if time.monotonic() >= deadline:
+                self.client.close()
+                reason = f": {last}" if last is not None else " (it is still loading its model)"
+                raise ModelLoadError(f"{name} at {self.base_url} did not become ready{reason}")
+            time.sleep(0.5)
+
+    @property
+    def running(self) -> bool:
+        return True  # unknown; a request to a stopped server fails on its own
+
+    def log_tail(self, lines: int = 25) -> str:
+        return f"(the log is on the machine that runs {self.base_url})"
+
+    def stop(self) -> None:
+        self.client.close()
+
+    def kill(self) -> None:
+        pass

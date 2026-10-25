@@ -40,6 +40,7 @@ from urakatsu.pipeline import (
 from urakatsu.pipeline.projects import chapters_of
 from urakatsu.pipeline.scope import Bounds
 from urakatsu.pipeline.stages import InpaintingMask
+from urakatsu.remote import REMOTE
 from urakatsu.runtimes.manager import RuntimeManager, RuntimeReport
 from urakatsu.scene import components as c
 from urakatsu.scene import At, RemovePolicy, Session
@@ -196,7 +197,7 @@ class Workspace:
             if runtime is not None and runtime not in cls.runtimes_declared():
                 raise ValueError(f"{cls.id} cannot run on {runtime!r}; supported: {list(cls.runtimes_declared())}")
         for provider_id, runtime in config.runtimes.items():
-            if runtime not in RuntimeManager.RUNTIMES:
+            if runtime not in RuntimeManager.RUNTIMES and runtime != REMOTE:  # remote: a worker elsewhere
                 raise ValueError(f"unknown runtime {runtime!r} for {provider_id}")
         if not self.automations.busy:  # a running batch applies the saved settings when it ends
             self.pipeline.configure(config)

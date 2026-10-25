@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 from urakatsu.core.registry import register
-from urakatsu.providers.base import InpaintingProvider, ProviderSettings
+from urakatsu.providers.base import InpaintingProvider, ProviderSettings, server_fields
 from urakatsu.runtimes.device import Backend
 from urakatsu.runtimes.diffusion import SdServer, image_b64
 from urakatsu.runtimes.store import HuggingFaceFile
@@ -64,11 +64,16 @@ STRENGTH = 0.999
 SEED = -1
 
 
+_SERVER_URL, _SERVER_KEY = server_fields("diffusion")
+
+
 class RoremMixedSettings(ProviderSettings):
     """``RoremMixedConfig``."""
 
     prompt: str = DEFAULT_PROMPT
     negative_prompt: str = DEFAULT_NEGATIVE_PROMPT
+    server_url: Optional[str] = _SERVER_URL
+    server_api_key: Optional[str] = _SERVER_KEY
 
 
 def resize_mask(mask: np.ndarray, resolution: int) -> np.ndarray:
@@ -158,6 +163,11 @@ class RoremMixedProvider(InpaintingProvider):
     def _load(self) -> None:
         if "\0" in self.settings.prompt or "\0" in self.settings.negative_prompt:
             raise ValueError("RORem prompt contains NUL")
+        if self.attached():  # an sd-server started elsewhere with the RORem weights
+            server = SdServer.attach(self.settings.server_url, self.settings.server_api_key)
+            self._processor = RoremMixedProcessor(server, self.settings.prompt, self.settings.negative_prompt)
+            log.info("attached RORem mixed to %s", self.settings.server_url)
+            return
         runtime = self.runtime_instance()
         marker, diffusion_model, vae, clip_l, clip_g = (
             self.resolve(source) for source in (SDXL_VERSION_MARKER, DIFFUSION_MODEL, VAE_MODEL, CLIP_L_MODEL, CLIP_G_MODEL)

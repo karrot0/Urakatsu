@@ -257,8 +257,24 @@ const VISION: { stage: "detection" | "ocr" | "inpainting"; title: string; descri
   { stage: "inpainting", title: "Inpainting", description: "Removes the original lettering." },
 ];
 
+// The runtime that runs a model on a Urakatsu worker elsewhere (urakatsu/remote).
+const REMOTE = "remote";
+
+/** Whether a model can run at all: here, or on a worker when this machine cannot run it. */
+function usable(p: ProviderInfo): boolean {
+  return p.available || p.runtimes.some((r) => r.name === REMOTE);
+}
+
+function unavailableDetail(p: ProviderInfo): string | undefined {
+  return p.available ? undefined : usable(p) ? "Remote only" : "Unavailable";
+}
+
 function providerOptions(providers: ProviderInfo[]): Option[] {
-  return providers.map((p) => ({ value: p.id, label: p.name, disabled: !p.available, detail: p.available ? undefined : "Unavailable" }));
+  return providers.map((p) => ({ value: p.id, label: p.name, disabled: !usable(p), detail: unavailableDetail(p) }));
+}
+
+function selectedRuntime(provider: ProviderInfo, draft: Config): string {
+  return draft.runtimes[provider.id] || provider.defaultRuntime;
 }
 
 function RuntimeSelect({ provider, draft, update }: { provider?: ProviderInfo; draft: Config; update: (patch: Partial<Config>) => void }) {
@@ -267,8 +283,8 @@ function RuntimeSelect({ provider, draft, update }: { provider?: ProviderInfo; d
     <Select
       size="md"
       label={`${provider.name} runtime`}
-      value={draft.runtimes[provider.id] || provider.defaultRuntime}
-      options={provider.runtimes.map((r) => ({ value: r.name, label: r.name, disabled: !r.available, detail: r.available ? undefined : "Unavailable" }))}
+      value={selectedRuntime(provider, draft)}
+      options={provider.runtimes.map((r) => ({ value: r.name, label: r.name, disabled: !r.available, detail: r.available ? (r.name === REMOTE ? "On a worker" : undefined) : "Unavailable" }))}
       onChange={(runtime) => update({ runtimes: { ...draft.runtimes, [provider.id]: runtime } })}
       className="w-[120px] flex-none"
     />
@@ -280,7 +296,7 @@ function FillModelRow({ providers, draft, update }: { providers: ProviderInfo[];
   const inpainting = providers.find((p) => p.id === draft.inpainting);
   const options: Option[] = [
     { value: "", label: "Same as inpainting", detail: inpainting ? (inpainting.prompted ? inpainting.name : `${inpainting.name}, no prompts`) : undefined },
-    ...providers.map((p) => ({ value: p.id, label: p.name, disabled: !p.available, detail: !p.available ? "Unavailable" : p.prompted ? "Follows prompts" : "Removes only" })),
+    ...providers.map((p) => ({ value: p.id, label: p.name, disabled: !usable(p), detail: unavailableDetail(p) ?? (p.prompted ? "Follows prompts" : "Removes only") })),
   ];
   const provider = draft.fill ? providers.find((p) => p.id === draft.fill) : undefined;
   return (
@@ -307,7 +323,7 @@ function SoundEffectsSection({ providers, draft, update }: { providers: Provider
   const redraw = providers.find((p) => p.id === (draft.soundEffectsModel || fillId));
   const options: Option[] = [
     { value: "", label: "Same as generative fill", detail: fill ? (fill.prompted ? fill.name : `${fill.name}, removes only`) : undefined },
-    ...providers.map((p) => ({ value: p.id, label: p.name, disabled: !p.available || !p.prompted, detail: !p.available ? "Unavailable" : p.prompted ? "Follows prompts" : "Removes only" })),
+    ...providers.map((p) => ({ value: p.id, label: p.name, disabled: !usable(p) || !p.prompted, detail: unavailableDetail(p) ?? (p.prompted ? "Follows prompts" : "Removes only") })),
   ];
   return (
     <PreferenceSection title="Sound effects" description="Onomatopoeia drawn into the art, such as ドン or 쾅. Applies to pages detected after you change it.">
@@ -469,7 +485,9 @@ function SchemaSection({
   action?: ReactNode;
 }) {
   const schema = parseJson(provider.settingsSchemaJson) as { properties?: Record<string, SchemaProperty> };
-  const fields = Object.entries(schema.properties ?? {}).filter(([key]) => key !== "translation");
+  // Fields for one runtime (a worker's address, an attached server) show only while it is selected.
+  const runtime = selectedRuntime(provider, draft);
+  const fields = Object.entries(schema.properties ?? {}).filter(([key, property]) => key !== "translation" && (!property.runtimes || property.runtimes.includes(runtime)));
   if (fields.length === 0) return null;
   const values = { ...parseJson(provider.defaultsJson), ...parseJson(draft[map][provider.id]) };
   delete values.translation;
@@ -512,7 +530,15 @@ function InstalledModelSelect({ providerId, value, onChange }: { providerId: str
 }
 
 // Pydantic titles come from field names ("Api Key"); a few read better spelled out.
-const FIELD_TITLES: Record<string, string> = { api_key: "API key", base_url: "Base URL", model: "Model" };
+const FIELD_TITLES: Record<string, string> = {
+  api_key: "API key",
+  base_url: "Base URL",
+  model: "Model",
+  remote_url: "Worker URL",
+  remote_api_key: "Worker token",
+  server_url: "Server URL",
+  server_api_key: "Server API key",
+};
 const FIELD_DESCRIPTIONS: Record<string, string> = { api_key: "Separate several keys with commas to rotate between them." };
 
 // Mirrors ``credentials`` in remote/base.py: keys split on commas, semicolons or whitespace.
@@ -526,6 +552,7 @@ interface SchemaProperty {
   title?: string;
   description?: string;
   enum?: string[];
+  runtimes?: string[];
 }
 
 function schemaType(property: SchemaProperty): string {

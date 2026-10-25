@@ -174,6 +174,27 @@ program holds 8090 or 5173, the next free port is used and printed;
 To run the Vite dev server against a service you started yourself, start it in `web/`:
 `npm run dev` proxies to port 8090, or to `URAKATSU_API` if set.
 
+### Run models on another machine
+
+Detection, OCR and inpainting models can run on a GPU elsewhere, such as a Colab or Kaggle
+notebook or a server. Install Urakatsu there and start a worker:
+
+```bash
+urakatsu worker --port 8100
+```
+
+It prints a token. To reach a notebook from your machine, expose the port with a tunnel, for
+example `cloudflared tunnel --url http://localhost:8100`. In the app, open Settings, Pipeline,
+pick the model, set its runtime to `remote`, and enter the worker's address and token. The
+worker runs the same model code on its own runtime, downloads the weights itself, and keeps
+one model per stage loaded. Loads and inference run as background jobs that the app polls, so
+no request stays open long enough for a tunnel to cut it, however slow the model is.
+
+PaddleOCR-VL, FLUX.2 Klein and RORem can also use a llama-server or sd-server that someone
+else started: keep their runtime on `llama` or `diffusion` and set Server URL. That server must
+be started with the model's weights (PaddleOCR-VL also needs its `--mmproj` and a context of at
+least 4096).
+
 ### Test
 
 ```bash

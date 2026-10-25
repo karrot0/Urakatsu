@@ -16,7 +16,7 @@ import base64
 import io
 import logging
 import time
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 from PIL import Image
 
@@ -28,7 +28,7 @@ from .base import Runtime
 from .device import Device
 from .llama import _error_text, _hardware
 from .packages import STABLE_DIFFUSION_CPP, Installed, PackageManager
-from .server_process import ServerProcess, device_env, free_port
+from .server_process import AttachedServer, ServerProcess, device_env, free_port
 
 log = logging.getLogger(__name__)
 
@@ -42,12 +42,21 @@ def image_b64(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _models_ready(client) -> bool:
+    return client.get("/sdcpp/v1/models/status").json().get("state") == "ready"
+
+
 class SdServer:
     """One ``sd-server`` process with one model preloaded."""
 
-    def __init__(self, process: ServerProcess):
+    def __init__(self, process: ServerProcess | AttachedServer):
         self.process = process
         self._previews: bool | None = None
+
+    @classmethod
+    def attach(cls, url: str, api_key: Optional[str] = None, transport=None) -> "SdServer":
+        """An sd-server someone else runs at ``url``, started with the model's weights (no local stable-diffusion.cpp)."""
+        return cls(AttachedServer("sd-server", url, _models_ready, api_key, transport))
 
     def previews(self) -> bool:
         """Whether this release can stream ``proj`` step previews (asked once per process)."""
@@ -125,7 +134,7 @@ class DiffusionRuntime(Runtime):
             installed.executable,
             [*model_args, "--listen-ip", "127.0.0.1", "--listen-port", str(port)],
             port,
-            ready=lambda client: client.get("/sdcpp/v1/models/status").json().get("state") == "ready",
+            ready=_models_ready,
             env=env,
         )
         return SdServer(process)

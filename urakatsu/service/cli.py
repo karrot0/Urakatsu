@@ -4,7 +4,8 @@
     urakatsu dev        serve, restarted on Python changes, plus the Vite dev server (hot reload)
     urakatsu desktop    the workspace in its own window (what the Windows app runs)
     urakatsu listen     API mode: JSON API + native gRPC, no UI
-    urakatsu run        one-shot pipeline on image files
+    urakatsu worker     serve this machine's detection, OCR and inpainting models to other apps (remote runtime)
+    urakatsu run       one-shot pipeline on image files
     urakatsu providers  list providers and availability
     urakatsu devices    show discovered hardware and runtimes
     urakatsu runtimes   list, check or update the native runtimes (always the newest releases)
@@ -56,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_service_args(listen)
     listen.set_defaults(host="0.0.0.0")
 
+    worker = sub.add_parser("worker", help="serve this machine's detection, OCR and inpainting models to other Urakatsu apps")
+    worker.add_argument("--host", default="127.0.0.1", help="address to listen on (a tunnel can expose 127.0.0.1)")
+    worker.add_argument("--port", type=int, default=8100)
+    worker.add_argument("--token", default=None, help="token apps must send (default: URAKATSU_WORKER_TOKEN, else a new one)")
+    worker.add_argument("--no-token", action="store_true", help="accept requests without a token (only on 127.0.0.1)")
+    worker.add_argument("--device", default=None, help="auto | cpu | cuda | cuda:N | dml")
+    worker.add_argument("--log-level", default="info")
+
     run = sub.add_parser("run", help="run the pipeline on image files")
     run.add_argument("images", nargs="+", type=Path)
     run.add_argument("--out", type=Path, default=Path("out"), help="output directory")
@@ -102,6 +111,35 @@ def cmd_serve(args: argparse.Namespace, serve_ui: bool) -> int:
                 log_level=args.log_level,
             )
         )
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def cmd_worker(args: argparse.Namespace) -> int:
+    import os
+    import secrets
+
+    import uvicorn
+
+    from urakatsu.core.config import load_config
+    from urakatsu.remote.worker import Worker, create_app
+    from urakatsu.runtimes.manager import RuntimeManager
+    from urakatsu.runtimes.packages import start_updater
+
+    _configure_logging(args.log_level)
+    token = None if args.no_token else args.token or os.environ.get("URAKATSU_WORKER_TOKEN") or secrets.token_urlsafe(24)
+    if token is None and args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("urakatsu worker: --no-token only listens on 127.0.0.1; anyone who can reach it could run models", file=sys.stderr)
+        return 2
+    config = load_config()
+    start_updater()  # always the newest llama.cpp and stable-diffusion.cpp (AGENTS.md)
+    worker = Worker(config, RuntimeManager(args.device or config.device))
+    print(f"Urakatsu worker on http://{args.host}:{args.port} ({worker.runtimes.device.label()})")
+    print(f"Token: {token}" if token else "No token: anything that reaches this port can run models (a tunnel exposes it too).")
+    print("In the app: Settings, Pipeline, pick a model, set its runtime to remote, and enter this address and token.")
+    try:
+        uvicorn.run(create_app(worker, token), host=args.host, port=args.port, log_level=args.log_level, access_log=False)
     except KeyboardInterrupt:
         pass
     return 0
@@ -263,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_serve(args, serve_ui=False)
     if args.command == "dev":
         return cmd_dev(args)
+    if args.command == "worker":
+        return cmd_worker(args)
     if args.command == "run":
         return cmd_run(args)
     if args.command == "providers":

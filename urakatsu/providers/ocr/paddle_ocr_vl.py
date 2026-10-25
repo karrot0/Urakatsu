@@ -44,8 +44,18 @@ from typing import Optional
 from PIL import Image
 
 from urakatsu.core.registry import register
-from urakatsu.providers.base import OcrProvider
+from urakatsu.providers.base import OcrProvider, ProviderSettings, server_fields
+from urakatsu.runtimes.llama import LlamaServer
 from urakatsu.runtimes.store import HuggingFaceFile, WeightSource
+
+_SERVER_URL, _SERVER_KEY = server_fields("llama")
+
+
+class PaddleOcrVlSettings(ProviderSettings):
+    # A llama-server started elsewhere with the GGUF and its mmproj (``--mmproj``) and a context
+    # of at least ``LLAMA_CONTEXT``; prompts are still rendered here.
+    server_url: Optional[str] = _SERVER_URL
+    server_api_key: Optional[str] = _SERVER_KEY
 
 MAX_NEW_TOKENS = 512
 REPETITION_PENALTY = 1.2
@@ -216,6 +226,7 @@ class PaddleOcrVlProvider(OcrProvider):
     name = "PaddleOCR-VL-1.6"
     description = "Vision-language OCR (PaddleOCR-VL-1.6): GGUF through llama.cpp, or full precision through torch."
     runtimes = ("llama", "torch")
+    Settings = PaddleOcrVlSettings
 
     weight_roles = {"llama": ("model", "projector")}
 
@@ -256,8 +267,11 @@ class PaddleOcrVlProvider(OcrProvider):
             self._load_llama()
 
     def _load_llama(self) -> None:
-        model_path, projector_path = self.resolve_weights()
-        server = self.runtime_instance().launch(model_path, projector_path, context=LLAMA_CONTEXT, batch=LLAMA_BATCH)
+        if self.attached():
+            server = LlamaServer.attach(self.settings.server_url, self.settings.server_api_key)
+        else:
+            model_path, projector_path = self.resolve_weights()
+            server = self.runtime_instance().launch(model_path, projector_path, context=LLAMA_CONTEXT, batch=LLAMA_BATCH)
         if not server.vision:
             server.close()
             raise ValueError("PaddleOCR-VL-1.6 projector does not support images")

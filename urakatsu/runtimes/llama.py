@@ -19,7 +19,7 @@ from urakatsu.core.types import Availability
 from .base import Runtime
 from .device import Device
 from .packages import LLAMA_CPP, Installed, PackageManager
-from .server_process import ServerProcess, device_env, free_port
+from .server_process import AttachedServer, ServerProcess, device_env, free_port
 
 # DEFAULT_GPU_LAYERS: offload everything when an accelerator is selected.
 DEFAULT_GPU_LAYERS = 1000
@@ -37,9 +37,19 @@ def _hardware() -> list[Device]:
 class LlamaServer:
     """One ``llama-server`` process serving one model."""
 
-    def __init__(self, process: ServerProcess):
+    def __init__(self, process: ServerProcess | AttachedServer):
         self.process = process
         self.props: dict[str, Any] = process.client.get("/props").raise_for_status().json()
+
+    @classmethod
+    def attach(cls, url: str, api_key: Optional[str] = None, transport=None) -> "LlamaServer":
+        """A llama-server someone else runs at ``url`` (it needs no local llama.cpp)."""
+        server = AttachedServer("llama-server", url, lambda client: client.get("/health").status_code == 200, api_key, transport)
+        try:
+            return cls(server)
+        except Exception as error:
+            server.stop()
+            raise ProcessingError(f"llama-server at {server.base_url}: {error}") from error
 
     @property
     def media_marker(self) -> str:

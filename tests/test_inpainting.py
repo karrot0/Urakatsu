@@ -102,9 +102,10 @@ def test_stage_is_registered_for_inpainting_and_providers_are_listed():
     from urakatsu.core.registry import registry
 
     assert {cls.id for cls in registry.list(Stage.INPAINTING)} == {"lama", "aot-inpainting", "flux2-klein", "rorem-mixed", "diffusion-model"}
-    assert LamaProvider.runtimes_declared() == ("torch",)
-    assert Flux2KleinProvider.runtimes_declared() == ("diffusion",)
-    assert RoremMixedProvider.runtimes_declared() == ("diffusion",)
+    # Every inpainter can also run on a worker (the remote runtime).
+    assert LamaProvider.runtimes_declared() == ("torch", "remote")
+    assert Flux2KleinProvider.runtimes_declared() == ("diffusion", "remote")
+    assert RoremMixedProvider.runtimes_declared() == ("diffusion", "remote")
 
 
 # ---- inpaint_tiled (Rust tests in stages/inpainting.rs) ------------------------------------------
@@ -235,7 +236,9 @@ def test_lama_boxes_from_mask_and_crop_box_clamp_to_image():
 
 def test_aot_and_lama_settings_have_no_options():
     assert issubclass(LamaProvider.Settings, ProviderSettings)
-    assert AotInpaintingProvider.info().settings_schema.get("properties", {}) == {}
+    # Only the remote runtime's connection fields, which the Settings page shows for that runtime alone.
+    properties = AotInpaintingProvider.info().settings_schema.get("properties", {})
+    assert {name: field["runtimes"] for name, field in properties.items()} == {"remote_url": ["remote"], "remote_api_key": ["remote"]}
 
 
 # ---- FLUX.2 Klein processor (flux2_klein/processor.rs tests and scheduler) ----------------------

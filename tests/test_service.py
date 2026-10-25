@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 
 from urakatsu.core.registry import registry
+from urakatsu.core.stage import Stage
 from urakatsu.pipeline import Pipeline
 from urakatsu.runtimes import RuntimeManager
 from urakatsu.service import convert
@@ -68,7 +69,7 @@ async def test_native_grpc_roundtrip(workspace):
             caps = await stub.GetCapabilities(pb.Empty())
             assert caps.device.backend == "cpu" and list(caps.stages) == ["detection", "ocr", "translation", "inpainting", "sound_effects"]
             detector = next(p for p in caps.providers if p.id == "fake-detector")
-            assert [r.name for r in detector.runtimes] == ["torch", "onnx"]
+            assert [r.name for r in detector.runtimes] == ["torch", "onnx", "remote"]
 
             config = await stub.GetConfig(pb.Empty())
             config.runtimes["fake-detector"] = "onnx"
@@ -479,3 +480,15 @@ def test_text_layout_reports_the_rendered_size_and_line_starts(workspace):
     assert layout["font_size"] > 5 and len(starts) >= 3 and starts[0] == 0
     assert starts == sorted(starts) and starts[-1] < len(text)  # breaks may fall inside a hyphenated word
     assert workspace.text_layout(project, page) is workspace.text_layout(project, page)  # from the render's cache
+
+
+def test_settings_accept_the_remote_runtime(workspace):
+    config = workspace.get_config().model_copy(deep=True)
+    config.runtimes = {"fake-detector": "remote", "fake-inpainter": "remote"}
+    config.processor = {"fake-detector": {"remote_url": "http://worker.test", "remote_api_key": "t"}}
+    saved = workspace.set_config(config)
+    assert saved.runtimes["fake-detector"] == "remote"
+    assert workspace.pipeline.provider(Stage.DETECTION).runtime_name == "remote"
+    config.runtimes = {"fake-detector": "warp-drive"}
+    with pytest.raises(ValueError, match="cannot run on 'warp-drive'"):
+        workspace.set_config(config)

@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 from urakatsu.core.registry import register
-from urakatsu.providers.base import InpaintingProvider, ProviderSettings
+from urakatsu.providers.base import InpaintingProvider, ProviderSettings, server_fields
 from urakatsu.runtimes.device import Backend
 from urakatsu.runtimes.diffusion import SdServer, image_b64
 from urakatsu.runtimes.store import HuggingFaceFile
@@ -51,10 +51,15 @@ TEXT_CFG = 1.0
 DISTILLED_GUIDANCE = 3.5
 
 
+_SERVER_URL, _SERVER_KEY = server_fields("diffusion")
+
+
 class Flux2KleinSettings(ProviderSettings):
     """``Flux2KleinConfig``."""
 
     prompt: str = "Remove the text and reconstruct the background."
+    server_url: Optional[str] = _SERVER_URL
+    server_api_key: Optional[str] = _SERVER_KEY
 
 
 def flux2_sigmas(image_seq_len: int, num_steps: int) -> list[float]:
@@ -201,6 +206,10 @@ class Flux2KleinProvider(InpaintingProvider):
         prompt = self.settings.prompt
         if "\0" in prompt:
             raise ValueError("FLUX.2 prompt contains NUL")
+        if self.attached():  # an sd-server started elsewhere with the Klein weights
+            self._processor = Flux2KleinProcessor(SdServer.attach(self.settings.server_url, self.settings.server_api_key), prompt)
+            log.info("attached FLUX.2 Klein to %s", self.settings.server_url)
+            return
         runtime = self.runtime_instance()
         transformer, text_encoder, vae = (self.resolve(source) for source in self.weight_sources(self.runtime_name))
         device = runtime.device
