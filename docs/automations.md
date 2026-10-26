@@ -16,8 +16,10 @@ chosen days at a set time. Open one from the calendar button next to the project
    the next stage loads its model, so each model has the GPU to itself.
 4. **Keeps going past errors.** A page that fails a stage is recorded and left out of the
    later stages that need that stage. A page whose translation failed is still inpainted.
-5. **Reports.** The run history lists each chapter as done, partly done or failed, with the
-   errors and the model each stage ran.
+5. **Exports, if asked.** With *Export finished chapters to Komga*, the chapters done without
+   errors are written to the project's Komga series ([Komga](komga.md)).
+6. **Reports.** The run history lists each chapter as done, partly done or failed, with the
+   errors, the model each stage ran and how the export went.
 
 A run is ordinary pipeline work: each page's result is its own undo step, user edits are
 never overwritten, and running again continues where the last run stopped.

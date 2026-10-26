@@ -2,7 +2,7 @@
 // and a schedule; a run takes every chosen page through one stage at a time, unloading between
 // stages, so the heavy models get the GPU to themselves. Opened from the project header.
 
-import { CalendarClock, Check, ChevronDown, ChevronRight, MoreHorizontal, Play, Plus, Square } from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronRight, MoreHorizontal, Play, Plus, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,8 @@ import {
 import { describeError } from "../api/client";
 import { formatDate, formatTimestamp, plural } from "../format";
 import { STAGES, useWorkspace, type StageName } from "../state/workspace";
-import { ActionMenu, NumberField, Select, Switch, Tooltip, type Option } from "./primitives";
+import { useKomgaLink } from "./Komga";
+import { ActionMenu, CheckRow, NumberField, Select, Switch, Tooltip, type Option } from "./primitives";
 import { Badge, Segmented, type Tone } from "./ui";
 
 const STAGE_LABEL: Record<StageName, string> = { detection: "Detection", ocr: "OCR", translation: "Translation", inpainting: "Inpainting" };
@@ -50,13 +51,14 @@ function emptyBody(): AutomationBody {
     stages: [...STAGES],
     profile: null,
     wake: false,
+    komga: false,
     notify: { enabled: false, webhook_url: "", mention: "" },
   };
 }
 
 function bodyOf(automation: Automation): AutomationBody {
-  const { name, enabled, schedule, target, stages, profile, wake, notify } = automation;
-  return structuredClone({ name, enabled, schedule, target, stages, profile, wake, notify: notify ?? emptyBody().notify });
+  const { name, enabled, schedule, target, stages, profile, wake, komga, notify } = automation;
+  return structuredClone({ name, enabled, schedule, target, stages, profile, wake, komga: komga ?? false, notify: notify ?? emptyBody().notify });
 }
 
 // ---- header button ---------------------------------------------------------------------------
@@ -302,6 +304,7 @@ function AutomationList({
                 <span className="flex items-center gap-2 truncate font-medium">
                   {automation.name}
                   {automation.wake && automation.enabled && automation.schedule.kind !== "manual" && <Badge tone="info">Wakes PC</Badge>}
+                  {automation.komga && <Badge tone="neutral">Komga</Badge>}
                 </span>
                 <span className="truncate text-xs text-fg-3">
                   {describeSchedule(automation.schedule, formatDate)} · {targetText(automation)} · {profile ? profile.name : "Current settings"}
@@ -341,6 +344,7 @@ const RUN_LABEL: Record<RunRecord["status"], string> = {
   waiting: "Waiting",
   downloading: "Downloading",
   running: "Running",
+  exporting: "Exporting",
   completed: "Done",
   stopped: "Stopped",
   failed: "Failed",
@@ -374,7 +378,9 @@ function RunRow({ run, onStop }: { run: RunRecord; onStop: () => void }) {
   const summary = live(run)
     ? progress && run.status === "running"
       ? `Stage ${progress.phase} of ${progress.phases}: ${STAGE_LABEL[progress.stage ?? "detection"]} with ${progress.model} · page ${Math.min(progress.done + 1, progress.total)} of ${progress.total}${progress.chapter ? ` · ${progress.chapter}` : ""}`
-      : run.status === "downloading"
+      : run.status === "exporting"
+        ? "Exporting finished chapters to Komga"
+        : run.status === "downloading"
         ? "Downloading new chapters"
         : run.status === "waiting"
           ? "Waiting for the current run to finish"
@@ -408,6 +414,11 @@ function RunRow({ run, onStop }: { run: RunRecord; onStop: () => void }) {
       <span className={cn("truncate pl-5.5 text-xs", run.error ? "text-danger" : "text-fg-3")} title={summary}>
         {summary}
       </span>
+      {run.komga && (
+        <span className={cn("truncate pl-5.5 text-xs", run.komga.error ? "text-[var(--warning)]" : "text-fg-3")} title={run.komga.error ?? undefined}>
+          {run.komga.error ? `Komga export stopped after ${plural(run.komga.books, "chapter")}: ${run.komga.error}` : `${plural(run.komga.books, "chapter")} exported to Komga`}
+        </span>
+      )}
       {run.notified && run.notified !== "sent" && (
         <span className="truncate pl-5.5 text-xs text-[var(--warning)]" title={run.notified}>
           Discord message {run.notified}
@@ -455,28 +466,6 @@ function Row({ title, description, children }: { title: string; description?: st
   );
 }
 
-function CheckRow({ checked, label, detail, onChange }: { checked: boolean; label: string; detail?: string; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      role="checkbox"
-      aria-checked={checked}
-      className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover"
-      onClick={() => onChange(!checked)}
-    >
-      <span
-        className={cn(
-          "flex size-4 shrink-0 items-center justify-center rounded-[4px]",
-          checked ? "bg-brand text-on-brand" : "bg-surface shadow-[inset_0_0_0_1px_var(--border-strong)]",
-        )}
-      >
-        {checked && <Check size={12} strokeWidth={3} />}
-      </span>
-      <span className="truncate">{label}</span>
-      {detail && <span className="ml-auto shrink-0 text-xs text-fg-3">{detail}</span>}
-    </button>
-  );
-}
-
 function AutomationEditor({
   initial,
   profiles,
@@ -507,6 +496,8 @@ function AutomationEditor({
   const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const linked = !!ws.link;
+  const [komgaLink] = useKomgaLink(project.id);
+  const onKomga = !!komgaLink;
   const chapters = project.chapters.filter((c) => c.pageIds.length > 0);
   const profileOptions: Option[] = [{ value: CURRENT, label: "Current settings" }, ...profiles.map((p) => ({ value: p.id, label: p.name }))];
   const { schedule, target, notify } = body;
@@ -514,6 +505,7 @@ function AutomationEditor({
   const mentionId = discordUserId(notify.mention);
   const invalid =
     (notify.enabled && (!webhookOk || mentionId === null)) ||
+    (body.komga && komgaLink === null) ||
     !body.name.trim() ||
     body.stages.length === 0 ||
     (target.kind === "chapters" && target.chapter_ids.length === 0) ||
@@ -636,6 +628,13 @@ function AutomationEditor({
             </div>
           </Row>
         )}
+        <Row title="Komga" description="Export the chapters a run finishes to this project's Komga series.">
+          <label className="flex items-center gap-2 text-sm">
+            <Switch label="Export finished chapters to Komga" checked={body.komga} disabled={!onKomga && !body.komga} onChange={(komga) => set({ komga })} />
+            Export finished chapters to Komga
+          </label>
+          {komgaLink === null && <span className="text-xs text-fg-3">Add this project to Komga first, from the Komga button beside the project name.</span>}
+        </Row>
         <Row title="Discord" description="Post to a channel when a run finishes. Runs that find nothing new stay quiet.">
           <label className="flex items-center gap-2 text-sm">
             <Switch label="Post to Discord when a run finishes" checked={notify.enabled} onChange={(enabled) => setNotify({ enabled })} />

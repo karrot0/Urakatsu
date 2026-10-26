@@ -13,6 +13,8 @@ one batch runs at a time, since there is one accelerator. A batch runs stage by 
 - While a batch runs the computer is kept awake, interactive runs wait their turn
   (``Workspace.start_run`` refuses them), and settings saved meanwhile apply afterwards.
 - An automation with ``wake`` set has the computer woken for it (``core.power.WakeTask``).
+- An automation with ``komga`` on exports the chapters a run finished to the project's Komga
+  series (``urakatsu.sources.komga``) before the run ends.
 - An automation with ``notify`` on posts to a Discord webhook when a run finishes, mentioning a
   user if one is set. A run that found nothing to do sends nothing (no message every night).
 """
@@ -42,6 +44,7 @@ from urakatsu.core.stage import Stage
 from urakatsu.core.stop import StopToken
 from urakatsu.pipeline.batch import BatchChapter, BatchStatus, phases_for, run_batch
 from urakatsu.pipeline.projects import chapters_of
+from urakatsu.sources.komga import ExportReport
 
 from .views import page_view
 
@@ -173,6 +176,7 @@ class Automation(BaseModel):
     stages: list[Stage] = Field(default_factory=Stage.all)
     profile: Optional[str] = None  # a ModelProfile id; None runs the current settings
     wake: bool = False
+    komga: bool = False  # export the chapters a run finished to the project's Komga series
     notify: Notify = Field(default_factory=Notify)
     next_run: Optional[float] = None
     created_at: float = 0.0
@@ -190,6 +194,7 @@ class AutomationBody(BaseModel):
     stages: list[Stage] = Field(default_factory=Stage.all)
     profile: Optional[str] = None
     wake: bool = False
+    komga: bool = False
     notify: Notify = Field(default_factory=Notify)
 
 
@@ -213,7 +218,8 @@ class RunProgress(BaseModel):
     total: int = 0
 
 
-RunState = Literal["queued", "waiting", "downloading", "running", "completed", "stopped", "failed"]
+RunState = Literal["queued", "waiting", "downloading", "running", "exporting", "completed", "stopped", "failed"]
+LIVE: tuple[str, ...] = ("queued", "waiting", "downloading", "running", "exporting")
 
 
 class RunRecord(BaseModel):
@@ -234,6 +240,7 @@ class RunRecord(BaseModel):
     chapters: list[ChapterResult] = Field(default_factory=list)
     progress: Optional[RunProgress] = None
     error: Optional[str] = None
+    komga: Optional[ExportReport] = None  # the export of the finished chapters, when the automation has one
     notified: Optional[str] = None  # "sent", or why the Discord message was not
 
 
@@ -378,6 +385,8 @@ class Automations:
             raise ValueError("the chapter limit must be at least 1")
         if body.target.download and self.workspace.links.get(project_id) is None:
             raise ValueError("this project is not linked to a source, so there is nothing to download")
+        if body.komga and self.workspace.komga_links.get(project_id) is None:
+            raise ValueError("this project is not on Komga yet: add it from the project's Komga button first")
         if body.notify.enabled:
             body.notify.check()
 
@@ -443,7 +452,7 @@ class Automations:
 
     def _enqueue(self, project_id: str, automation: Automation, trigger: Literal["schedule", "manual"]) -> RunRecord:
         for run in ([self._active] if self._active else []) + list(self._queue):
-            if run.automation_id == automation.id and run.status in ("queued", "waiting", "downloading", "running"):
+            if run.automation_id == automation.id and run.status in LIVE:
                 return run  # already on its way
         run = RunRecord(
             id=uuid.uuid4().hex[:12],
@@ -646,6 +655,10 @@ class Automations:
                 )
                 run.models = [f"{stage.value}: {model}" for stage, model in result.models]
                 run.chapters = [self._result(chapter, result.failed, result.stopped) for chapter in chapters]
+                done = [chapter.id for chapter in run.chapters if chapter.status == "done"]
+                if automation.komga and done and not stop.stopped:
+                    run.status = "exporting"
+                    run.komga = await asyncio.to_thread(ws.komga_links.export, run.project_id, done)
                 run.status = "stopped" if result.stopped else "completed"
                 known = set(automation.completed_chapters)
                 finished = [chapter.id for chapter in run.chapters if chapter.status == "done" and chapter.id not in known]
@@ -773,6 +786,9 @@ def discord_message(run: RunRecord, mention: str = "") -> dict:
         names = ", ".join(chapter.name for chapter in run.chapters[:10]) + (", ..." if len(run.chapters) > 10 else "")
         fields.append({"name": "Chapters", "value": f"{summary}\n{names}"[:1024], "inline": False})
         fields.append({"name": "Pages", "value": str(sum(chapter.pages for chapter in run.chapters)), "inline": True})
+    if run.komga is not None:
+        exported = f"{run.komga.books} chapter{'s' if run.komga.books != 1 else ''} exported"
+        fields.append({"name": "Komga", "value": (f"{exported}; {run.komga.error}" if run.komga.error else exported)[:1024], "inline": not run.komga.error})
     if run.downloaded:
         fields.append({"name": "Downloaded", "value": f"{run.downloaded} chapter{'s' if run.downloaded != 1 else ''}", "inline": True})
     if run.started_at and run.finished_at:

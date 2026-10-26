@@ -1,5 +1,6 @@
 // Settings > Sources: the installer. Turn a source system on (Urakatsu installs and starts its
-// runtime), add extension repositories, and install the sources you read.
+// runtime), add extension repositories, and install the sources you read. Below them, Komga, where
+// projects are exported to (KomgaSettings).
 
 import { ChevronDown, ChevronUp, Globe, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -7,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { describeError } from "../api/client";
 import { languageName, sources, type Extension, type Repository, type SystemStatus } from "../api/sources";
 import { useWorkspace } from "../state/workspace";
+import { KomgaSettings } from "./KomgaSettings";
 import { Switch } from "./primitives";
 import { PreferencePage, PreferenceRow, PreferenceSection } from "./SettingsPage";
 import { SourceIcon } from "./SourcesPage";
@@ -57,10 +59,11 @@ export function SourcesSettings() {
   return (
     <PreferencePage
       title="Sources"
-      description="Source systems run the scrapers that link a project to a series and download its chapters. Each keeps its runtime on the newest release."
+      description="Source systems run the scrapers that link a project to a series and download its chapters. Each keeps its runtime on the newest release. Komga is where finished chapters go."
     >
       {!systems && <p className="text-fg-2">Loading source systems.</p>}
       {systems?.map((system) => <SystemSection key={system.id} system={system} onStatus={replace} />)}
+      <KomgaSettings />
     </PreferencePage>
   );
 }

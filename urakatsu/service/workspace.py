@@ -20,6 +20,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from urakatsu import __version__
+from urakatsu.core import files
 from urakatsu.core.config import PipelineConfig, load_config, save_config
 from urakatsu.core.errors import ProjectBusy
 from urakatsu.core.progress import Progress, ProgressKind
@@ -43,9 +44,10 @@ from urakatsu.pipeline.stages import InpaintingMask
 from urakatsu.remote import OFFLOADED
 from urakatsu.runtimes.manager import RuntimeManager, RuntimeReport
 from urakatsu.scene import components as c
-from urakatsu.scene import At, RemovePolicy, Session
+from urakatsu.scene import At, Chapter, RemovePolicy, Session
 from urakatsu.scene.scene import Snapshot
 from urakatsu.sources import SourceSystems
+from urakatsu.sources.komga import KomgaConnection, KomgaLinks
 from urakatsu.sources.links import SourceLinks
 
 from .automations import Automations
@@ -124,6 +126,8 @@ class Workspace:
         self.pipeline = Pipeline(self.config, self.runtimes)
         self.systems = SourceSystems()
         self.links = SourceLinks(self.store, self.systems)
+        self.komga = KomgaConnection()
+        self.komga_links = KomgaLinks(self.store, self.links, self.komga, self.chapter_pages, lambda: self.config.translation.target_language)
         self.automations = Automations(self)
         self.jobs: dict[str, Job] = {}
         self._renders: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
@@ -284,11 +288,22 @@ class Workspace:
         """A chapter's pages as rendered (translation typeset), in chapter order, packed as a
         comic book archive (``cbz``) or a plain ``zip``; returns the archive and its file name.
 
-        CBZ export: ``0001_<page>.png`` entries, stored uncompressed
+        CBZ export: the :meth:`chapter_pages` entries, stored uncompressed
         since PNG is already compressed.
         """
         if format not in ("cbz", "zip"):
             raise ValueError("format must be cbz or zip")
+        chapter, pages = self.chapter_pages(project_id, chapter_id)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+            for name, data in pages:
+                archive.writestr(name, data)
+        name = files.safe_stem(f"{self.store.name(project_id)} - {chapter.name}") or "chapter"
+        return buffer.getvalue(), f"{name}.{format}"
+
+    def chapter_pages(self, project_id: str, chapter_id: str) -> tuple[Chapter, list[tuple[str, bytes]]]:
+        """A chapter and its pages as rendered, in chapter order, as ``(file name, PNG)``:
+        ``0001_<page>.png``, numbered so any reader sorts them right."""
         snapshot = self.session(project_id).snapshot()
         chapter = next((ch for ch in chapters_of(snapshot) if ch.id == chapter_id), None)
         if chapter is None:
@@ -296,13 +311,11 @@ class Workspace:
         if not chapter.pages:
             raise ValueError(f"{chapter.name} has no pages to export")
         width = max(4, len(str(len(chapter.pages))))
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
-            for index, page_id in enumerate(chapter.pages, start=1):
-                label = _file_stem(snapshot.page(page_id).label or "") or "page"
-                archive.writestr(f"{index:0{width}d}_{label}.png", self.render(project_id, page_id, snapshot))
-        name = _file_stem(f"{self.store.name(project_id)} - {chapter.name}") or "chapter"
-        return buffer.getvalue(), f"{name}.{format}"
+        pages = []
+        for index, page_id in enumerate(chapter.pages, start=1):
+            label = files.safe_stem(snapshot.page(page_id).label or "") or "page"
+            pages.append((f"{index:0{width}d}_{label}.png", self.render(project_id, page_id, snapshot)))
+        return chapter, pages
 
     def delete_chapter(self, project_id: str, chapter_id: str) -> ProjectView:
         self._idle(project_id)
@@ -806,16 +819,6 @@ class Workspace:
         self.links.close()
         self.systems.close()
         self.pipeline.unload_all()
-
-
-def _file_stem(label: str) -> str:
-    """A page or archive name safe on every file system: no extension, no reserved characters
-    (the export rule)."""
-    name = label.strip().rstrip(". ")
-    stem, dot, extension = name.rpartition(".")
-    if dot and stem and 1 <= len(extension) <= 5 and extension.isalnum():
-        name = stem
-    return "".join("_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in name).strip()
 
 
 def _png(image: Image.Image) -> bytes:

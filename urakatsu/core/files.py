@@ -1,4 +1,4 @@
-"""Atomic file replacement that also holds on Windows.
+"""Atomic file replacement that also holds on Windows, and names safe on every file system.
 
 POSIX replaces a file at once, even while another thread or process has it open. Windows
 refuses with PermissionError until every handle on the target is closed, so a reader in the
@@ -36,3 +36,22 @@ def write_text(path: Path, text: str) -> None:
         replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def write_bytes(path: Path, data: bytes) -> None:
+    """Writes ``path`` atomically, as :func:`write_text`."""
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_bytes(data)
+        replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def safe_stem(label: str) -> str:
+    """A file or folder name safe on every file system: no extension, no reserved characters."""
+    name = label.strip().rstrip(". ")
+    stem, dot, extension = name.rpartition(".")
+    if dot and stem and 1 <= len(extension) <= 5 and extension.isalnum():
+        name = stem
+    return "".join("_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in name).strip()
