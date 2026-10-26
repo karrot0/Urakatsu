@@ -21,6 +21,8 @@
   extensions) and Mana sources straight into a project.
 - **Translate overnight.** Automations run chosen or new chapters on a schedule, one model at a
   time, so the largest models get the whole GPU, and can wake the computer to do it.
+- **Read in Komga.** Export a project to a Komga server as a series, one book per chapter, by
+  hand or as soon as an automation finishes the chapters.
 - **Any model from Hugging Face.** Every download is rated for your GPU and RAM before you get
   it. Translate with a local model or a hosted one (Claude, OpenAI, DeepL and more).
 - **Always current.** PyTorch, llama.cpp and stable-diffusion.cpp stay on their newest
@@ -248,6 +250,7 @@ parity, and swappable providers.
 | [Models](docs/models.md) | Default models, the Hugging Face catalog, diffusion inpainting, hosted translation, page storage |
 | [Sources](docs/sources.md) | Source systems, linking a series, the built-in browser |
 | [Automations](docs/automations.md) | Scheduled batches, model profiles, waking the computer |
+| [Komga](docs/komga.md) | Connecting a Komga server, projects as series, exporting chapters |
 | [Runtimes](docs/runtimes.md) | How runtimes stay current, the `urakatsu runtimes` commands, pinning a release |
 | [The desktop app](docs/app.md) | What setup does on each system, the app environment, command-line options, building |
 | [CI and releases](docs/releases.md) | The GitHub workflows, publishing a release, nightly builds |

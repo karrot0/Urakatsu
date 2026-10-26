@@ -1,7 +1,8 @@
 """Source systems: scraper runtimes that link projects to series on manga sites.
 
 ``base`` defines the layer every system implements, ``registry`` loads the systems, and
-``links`` ties a project to one series and downloads its chapters.
+``links`` ties a project to one series and downloads its chapters. ``komga`` goes the other
+way: it exports a project's chapters to a series on a Komga server.
 """
 
 from .base import (

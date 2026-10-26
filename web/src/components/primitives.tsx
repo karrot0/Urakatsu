@@ -4,7 +4,7 @@
 
 import { NumberField as NumberFieldPrimitive } from "@base-ui/react/number-field";
 import { cn } from "cn";
-import { Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { HexColorPicker } from "react-colorful";
 
@@ -171,6 +171,29 @@ export function Slider({
 }
 
 // ---- switch --------------------------------------------------------------------------------
+
+/** A checkbox as a full-width row: a label, and an optional detail on the right. */
+export function CheckRow({ checked, label, detail, onChange }: { checked: boolean; label: string; detail?: string; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      role="checkbox"
+      aria-checked={checked}
+      className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-left hover:bg-hover"
+      onClick={() => onChange(!checked)}
+    >
+      <span
+        className={cn(
+          "flex size-4 shrink-0 items-center justify-center rounded-[4px]",
+          checked ? "bg-brand text-on-brand" : "bg-surface shadow-[inset_0_0_0_1px_var(--border-strong)]",
+        )}
+      >
+        {checked && <Check size={12} strokeWidth={3} />}
+      </span>
+      <span className="truncate">{label}</span>
+      {detail && <span className="ml-auto shrink-0 text-xs text-fg-3">{detail}</span>}
+    </button>
+  );
+}
 
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean }) {
   return <SwitchBase checked={checked} disabled={disabled} aria-label={label} onCheckedChange={(next) => onChange(next)} />;

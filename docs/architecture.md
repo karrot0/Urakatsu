@@ -21,7 +21,8 @@ urakatsu/
 ├── pipeline/    project store (Project, then Chapters, then Pages), scheduler, stage processors
 ├── renderer/    typesetting and layout (HarfBuzz shaping, Skia drawing)
 ├── catalog/     the Hugging Face model catalog (see models.md)
-├── sources/     source systems: Suwayomi Server and Mana (see sources.md)
+├── sources/     source systems: Suwayomi Server and Mana (see sources.md); komga/ exports
+│                projects to a Komga server as series (see komga.md)
 ├── desktop/     the desktop app window and its first-start GPU setup (see app.md)
 └── service/     proto contract, gRPC servicer, gRPC-web bridge, JSON API, CLI
 web/             the workspace UI (Vite, React, Tailwind and Base UI)

@@ -27,6 +27,12 @@ downloaded chapter is never fetched again, so your edits stay.
 Covers are kept at tile size in `URAKATSU_HOME/cache/covers`, and a search fetches its covers
 in parallel, so results fill in as fast as the site allows.
 
+## Komga
+
+The other way round: a project can go to a Komga server as a series, its chapters as books,
+by hand or when an automation finishes them. Komga is set up on the same Settings page, below
+the source systems. See [Komga](komga.md).
+
 ## The built-in browser (Mana)
 
 Mana has a built-in browser, as the Mana app has a WebView:

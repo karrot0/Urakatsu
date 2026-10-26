@@ -12,7 +12,7 @@ import pytest
 
 from urakatsu.runtimes.device import Backend, Device, DeviceType
 from urakatsu.runtimes.gguf_metadata import read_metadata, special_token_text
-from urakatsu.runtimes.packages import LLAMA_CPP, PackageManager, preferred_variants
+from urakatsu.runtimes.packages import BUN, LLAMA_CPP, SUWAYOMI, PackageManager, preferred_variants
 
 # The server binary as the system names it (find_executable looks for "<name>.exe" on Windows).
 EXE = "llama-server.exe" if os.name == "nt" else "llama-server"
@@ -59,8 +59,30 @@ def test_variants_follow_the_driver():
     assert preferred_variants(CUDA)[:2] == ["win-cuda-13", "win-cuda-12"] or preferred_variants(CUDA)[0].startswith(("linux", "macos"))
     old = [Device.gpu(Backend.CUDA, 0, "RTX", driver_version="550.10")]
     assert not any(v.endswith("cuda-13") for v in preferred_variants(old))
-    # macOS has one build (Metal, falling back to the CPU) for every machine.
-    assert preferred_variants([Device.cpu()])[-1].endswith(("cpu", "macos-arm64"))
+    # macOS has one build per processor (Metal on Apple silicon, falling back to the CPU).
+    assert preferred_variants([Device.cpu()])[-1].endswith(("cpu", "macos-arm64", "macos-x64"))
+
+
+@pytest.mark.parametrize("package", [BUN, SUWAYOMI], ids=lambda package: package.id)
+def test_on_demand_runtimes_install_on_both_mac_processors(package, monkeypatch):
+    """Bun (Mana) and Suwayomi Server publish Apple silicon and Intel builds; both are picked up."""
+    import platform
+
+    assets, picked = {
+        "bun": (
+            ["bun-darwin-aarch64.zip", "bun-darwin-x64.zip", "bun-darwin-x64-baseline.zip", "bun-linux-x64-baseline.zip"],
+            {"arm64": "bun-darwin-aarch64.zip", "x86_64": "bun-darwin-x64-baseline.zip"},  # baseline runs on any x64 CPU
+        ),
+        "suwayomi-server": (
+            ["Suwayomi-Server-v2.4.2366-macOS-arm64.tar.gz", "Suwayomi-Server-v2.4.2366-macOS-x64.tar.gz"],
+            {"arm64": "Suwayomi-Server-v2.4.2366-macOS-arm64.tar.gz", "x86_64": "Suwayomi-Server-v2.4.2366-macOS-x64.tar.gz"},
+        ),
+    }[package.id]
+    manager = PackageManager(offline=False, transport=fake_github([release("v1", "2026-10-01T00:00:00Z", {name: b"x" for name in assets})], {}))
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    for machine, name in picked.items():
+        monkeypatch.setattr(platform, "machine", lambda: machine)
+        assert [asset.name for asset in manager.latest(package, preferred_variants([Device.cpu()])).assets] == [name]
 
 
 def test_installs_the_newest_release_with_the_best_build(tmp_path, monkeypatch):

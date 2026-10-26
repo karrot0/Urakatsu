@@ -3,6 +3,7 @@
 
 import type { StageName } from "../state/workspace";
 import { call } from "./catalog";
+import type { ExportReport } from "./komga";
 
 export type ScheduleKind = "manual" | "once" | "daily";
 
@@ -42,6 +43,8 @@ export interface AutomationBody {
   /** A model profile id; null runs the current settings. */
   profile: string | null;
   wake: boolean;
+  /** Export the chapters a run finished to the project's Komga series. */
+  komga: boolean;
   notify: Notify;
 }
 
@@ -69,7 +72,7 @@ export interface ModelProfile {
   translation: TranslationChoice | null;
 }
 
-export type RunState = "queued" | "waiting" | "downloading" | "running" | "completed" | "stopped" | "failed";
+export type RunState = "queued" | "waiting" | "downloading" | "running" | "exporting" | "completed" | "stopped" | "failed";
 
 export interface ChapterResult {
   id: string;
@@ -109,6 +112,8 @@ export interface RunRecord {
   chapters: ChapterResult[];
   progress: RunProgress | null;
   error: string | null;
+  /** The export of the finished chapters to Komga; null when the run had none. */
+  komga: ExportReport | null;
   /** "sent", or why the Discord message was not; null when there was none to send. */
   notified: string | null;
 }
@@ -158,7 +163,7 @@ export function discordUserId(text: string): string | null {
 
 /** A run that has not finished yet. */
 export function live(run: RunRecord): boolean {
-  return run.status === "queued" || run.status === "waiting" || run.status === "downloading" || run.status === "running";
+  return run.status === "queued" || run.status === "waiting" || run.status === "downloading" || run.status === "running" || run.status === "exporting";
 }
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

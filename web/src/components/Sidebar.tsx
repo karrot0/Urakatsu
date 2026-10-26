@@ -55,6 +55,7 @@ import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../ap
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
 import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
 import { AutomationsButton } from "./Automations";
+import { KomgaButton } from "./Komga";
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -431,6 +432,7 @@ function ProjectHead() {
           {project.name}
         </span>
       )}
+      <KomgaButton />
       <AutomationsButton />
     </div>
   );
