@@ -1,0 +1,61 @@
+# Keeps the release PR open on main, after Koharu's release-pr.yml (.github/release-please):
+#
+# - each push to main updates the PR "chore(main): release X.Y.Z" with the next version, picked
+#   from the conventional commits since the last release, and its CHANGELOG.md entry;
+# - merging that PR tags vX.Y.Z, creates the release with the same notes, and starts the
+#   release workflow on the tag to build and attach the installers.
+#
+# Needs Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+
+name: Release PR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: .github/release-please/package-lock.json
+
+      - run: npm ci --ignore-scripts --prefix .github/release-please
+
+      - uses: actions/github-script@v9
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const releasePlease = require('./.github/release-please/index.cjs')
+            const tag = await releasePlease({ ...context.repo, token: process.env.GITHUB_TOKEN })
+            core.setOutput('tag', tag)
+
+      # Tag pushes made with GITHUB_TOKEN do not trigger another workflow.
+      - name: Start release build
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh workflow run release.yml --ref "$TAG"

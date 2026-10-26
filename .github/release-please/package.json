@@ -1,0 +1,9 @@
+{
+  "name": "@urakatsu/release-please",
+  "private": true,
+  "description": "The release PR (.github/workflows/release-pr.yml) and git-cliff for release notes",
+  "devDependencies": {
+    "git-cliff": "2.14.2",
+    "release-please": "17.11.2"
+  }
+}
