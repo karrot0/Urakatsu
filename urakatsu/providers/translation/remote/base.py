@@ -35,6 +35,7 @@ from typing import Any, ClassVar, Mapping, Optional
 import httpx
 
 from urakatsu.core.config import GenerationConfig
+from urakatsu.core.stop import interruptible
 
 from ..backend import TranslationRequest
 from ..base import TranslatorProvider
@@ -139,9 +140,9 @@ async def send_json(
     async with httpx.AsyncClient(transport=transport, timeout=TRANSLATE_TIMEOUT) as client:
         try:
             if form is not None:
-                response = await client.request(method, url, headers=body[1], params=params, content=body[0])
+                response = await interruptible(client.request(method, url, headers=body[1], params=params, content=body[0]))
             else:
-                response = await client.request(method, url, headers=headers, params=params, json=json_body)
+                response = await interruptible(client.request(method, url, headers=headers, params=params, json=json_body))
         except httpx.HTTPError as error:
             raise TranslationError(f"{provider} request failed: {error}") from error
     return decode_response(provider, response.status_code, response.text)

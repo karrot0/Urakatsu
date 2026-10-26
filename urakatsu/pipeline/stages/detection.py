@@ -5,6 +5,27 @@ uses (distance transform, morphology, Suzuki-Abe contour tracing, Ramer-Douglas-
 simplification, polygon area and length) are reproduced with the same integer and f64/f32
 semantics, including tie-breaking of ``min_by_key`` (first) and ``max_by_key`` (last). OpenCV is
 used only for exact connected-component labelling and the exact Euclidean distance transform.
+
+Difference from Koharu: ``infer_outline`` only finds a stroke whose colour differs from the page
+behind the text, so the common manga case of dark text with a white stroke on white paper, where
+the stroke shows only where the text crosses art or screentone, came back as unstroked text.
+``infer_background_halo`` (no Rust counterpart) runs when no outline is found and recognises that
+stroke by its rim: the art around the glyphs stops at one constant distance from them.
+
+Difference from Koharu: ``measured_stroke_width`` takes the median rim distance in Rust. When the
+stroke colour joins larger areas of the same colour in the window (white clothes, a white text
+box), their far edges outnumber the true rim and pull the median to two or three times the real
+width. The width is taken at the peak of the rim distances instead, and a rim with no clear peak
+(a box behind the text rather than a stroke traced around it) measures no stroke. ``infer_outline``
+also skips a fill that lies mostly outside the text's mask: when a neighbouring text reaches into
+the sampling window, the counters of its glyphs otherwise read as a fill "outlined" by the glyphs.
+
+Difference from Koharu: without an outline, Rust picks the ink as the cluster most unlike the
+window border's colour, counting a cluster's pixels outside the mask when it has none inside. Text
+on a coloured band that the window cuts across then took the colour of the page beside the band,
+or of a neighbouring text. ``infer_text_paint`` judges ink against what lines the inside of the
+mask's edge when the border colour barely reaches into the mask (``local_background_index``), and
+passes over clusters with no pixels in the mask while another cluster has some.
 """
 
 from __future__ import annotations
@@ -21,12 +42,13 @@ from PIL import Image
 
 from urakatsu.core.errors import ProcessingError
 from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
-from urakatsu.pipeline.scope import Bounds
+from urakatsu.pipeline.scope import Bounds, geometry_extents
 from urakatsu.scene import At, AssetInput, AssetMetadata, Edit, Patch, RemovePolicy, Snapshot
 from urakatsu.scene import components as c
 
 from .base import StageInput, StageProcessor, finish, generation
 from .sound_effects import LABEL as SOUND_EFFECT_LABEL, group_sound_effects, write_sound_effect_mask, write_sound_effects
+from .watermarks import page_image
 
 MODEL_ID = "mayocream/koharu-layout-rfdetr-seg-2xl-1152"
 MODEL_NAME = "koharu-layout-rfdetr-seg-2xl"
@@ -42,6 +64,22 @@ COLOR_CLUSTER_MIN_DISTANCE_SQUARED = 32 * 32
 COLOR_CLUSTER_COUNT = 4
 MIN_EXTREME_COLOR_PIXELS = 4
 MIN_MEASURED_STROKE_WIDTH = 2
+# measured_stroke_width: share of the nearby rim (out to twice the peak distance) that must lie
+# within one pixel of the peak for the band to count as a stroke.
+OUTLINE_RIM_CONCENTRATION = 0.35
+# local_background_index: below this share of the mask, the window border's colour is not what the
+# text sits on.
+LOCAL_BACKGROUND_MIN_SHARE = 0.3
+# infer_background_halo: rings around the glyphs are searched out to this distance; inside the
+# stroke almost no ring pixel contrasts with the halo colour, and at its rim a clear share does.
+HALO_SEARCH_DISTANCE = 24
+HALO_QUIET_FRACTION = 0.06
+HALO_RIM_FRACTION = 0.15
+HALO_MIN_RIM_PIXELS = 16
+HALO_RIM_CONCENTRATION = 0.5
+# A wider "stroke" than this many glyph depths (distance from glyph centre line to its edge) is
+# plain paper between unstroked text and nearby art.
+HALO_MAX_WIDTH_PER_GLYPH_DEPTH = 5
 DIALOGUE_MASK_CONTAINMENT_THRESHOLD = np.float32(0.9)
 NON_MAXIMUM_SUPPRESSION_THRESHOLD = np.float32(0.5)
 F32_ZERO = np.float32(0.0)
@@ -56,15 +94,25 @@ class DetectionStage(StageProcessor):
     model = MODEL_NAME
 
     def skip(self, input: StageInput, provider=None) -> bool:
-        # Processor::skip: a page that already has a text region is not re-detected.
+        # Processor::skip: a page that already has a text region is not re-detected, unless the run
+        # is forced (Redo, an Urakatsu addition).
+        return not input.force and self.done(input)
+
+    def done(self, input: StageInput) -> bool:
+        # Urakatsu counts only regions that still have their text: once the user deletes every text
+        # block, the page is detected again (a page that keeps some keeps its deletions).
         for entity in input.scene.descendants(input.page):
-            if input.contains_entity(entity) and _region_kind_of(input.scene, entity) == c.RegionKinds.TEXT:
+            if (
+                input.contains_entity(entity)
+                and _region_kind_of(input.scene, entity) == c.RegionKinds.TEXT
+                and input.scene.relations_to(entity, c.Relations.RECOGNIZED_FROM)
+            ):
                 return True
         return False
 
     async def process(self, input: StageInput, provider) -> Patch:
         page = input.page
-        image = input.images.get(input.scene, page, "source")
+        image = page_image(input)
         if image is None:
             raise ProcessingError(f"page {page} has no source image")
         output: LayoutDetections = await provider.detect(image)
@@ -86,27 +134,52 @@ def build_patch(input: StageInput, image: Image.Image, output: LayoutDetections,
     page = input.page
     edit = input.scene.edit_as(gen)
     edit.observe_subtree(page)
-    remove_previous_regions(input, edit, gen)
-    write_page(input, edit, page, image, output, gen)
+    kept = remove_previous_regions(input, edit, gen)
+    write_page(input, edit, page, image, output, gen, kept)
     return finish(edit)
 
 
-def remove_previous_regions(input: StageInput, edit: Edit, gen: c.Generation) -> None:
-    """``remove_previous_regions``: drop regions this producer generated earlier on the page."""
-    remove = []
-    for entity in input.scene.descendants(input.page):
-        if not input.contains_entity(entity):
+def _owned(scene: Snapshot, entity: str, gen: c.Generation) -> bool:
+    origin = scene.component(entity, c.EntityOrigin)
+    return origin is not None and isinstance(origin.origin, c.GeneratedOrigin) and origin.origin.generation.producer == gen.producer
+
+
+def remove_previous_regions(input: StageInput, edit: Edit, gen: c.Generation) -> list[tuple[float, float, float, float]]:
+    """``remove_previous_regions``: drop regions this producer generated earlier on the page.
+
+    Urakatsu: the text blocks detection made go with them (a forced run detects a page that has
+    text), except a block the user edited (its text, translation, style or frame): it stays with
+    its region, whose extents are returned so a new detection over it is not written twice.
+    """
+    scene = input.scene
+    kept_regions: set[str] = set()
+    removed_contents: set[str] = set()
+    for layer in scene.text_layers(input.page):
+        presents = scene.relation_from(layer, c.Relations.PRESENTS)
+        content = presents.target if presents is not None else None
+        if not input.contains_entity(layer) or content is None or content in removed_contents or not _owned(scene, content, gen):
             continue
-        origin = input.scene.component(entity, c.EntityOrigin)
-        owned = (
-            origin is not None
-            and isinstance(origin.origin, c.GeneratedOrigin)
-            and origin.origin.generation.producer == gen.producer
-        )
-        if owned and input.scene.component(entity, c.Region) is not None:
+        layers = [relation.source for relation in scene.relations_to(content, c.Relations.PRESENTS)]
+        if scene.user_authored(content) or any(scene.user_authored(each) for each in layers):
+            kept_regions.update(relation.target for relation in scene.relations_from(content, c.Relations.RECOGNIZED_FROM))
+            continue
+        for each in layers:
+            edit.remove_entity(each, RemovePolicy.CASCADE)
+        edit.remove_entity(content, RemovePolicy.CASCADE)
+        removed_contents.add(content)
+    remove = []
+    for entity in scene.descendants(input.page):
+        if input.contains_entity(entity) and entity not in kept_regions and _owned(scene, entity, gen) and scene.component(entity, c.Region) is not None:
             remove.append(entity)
     for entity in remove:
         edit.remove_entity(entity, RemovePolicy.CASCADE)
+    kept = []
+    for entity in kept_regions:
+        geometry = scene.component(entity, c.Geometry)
+        extents = geometry_extents(geometry) if geometry is not None else None
+        if extents is not None:
+            kept.append(extents)
+    return kept
 
 
 # ---- write_page ----------------------------------------------------------------------------------
@@ -141,12 +214,19 @@ def write_page(
     image: Image.Image,
     output: LayoutDetections,
     gen: c.Generation,
+    kept: list[tuple[float, float, float, float]] = (),
 ) -> None:
-    """``write_page``: region scope filter, NMS, layout order, regions, dialogue links, masks."""
+    """``write_page``: region scope filter, NMS, layout order, regions, dialogue links, masks.
+
+    ``kept`` are text regions the user's edited blocks keep (``remove_previous_regions``): text
+    found again over one is not written a second time."""
     detections = list(output.detections)
     if input.region is not None:
         detections = [d for d in detections if _intersects(d.bbox, input.region)]
+    if kept:
+        detections = [d for d in detections if d.label != "text" or not any(_same_text(d.bbox, box) for box in kept)]
     non_maximum_suppression(detections, NON_MAXIMUM_SUPPRESSION_THRESHOLD)
+    suppress_nested_text(detections)
     sort_by_layout(detections)
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
@@ -161,6 +241,16 @@ def write_page(
     write_masks(input, edit, page, detections, (output.image_width, output.image_height))
     if input.sound_effects != "off":
         write_sound_effect_mask(input, edit, page, detections, (output.image_width, output.image_height))
+
+
+# A new text detection is the same text as a kept region when this much of it lies inside it.
+KEPT_OVERLAP = 0.5
+
+
+def _same_text(bbox, box) -> bool:
+    """Whether a new detection is text a kept block already holds: it lies mostly in the kept
+    box, or the kept box (a line the user edited) lies in it (its paragraph)."""
+    return containment(box, bbox) >= np.float32(KEPT_OVERLAP) or containment(bbox, box) >= NESTED_TEXT_CONTAINMENT
 
 
 def _intersects(bbox, region: Bounds) -> bool:
@@ -644,20 +734,51 @@ def infer_text_paint(pixels: _Pixels, background, width: int, height: int):
         return normalize_text_color(centers[nonempty[0]]), None, None
 
     background_index = min(nonempty, key=lambda index: color_distance_squared(centers[index], background))
+    background_index = local_background_index(pixels, assignment, background_index, width, height)
+    # Not in Rust: a cluster with no pixels in the mask is a neighbour's ink, unless no cluster has any.
+    in_mask = {index: int(np.count_nonzero(pixels.inside[assignment == index])) >= 8 for index in nonempty}
+    candidates = [index for index in nonempty if index != background_index]
+    if any(in_mask[index] for index in candidates):
+        candidates = [index for index in candidates if in_mask[index]]
     fill_index = None
     fill_score = -1
-    for index in nonempty:
-        if index == background_index:
-            continue
-        score = cluster_ink_score(pixels, assignment, index, centers[index], background)
+    for index in candidates:
+        score = cluster_ink_score(pixels, assignment, index, centers[index], centers[background_index])
         if fill_index is None or score >= fill_score:  # max_by_key: last maximum
             fill_index, fill_score = index, score
-    color = (
-        representative_ink_color(pixels, assignment, fill_index)
-        if fill_index is not None
-        else centers[background_index]
-    )
+    if fill_index is None:
+        return normalize_text_color(centers[background_index]), None, None
+    color = representative_ink_color(pixels, assignment, fill_index)
+    halo = infer_background_halo(pixels, assignment, fill_index, color, background, width, height)
+    if halo is not None:
+        return normalize_text_color(color), halo[0], halo[1]
     return normalize_text_color(color), None, None
+
+
+def local_background_index(pixels: _Pixels, assignment: np.ndarray, background_index: int, width: int, height: int) -> int:
+    """The cluster the text sits on (no Rust counterpart).
+
+    Rust judges ink against the window border's colour. When that colour barely reaches into the
+    mask (text on a band or box that the axis-aligned window cuts across), the text sits on whatever
+    lines the inside of the mask's edge instead; the edge rather than the whole mask, since bold
+    lettering can fill most of a tight mask.
+    """
+    inside_counts = np.bincount(assignment[pixels.inside], minlength=COLOR_CLUSTER_COUNT)
+    total = int(inside_counts.sum())
+    if total == 0 or inside_counts[background_index] >= total * LOCAL_BACKGROUND_MIN_SHARE:
+        return background_index
+    inside_grid = np.zeros((height, width), dtype=bool)
+    inside_grid[pixels.ly[pixels.inside], pixels.lx[pixels.inside]] = True
+    edge = (inside_grid & _dilate3(~inside_grid))[pixels.ly, pixels.lx]
+    edge_counts = np.bincount(assignment[edge], minlength=COLOR_CLUSTER_COUNT)
+    if int(edge_counts.sum()) == 0:
+        return background_index
+    local = int(np.argmax(edge_counts))
+    # A background runs on past the mask; ink lining a glyph-tight mask stops at it.
+    outside = int(np.count_nonzero((assignment == local) & ~pixels.inside))
+    if outside < inside_counts[local] * LOCAL_BACKGROUND_MIN_SHARE:
+        return background_index
+    return local
 
 
 def cluster_ink_score(pixels: _Pixels, assignment: np.ndarray, index: int, center, background) -> int:
@@ -715,7 +836,10 @@ def measured_stroke_width(
     width: int,
     height: int,
 ) -> Optional[float]:
-    """``measured_stroke_width``: median distance from fill to the outer rim of the stroke band."""
+    """``measured_stroke_width``: the peak distance from fill to the outer rim of the stroke band.
+
+    Rust takes the median; see the module docstring for why the peak is used here.
+    """
     if len(stroke_index) < 8 or len(fill_index) < 8:
         return None
     fill_grid = np.zeros((height, width), dtype=bool)
@@ -727,8 +851,13 @@ def measured_stroke_width(
     values = distances[sy, sx][keep].astype(np.int64)
     if len(values) < 8:
         return None
-    median = _histogram_median_values(values)
-    return float(median) if median >= MIN_MEASURED_STROKE_WIDTH else None
+    counts = np.bincount(values, minlength=2)
+    windows = counts + np.append(counts[1:], 0) + np.insert(counts[:-1], 0, 0)
+    counts[0] = 0
+    peak = int(np.argmax(counts))
+    if windows[peak] < counts[1 : 2 * peak + 3].sum() * OUTLINE_RIM_CONCENTRATION:
+        return None
+    return float(peak) if peak >= MIN_MEASURED_STROKE_WIDTH else None
 
 
 def infer_outline(
@@ -759,6 +888,11 @@ def infer_outline(
             enclosed = fill_members[~outside[pixels.ly[fill_members], pixels.lx[fill_members]]]
             if len(enclosed) < 8:
                 continue
+            # Not in Rust: a fill outside this text's mask is a neighbour's glyph counters, and the
+            # glyph around them is not this text's stroke.
+            inside_fill = int(np.count_nonzero(pixels.inside[enclosed]))
+            if inside_fill * 2 < len(enclosed):
+                continue
             fill_grid = np.zeros((height, width), dtype=bool)
             fill_grid[pixels.ly[enclosed], pixels.lx[enclosed]] = True
             selection = _enclosing_cluster_selection(assignments, stroke_index, fill_grid)
@@ -785,12 +919,84 @@ def infer_outline(
             stroke_width = measured_stroke_width(pixels, stroke, enclosed, outside, width, height)
             if stroke_width is None:
                 continue
-            inside_fill = int(np.count_nonzero(pixels.inside[enclosed]))
             evidence = len(enclosed) + inside_fill
             score = contrast * min(evidence, 4096)
             if best is None or score > best.score:
                 best = _Outline(fill=normalized_fill, stroke=normalized_stroke, width=stroke_width, score=score)
     return best
+
+
+def infer_background_halo(
+    pixels: _Pixels,
+    assignment: np.ndarray,
+    fill_index: int,
+    fill_color,
+    background,
+    width: int,
+    height: int,
+) -> Optional[tuple[tuple[int, int, int], float]]:
+    """A stroke in the page's own colour, seen only where the text crosses art (no Rust counterpart).
+
+    Glyphs are the fill cluster's components inside the mask that do not touch the window border, so
+    art in the fill colour is not mistaken for text. Rings at each distance from the glyphs then show
+    the stroke: the first rings past the anti-aliasing hold almost nothing but the halo colour, and
+    the ring just past the stroke's rim suddenly holds art. The art's edge must sit at that one
+    distance, as a stroke traced around the glyphs makes it, rather than spread like a panel or
+    bubble line that merely passes nearby, and the band must stay in proportion to the glyph lines.
+    """
+    valid = np.zeros((height, width), dtype=bool)
+    valid[pixels.ly, pixels.lx] = True
+    members = assignment == fill_index
+    fill_grid = np.zeros((height, width), dtype=bool)
+    fill_grid[pixels.ly[members], pixels.lx[members]] = True
+    inside_grid = np.zeros((height, width), dtype=bool)
+    inside_grid[pixels.ly[pixels.inside], pixels.lx[pixels.inside]] = True
+    _, labels = cv2.connectedComponents(fill_grid.astype(np.uint8), connectivity=8)
+    border = np.concatenate([labels[1], labels[-2], labels[:, 1], labels[:, -2]])
+    glyph_labels = np.setdiff1d(np.unique(labels[fill_grid & inside_grid]), np.append(border, 0))
+    glyph = np.isin(labels, glyph_labels)
+    if int(np.count_nonzero(glyph)) < 8:
+        return None
+
+    distance = _distance_from_sites(glyph).astype(np.int64)
+    colors = np.zeros((height, width, 3), dtype=np.int64)
+    colors[pixels.ly, pixels.lx] = pixels.color
+    ring = valid & (distance >= 2) & (distance <= 4)
+    if int(np.count_nonzero(ring)) < 8:
+        return None
+    halo = median_color(colors[ring])
+    # A halo unlike the background is infer_outline's to judge, and it already declined.
+    if (
+        color_distance_squared(halo, background) >= COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+        or color_distance_squared(halo, fill_color) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+    ):
+        return None
+    near = valid & (((colors - np.array(halo, dtype=np.int64)) ** 2).sum(axis=2) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED)
+    contrast = valid & ~near & ~glyph
+    edge = contrast & _dilate3(near)
+
+    searched = valid & (distance <= HALO_SEARCH_DISTANCE)
+    length = HALO_SEARCH_DISTANCE + 1
+    totals = np.bincount(distance[searched], minlength=length)
+    contrasts = np.bincount(distance[searched & contrast], minlength=length)
+    edges = np.bincount(distance[searched & edge], minlength=length)
+    fractions = contrasts / np.maximum(totals, 1)
+    quiet = next((d for d in range(2, length) if totals[d] > 0 and fractions[d] <= HALO_QUIET_FRACTION), None)
+    if quiet is None:
+        return None
+    rim = next((d for d in range(quiet + 1, length) if fractions[d] >= HALO_RIM_FRACTION), None)
+    if rim is None or rim - 1 < MIN_MEASURED_STROKE_WIDTH or contrasts[rim] < HALO_MIN_RIM_PIXELS:
+        return None
+    depths = np.sort(_distance_from_sites(~glyph)[glyph])
+    if rim - 1 > HALO_MAX_WIDTH_PER_GLYPH_DEPTH * int(depths[(len(depths) - 1) * 99 // 100]):
+        return None
+    nearby_edges = int(edges[rim : rim + 6].sum())
+    if nearby_edges == 0 or int(edges[rim : rim + 2].sum()) < nearby_edges * HALO_RIM_CONCENTRATION:
+        return None
+    stroke_color = normalize_text_color(halo)
+    if stroke_color == normalize_text_color(fill_color):
+        return None
+    return stroke_color, float(rim - 1)
 
 
 # ---- geometry (rectangle, rotated rectangle, mask outline) ---------------------------------------
@@ -1248,6 +1454,41 @@ def non_maximum_suppression(detections: list, threshold: np.float32) -> None:
         if not suppressed:
             kept.append(candidate)
     detections[:] = kept
+
+
+# A text box this much inside a larger one is part of it (a line of its paragraph; a line's box
+# can stick out of a paragraph box the detector drew narrower than the text).
+NESTED_TEXT_CONTAINMENT = np.float32(0.75)
+
+
+def suppress_nested_text(detections: list) -> None:
+    """Not in Koharu: the layout model can find a paragraph and also its lines, and IoU
+    suppression keeps all of them (a line is a small part of its paragraph), so the text would be
+    read, translated and typeset twice. Lines inside a paragraph box are dropped. When the boxes
+    inside a large one sit in different bubbles, the large box is the mistake and is dropped."""
+    texts = [d for d in detections if d.label == "text"]
+    bubbles = [d for d in detections if d.label == "bubble"]
+
+    def home(text) -> Optional[int]:
+        held = [i for i, bubble in enumerate(bubbles) if containment(bubble.bbox, text.bbox) >= np.float32(0.5)]
+        return min(held, key=lambda i: _area32(bubbles[i].bbox)) if held else None
+
+    dropped: set[int] = set()
+    for outer in sorted(texts, key=lambda d: -_area32(d.bbox)):
+        if id(outer) in dropped:
+            continue
+        inner = [
+            text
+            for text in texts
+            if text is not outer and id(text) not in dropped and _area32(text.bbox) < _area32(outer.bbox) and containment(outer.bbox, text.bbox) >= NESTED_TEXT_CONTAINMENT
+        ]
+        if not inner:
+            continue
+        if len({home(text) for text in inner}) > 1:
+            dropped.add(id(outer))
+        else:
+            dropped.update(id(text) for text in inner)
+    detections[:] = [d for d in detections if id(d) not in dropped]
 
 
 def sort_by_layout(detections: list) -> None:

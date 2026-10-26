@@ -304,13 +304,14 @@ class KomgaLinks:
                 folder.mkdir(parents=True, exist_ok=True)
                 source = self.sources.get(project_id)
                 numbers = _chapter_numbers(source, project_id, self.store)
+                webtoon = self.store.format(project_id).kind == "webtoon"
                 for chapter in chapters:
                     if stop is not None and stop.stopped:
                         report.stopped = True
                         break
                     self._progress(project_id, chapter=chapter.name)
                     _, pages = self.render(project_id, chapter.id)
-                    book = self._book_info(link, chapter, numbers.get(chapter.id), source)
+                    book = self._book_info(link, chapter, numbers.get(chapter.id), source, webtoon)
                     name = self._file_name(link, chapter, folder)
                     files.write_bytes(folder / name, pack_cbz(pages, book))
                     link.books[chapter.id] = Book(file=name, exported_at=time.time())
@@ -348,7 +349,7 @@ class KomgaLinks:
                 return name
         raise ValueError(f"no free file name for {chapter.name} in {folder}")
 
-    def _book_info(self, link: KomgaLink, chapter: Chapter, number: Optional[float], source: Optional[SourceLink]) -> BookInfo:
+    def _book_info(self, link: KomgaLink, chapter: Chapter, number: Optional[float], source: Optional[SourceLink], webtoon: bool = False) -> BookInfo:
         series = source.series if source else None
         return BookInfo(
             series=link.title,
@@ -359,6 +360,7 @@ class KomgaLinks:
             web=series.url if series else None,
             language=self.language(),
             right_to_left=bool(source and source.source_language.lower().startswith("ja")),
+            webtoon=webtoon,
         )
 
     def _find_series(self, client: KomgaClient, link: KomgaLink, stop: Optional[StopToken] = None) -> Optional[str]:
@@ -400,6 +402,8 @@ class KomgaLinks:
                 metadata |= {"links": [{"label": source.source_name or "Source", "url": series.url}], "linksLock": True}
             if source.source_language.lower().startswith("ja"):
                 metadata |= {"readingDirection": "RIGHT_TO_LEFT", "readingDirectionLock": True}
+        if self.store.format(project_id).kind == "webtoon":
+            metadata |= {"readingDirection": "WEBTOON", "readingDirectionLock": True}
         try:
             client.update_series(link.series_id, metadata)  # type: ignore[arg-type]
             cover = self.sources.cover(project_id)

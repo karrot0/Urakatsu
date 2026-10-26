@@ -124,6 +124,7 @@ async def serve(
 ) -> None:
     """Runs until SIGINT / SIGTERM, or until ``shutdown`` is set (the desktop app runs this on a thread)."""
     servicer = UrakatsuServicer(workspace)
+    workspace.bind(asyncio.get_running_loop())
     workspace.systems.start_enabled()
     workspace.automations.start()  # the timer that runs scheduled automations
     if not os.environ.get("URAKATSU_NO_UPDATE_CHECK"):

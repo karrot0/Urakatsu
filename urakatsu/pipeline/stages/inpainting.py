@@ -7,10 +7,17 @@ raster layer. The provider is any ``InpaintingProvider``: LaMa and AOT run on th
 torch runtime, FLUX.2 Klein and RORem on the diffusion runtime; all four go through
 the same tiling here.
 
+Urakatsu also flat-fills text that is in no bubble when the background around it is uniform
+(captions: white lettering on a black box, as webtoons and manhua use). Koharu sends those to
+the model, and a generative model with a crop of almost nothing but lettering on one colour
+paints a scene into it.
+
 Generative fill is a user mask with ``generative`` set, run by the fill
 model. A model that follows prompts gets the whole selection as one crop with its
 surroundings (``fill_region``), so a sound effect is painted as one piece rather than in
-tiles; LaMa and AOT go through the tiling like the remove tool. Either way the result is
+tiles; a model that edits the crop it is given (``crop_edits``) gets only a rim of
+surroundings, since its instruction applies to everything in view. LaMa and AOT go through
+the tiling like the remove tool. Either way the result is
 committed to the Cleanup layer as a user edit.
 """
 
@@ -42,12 +49,14 @@ from urakatsu.scene import (
     RasterLayerKind,
     Region,
     RegionKinds,
+    Relations,
     Snapshot,
     user,
 )
 from urakatsu.scene.components import is_user
 
 from .base import StageInput, StageProcessor, finish, generation
+from .watermarks import page_image, watermark_layer
 
 PRODUCER = "dev.koharu.pipeline.inpainting"
 SOURCE = "source"
@@ -58,8 +67,15 @@ TILE_SIZE = 512
 TILE_CONTEXT = 128
 UNIFORM_BACKGROUND_MIN_PIXELS = 16
 FLAT_FILL_EDGE_MARGIN = 3.0
+# Pixels around a free text region's box sampled for its background, beyond the edge margin.
+TEXT_FLAT_FILL_PAD = 8
 # Context around a generative fill selection, as a share of its longer side (at least TILE_CONTEXT).
 FILL_CONTEXT = 0.5
+# The same for a model that edits the whole crop it sees from an instruction (Qwen Image, FLUX.2
+# Klein): with a page's worth of context, "remove the text" goes to a speech balloon beside the
+# selected sound effect, outside the mask, and the selection comes back unchanged.
+EDIT_CONTEXT = 0.1
+EDIT_CONTEXT_MIN = 48
 
 Inference = Callable[[Image.Image, np.ndarray], Image.Image]
 
@@ -92,11 +108,20 @@ class InpaintingStage(StageProcessor):
     def skip(self, input: StageInput, provider: Provider) -> bool:
         if input.inpainting_mask is not None:
             return False
+        cleanup = self._cleanup(input)
+        # A forced run (Redo) paints the page again, but never over a cleanup the user painted.
+        return cleanup is not None and (not input.force or input.scene.user_authored(cleanup))
+
+    def done(self, input: StageInput) -> bool:
+        return input.inpainting_mask is None and self._cleanup(input) is not None
+
+    @staticmethod
+    def _cleanup(input: StageInput) -> Optional[str]:
         for entity in input.scene.children(input.page):
             layer = input.scene.component(entity, RasterLayer)
             if layer is not None and layer.kind is RasterLayerKind.CLEANUP and input.scene.asset(entity, SOURCE) is not None:
-                return True
-        return False
+                return entity
+        return None
 
     async def process(self, input: StageInput, provider: Provider) -> Patch:
         prepared = prepare(input)
@@ -106,7 +131,8 @@ class InpaintingStage(StageProcessor):
         if mask is not None and mask.generative:
             fill = functools.partial(provider._fill, prompt=mask.prompt or None)
             if getattr(provider, "prompted", False):
-                image = await asyncio.to_thread(fill_region, prepared.image, prepared.mask, fill)
+                context = (EDIT_CONTEXT, EDIT_CONTEXT_MIN) if getattr(provider, "crop_edits", False) else (FILL_CONTEXT, TILE_CONTEXT)
+                image = await asyncio.to_thread(fill_region, prepared.image, prepared.mask, fill, *context)
             else:
                 image = await asyncio.to_thread(inpaint_tiled, prepared.image, prepared.mask, prepared.text_mask, [], fill)
             return commit(input, provider, prepared, image)
@@ -123,7 +149,7 @@ class InpaintingStage(StageProcessor):
 
 def prepare(input: StageInput) -> _Prepared:
     page = input.page
-    original = input.images.get(input.scene, page, SOURCE)
+    original = page_image(input)
     if original is None:
         raise ValueError(f"page {page} has no source image")
     cleanup_entity = next(
@@ -197,16 +223,24 @@ def _clear_outside(mask: np.ndarray, text_mask: np.ndarray, bounds: Bounds) -> N
 
 
 def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> list[FlatFillRegion]:
+    """Bubbles, then text in no bubble (its box widened by TEXT_FLAT_FILL_PAD): each is filled
+    flat when the unmasked pixels in it share one colour (``fill_uniform_regions``)."""
     regions: list[FlatFillRegion] = []
+    free_text: list[np.ndarray] = []
     for entity in scene.descendants(page):
         region = scene.component(entity, Region)
-        if region is None or region.kind != RegionKinds.BUBBLE:
+        if region is None or region.kind not in (RegionKinds.BUBBLE, RegionKinds.TEXT):
             continue
         geometry = scene.component(entity, Geometry)
         if geometry is None:
             continue
         polygon = np.array([(point.x, point.y) for point in geometry.points], dtype=np.float32).reshape(-1, 2)
         if len(polygon) < 3:
+            continue
+        if region.kind == RegionKinds.TEXT:
+            if not scene.relations_from(entity, Relations.INSIDE):
+                (left, top), (right, bottom) = polygon.min(axis=0) - TEXT_FLAT_FILL_PAD, polygon.max(axis=0) + TEXT_FLAT_FILL_PAD
+                free_text.append(np.array([(left, top), (right, top), (right, bottom), (left, bottom)], dtype=np.float32))
             continue
         left, top = polygon.min(axis=0)
         right, bottom = polygon.max(axis=0)
@@ -215,6 +249,15 @@ def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> li
             int(np.clip(np.floor(top), 0, height)),
             int(np.clip(np.ceil(right), 0, width)),
             int(np.clip(np.ceil(bottom), 0, height)),
+        )
+        if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
+    for polygon in free_text:
+        bounds = (
+            int(np.clip(np.floor(polygon[0, 0]), 0, width)),
+            int(np.clip(np.floor(polygon[0, 1]), 0, height)),
+            int(np.clip(np.ceil(polygon[2, 0]), 0, width)),
+            int(np.clip(np.ceil(polygon[2, 1]), 0, height)),
         )
         if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
             regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
@@ -257,7 +300,9 @@ def commit(input: StageInput, provider: Provider, prepared: _Prepared, image: Im
                 layer.origin = user()
                 edit.set(entity, layer)
     else:
-        entity = edit.add_entity(page, At.START)
+        # Over the Watermarks layer (not in Koharu), which sits right over the source.
+        below = watermark_layer(input.scene, page)
+        entity = edit.add_entity(page, At.after(below) if below is not None else At.START)
         edit.set(entity, RasterLayer(origin=user(), name="Cleanup", kind=RasterLayerKind.CLEANUP))
 
     buffer = io.BytesIO()
@@ -308,8 +353,9 @@ def inpaint_tiled(
     return Image.fromarray(output, "RGB")
 
 
-def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference) -> Image.Image:
-    """Generative fill: the masked area in one crop, with context around it on every side."""
+def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference, context: float = FILL_CONTEXT, minimum: int = TILE_CONTEXT) -> Image.Image:
+    """Generative fill: the masked area in one crop, with ``context`` of its longer side (at least
+    ``minimum`` pixels) around it on every side."""
     if image.size != (mask.shape[1], mask.shape[0]):
         raise ValueError("image and mask dimensions differ")
     output = np.asarray(image.convert("RGB")).copy()
@@ -318,7 +364,7 @@ def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference) -> Image.
         return Image.fromarray(output, "RGB")
     height, width = mask.shape
     left, top, right, bottom = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
-    margin = max(TILE_CONTEXT, round(max(right - left, bottom - top) * FILL_CONTEXT))
+    margin = max(minimum, round(max(right - left, bottom - top) * context))
     left, top = max(left - margin, 0), max(top - margin, 0)
     right, bottom = min(right + margin, width), min(bottom + margin, height)
     crop_mask = np.where(mask[top:bottom, left:right] >= 127, 255, 0).astype(np.uint8)
@@ -412,7 +458,10 @@ def inpaint_tiles(mask: np.ndarray) -> tuple[np.ndarray, list[_Tile]]:
                 core = (core_left, core_top, core_right, core_bottom)
                 owned = component_bounds_in(labels, label, core)
                 if owned is not None:
-                    split.append(_Tile([label], core, expand_bounds(owned, width, height)))
+                    # The core is the component's part of the cell, not the whole cell: the crop is
+                    # built around that part, and a cell the component only crosses in a thin band
+                    # would otherwise be taller or wider than its crop when composited.
+                    split.append(_Tile([label], owned, expand_bounds(owned, width, height)))
                 core_left = core_right
             core_top = core_bottom
 

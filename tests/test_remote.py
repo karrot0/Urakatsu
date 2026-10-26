@@ -19,6 +19,7 @@ from urakatsu.core.config import PipelineConfig
 from urakatsu.core.errors import OutOfMemory, ProviderUnavailable, is_out_of_memory
 from urakatsu.core.registry import Registry
 from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
+from urakatsu.core.stop import StopToken, StoppedError, stopping
 from urakatsu.providers.base import DetectionProvider, InpaintingProvider, OcrProvider, TranslationProvider
 from urakatsu.core.config import save_config
 from urakatsu.remote import CLOUD, REMOTE, client as remote_client, cloud, wire
@@ -202,7 +203,7 @@ async def test_remote_providers_match_local_runs(worker):
 
     inpainter = remote(EchoInpainter)
     await inpainter.load()
-    assert inpainter.instructed is False  # what the worker's loaded model says
+    assert inpainter.instructed is False and inpainter.crop_edits is False  # what the worker's loaded model says
     # The stage calls these synchronously, per tile.
     assert np.array_equal(np.asarray(inpainter._inpaint(image, mask)), np.asarray(EchoInpainter()._inpaint(image, mask)))
     filled = np.asarray(inpainter._fill(image, mask, "abc"))
@@ -395,6 +396,22 @@ async def test_a_call_longer_than_a_poll_is_waited_for_in_short_requests(worker)
     assert calls[0][1].endswith("/recognize") and calls[-1][1].endswith("/result")
     assert len(polls) >= 2  # each poll returned after POLL_WAIT while the model was still working
     assert not instance.jobs  # a fetched result is gone
+
+
+async def test_stopping_the_run_stops_waiting_for_the_worker(worker, monkeypatch):
+    """A stopped run frees the lane at once instead of waiting out the worker's job."""
+    instance, _, _ = worker
+    monkeypatch.setattr(remote_client, "STOP_POLL_WAIT", 0.05)
+    monkeypatch.setattr(SlowOcr, "seconds", 3.0)
+    provider = remote(SlowOcr)
+    await provider.load()
+    token = StopToken()
+    asyncio.get_running_loop().call_later(0.2, token.stop)
+    started = time.monotonic()
+    with stopping(token), pytest.raises(StoppedError):
+        await provider.recognize([page()])
+    assert time.monotonic() - started < 1.5
+    assert not any(path.endswith("/result") for _, path in instance.shared.requests)  # abandoned, not fetched
 
 
 def test_a_job_whose_model_was_unloaded_while_it_waited_reports_it(worker):

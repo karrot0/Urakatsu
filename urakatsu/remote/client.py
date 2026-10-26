@@ -16,6 +16,10 @@ its runtime, so a remote run produces what a local one would.
   notebook GPU takes over a minute for a crop.
 - A worker that restarted (a notebook reconnecting) or unloaded the model for another client
   answers 404 for it; the client loads it again and repeats the call once.
+- Stopping the run stops the waiting: inside a pipeline run the client polls in short holds
+  (``STOP_POLL_WAIT``) and raises ``StoppedError`` once the run's token is set, so the
+  accelerator lane frees within seconds. The job on the worker is abandoned, not cancelled
+  (neither the worker nor Urakatsu Cloud can cancel one); its result expires unfetched.
 - Step previews of diffusion models are not streamed from the worker.
 """
 
@@ -31,6 +35,7 @@ from PIL import Image
 
 from urakatsu.core.errors import ModelLoadError, OutOfMemory, ProcessingError, ProviderUnavailable
 from urakatsu.core.results import LayoutDetections
+from urakatsu.core.stop import current as current_stop
 
 from . import CLOUD, PROTOCOL, cloud, wire
 
@@ -44,6 +49,7 @@ KEY_ENV = "URAKATSU_REMOTE_API_KEY"
 TIMEOUT = httpx.Timeout(30.0, read=None)
 # Seconds the worker may hold a poll open (it caps this at its ``MAX_WAIT``).
 POLL_WAIT = 20.0
+STOP_POLL_WAIT = 2.0
 # Settings that say where to connect or hold the user's own keys, not how the model runs: the
 # worker uses its own, and a key never leaves this machine.
 CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "server_url", "server_api_key", "api_key"})
@@ -83,6 +89,11 @@ def worker_error(response: httpx.Response, action: str, on_cloud: bool = False) 
         return error_for(body.get("kind"), str(body.get("error") or response.text))
     except (ValueError, AttributeError):
         return error_for("unavailable" if response.status_code == 503 else None, response.text[:500] or f"HTTP {response.status_code}")
+
+
+def _poll_wait() -> float:
+    """How long one poll may wait: short inside a run, so a stop is noticed quickly."""
+    return POLL_WAIT if current_stop() is None else STOP_POLL_WAIT
 
 
 class ModelGone(Exception):
@@ -153,7 +164,7 @@ class RemoteModel:
         while state.get("state") == "loading":
             try:
                 state = self._request(
-                    "GET", f"/v1/models/{self.model_id}", params={"wait": POLL_WAIT}, action=f"load {self.provider.id}", error=ModelLoadError
+                    "GET", f"/v1/models/{self.model_id}", params={"wait": _poll_wait()}, action=f"load {self.provider.id}", error=ModelLoadError
                 )
             except ModelGone:
                 raise ModelLoadError(f"the worker dropped {self.provider.id} while loading it (another client may have swapped it out)") from None
@@ -162,6 +173,7 @@ class RemoteModel:
             raise error_for(failure.get("kind", "load"), str(failure.get("error") or "the model failed to load"))
         if "instructed" in state:  # an inpainter whose recipe on the worker decides it
             self.provider.instructed = bool(state["instructed"])
+            self.provider.crop_edits = bool(state["instructed"]) and not getattr(type(self.provider), "sees_mask", False)
         self._check_weights(state)
 
     def _check_weights(self, state: dict[str, Any]) -> None:
@@ -192,6 +204,9 @@ class RemoteModel:
     # -- calls ----------------------------------------------------------------------------------
 
     def _request(self, method: str, path: str, *, action: str, error: type[Exception] = ProcessingError, **kwargs: Any) -> Any:
+        stop = current_stop()
+        if stop is not None:
+            stop.raise_if_stopped()
         if self.client is None:
             raise ProcessingError(f"{self.provider.name} is not loaded")
         try:
@@ -221,7 +236,7 @@ class RemoteModel:
         job = self._request("POST", f"/v1/models/{self.model_id}/{operation}", action=operation, **kwargs)
         identifier = job["job"]
         while job.get("state") == "running":
-            job = self._request("GET", f"/v1/jobs/{identifier}", params={"wait": POLL_WAIT}, action=operation)
+            job = self._request("GET", f"/v1/jobs/{identifier}", params={"wait": _poll_wait()}, action=operation)
         if job.get("state") == "failed":
             failure = job.get("failure") or {}
             if failure.get("kind") == "gone":

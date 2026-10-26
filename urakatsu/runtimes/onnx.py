@@ -81,9 +81,9 @@ class OnnxRuntime(Runtime):
         if preload is None:
             return
         try:
-            preload(cuda=True, cudnn=True, msvc=True, verbose=False)
-        except Exception as error:  # a failed preload just means the session will tell us
-            log.debug("onnxruntime.preload_dlls failed: %s", error)
+            preload(cuda=True, cudnn=True, msvc=True)
+        except Exception as error:  # the session then reports the CPU fallback
+            log.warning("onnxruntime.preload_dlls failed: %s", error)
 
     def effective_device(self) -> Device:
         if self._fallback_reason is not None:

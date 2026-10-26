@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 
 class ProgressKind(str, Enum):
+    QUEUED = "queued"
     STARTED = "started"
     LOADING = "loading"
     RUNNING = "running"

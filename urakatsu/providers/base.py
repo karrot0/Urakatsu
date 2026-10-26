@@ -373,6 +373,9 @@ class InpaintingProvider(Provider):
     # Whether the prompt is an edit instruction ("replace X with Y"), as for models that take the
     # crop as a reference image, rather than a description of what belongs there.
     instructed: ClassVar[bool] = False
+    # Whether the model edits the whole crop it gets from the instruction, not knowing the mask
+    # (it takes the crop as a reference image); generative fill then sends a tight crop.
+    crop_edits: ClassVar[bool] = False
     remotable = True
 
     def _remote_methods(self, remote) -> dict[str, Any]:
@@ -392,6 +395,23 @@ class InpaintingProvider(Provider):
         if prompt and not self.prompted:
             raise ValueError(f"{self.name} cannot follow a prompt; leave it empty to remove, or pick a diffusion model for Generative fill in Settings, Pipeline")
         return self._inpaint(image, mask)
+
+
+class WatermarkBox(BaseModel):
+    box: tuple[int, int, int, int]  # left, top, right, bottom
+    score: float
+
+
+class WatermarkProvider(Provider):
+    """Proposes boxes that may hold a watermark; the watermarks stage decides what is removed."""
+
+    stage = Stage.WATERMARKS
+
+    async def detect_watermarks(self, image: Image.Image) -> list[WatermarkBox]:
+        return await asyncio.to_thread(self._detect_watermarks, image)
+
+    def _detect_watermarks(self, image: Image.Image) -> list[WatermarkBox]:  # pragma: no cover - interface
+        raise NotImplementedError
 
 
 class TranslationProvider(Provider):

@@ -19,6 +19,8 @@
   re-run never overwrites your edits.
 - **Chapters from the sites you read.** Download series from Suwayomi (Tachiyomi and Mihon
   extensions) and Mana sources straight into a project.
+- **Webtoons, manhwa and manhua.** A webtoon project joins each chapter into one strip and
+  cuts it again where no bubble, text or drawing is cut, then exports pages or one long strip.
 - **Translate overnight.** Automations run chosen or new chapters on a schedule, one model at a
   time, so the largest models get the whole GPU, and can wake the computer to do it.
 - **Read in Komga.** Export a project to a Komga server as a series, one book per chapter, by
@@ -251,6 +253,7 @@ parity, and swappable providers.
 | [Sources](docs/sources.md) | Source systems, linking a series, the built-in browser |
 | [Automations](docs/automations.md) | Scheduled batches, model profiles, waking the computer |
 | [Komga](docs/komga.md) | Connecting a Komga server, projects as series, exporting chapters |
+| [Webtoons](docs/webtoons.md) | Webtoon projects, how strips are restitched, the cut settings |
 | [Runtimes](docs/runtimes.md) | How runtimes stay current, the `urakatsu runtimes` commands, pinning a release |
 | [The desktop app](docs/app.md) | What setup does on each system, the app environment, command-line options, building |
 | [CI and releases](docs/releases.md) | The GitHub workflows, publishing a release, nightly builds |
@@ -261,7 +264,8 @@ Urakatsu follows [Koharu](https://github.com/koharu-rs/koharu)'s pipeline, scene
 typesetting, and runs on [llama.cpp](https://github.com/ggml-org/llama.cpp),
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp),
 [PyTorch](https://pytorch.org/), [Suwayomi Server](https://github.com/Suwayomi/Suwayomi-Server)
-and [Bun](https://bun.sh/).
+and [Bun](https://bun.sh/). Webtoon slicing follows
+[SmartStitch](https://github.com/MechTechnology/SmartStitch)'s pixel comparison.
 
 Licensed under the [MIT license](LICENSE). Koharu's copyright and license notices, which
 Urakatsu keeps, are in [NOTICE](NOTICE).

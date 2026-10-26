@@ -101,6 +101,10 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
         return convert.project_to_proto(self.workspace.rename_project(request.project_id, request.name))
 
     @guarded
+    async def SetProjectFormat(self, request, context):
+        return convert.project_to_proto(self.workspace.set_project_format(request.project_id, convert.format_from_proto(request.format)))
+
+    @guarded
     async def DeleteProject(self, request, context):
         self.workspace.delete_project(request.project_id)
         return pb.Empty()
@@ -127,6 +131,10 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
     @guarded
     async def DeleteChapter(self, request, context):
         return convert.project_to_proto(self.workspace.delete_chapter(request.project_id, request.chapter_id))
+
+    @guarded
+    async def RestitchChapter(self, request, context):
+        return convert.project_to_proto(await self.workspace.restitch_chapter(request.project_id, request.chapter_id))
 
     @guarded
     async def ArrangeProject(self, request, context):
@@ -245,6 +253,7 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
                 entities=list(request.entity_ids) or None,
                 inpainting_mask=bytes(request.inpainting_mask) or None,
                 fill_prompt=request.fill_prompt if request.HasField("fill_prompt") else None,
+                force=request.force,
             )
         except Exception as error:
             await context.abort(status_for(error), message_for(error))

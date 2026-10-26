@@ -52,7 +52,8 @@ class SourceLink(BaseModel):
 
 
 class DownloadState(BaseModel):
-    state: Literal["queued", "downloading", "importing", "failed"]
+    # "stitching": a webtoon project joins the pages and cuts them again (pipeline/stitch.py).
+    state: Literal["queued", "downloading", "importing", "stitching", "failed"]
     done: int = 0
     total: int = 0
     error: Optional[str] = None
@@ -324,7 +325,7 @@ class SourceLinks:
         images = list(self._pool.map(fetch, enumerate(handles, start=1)))
         if (project_id, chapter_id) in self._cancelled:
             raise _Cancelled()
-        state.state = "importing"
+        state.state = "stitching" if self.store.format(project_id).kind == "webtoon" else "importing"
         width = len(str(len(images)))
         order = {remote_key(link, c.id): index for index, c in enumerate(link.chapters)}
         name = chapter.name

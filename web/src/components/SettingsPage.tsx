@@ -15,6 +15,7 @@ import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
+import { WatermarkPreview, type WatermarkMode } from "./WatermarkPreview";
 import { SourcesSettings } from "./SourcesSettings";
 import { AboutSettings } from "./Updates";
 import { TOOL_INFO } from "./ToolBelt";
@@ -388,6 +389,65 @@ function SoundEffectsSection({ providers, draft, update }: { providers: Provider
   );
 }
 
+const WATERMARK_MODES: { mode: WatermarkMode; title: string; description: string }[] = [
+  { mode: "off", title: "Leave as drawn", description: "Logos and scanlator marks stay on the page." },
+  { mode: "remove", title: "Remove repeated", description: "Marks that repeat across a chapter are lifted off, keeping the art under them." },
+];
+
+/** The Hugging Face repository a provider's weights come from (`hf://org/repo@revision/file`). */
+function weightsRepo(provider?: ProviderInfo): string | undefined {
+  const source = provider?.weights[0];
+  const match = source?.match(/^hf:\/\/(?:datasets\/)?([^@]+)@/);
+  return match?.[1];
+}
+
+/** Platform logos and scanlator marks over the art (not a Koharu setting: Koharu leaves them). */
+function WatermarksSection({ providers, draft, update }: { providers: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const mode = (draft.watermarks || "off") as WatermarkMode;
+  const provider = providers.find((p) => p.id === draft.watermarksModel) ?? providers[0];
+  const repo = weightsRepo(provider);
+  return (
+    <PreferenceSection title="Watermarks" description="Logos and scanlator marks drawn over the art. Applies to pages detected after you change it.">
+      <div role="radiogroup" aria-label="Watermarks" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
+        {WATERMARK_MODES.map((option) => {
+          const active = mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update({ watermarks: option.mode })}
+              className={cn(
+                "flex min-w-0 cursor-pointer flex-col gap-2 rounded-card bg-surface p-2 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:shadow-focus",
+                active ? "shadow-[inset_0_0_0_2px_var(--brand)]" : "hover:bg-hover-faint",
+              )}
+            >
+              <WatermarkPreview mode={option.mode} className="block w-full overflow-hidden rounded-control" />
+              <span className="px-0.5">
+                <span className="block font-medium">{option.title}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-fg-2">{option.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <PreferenceRow
+        title="Watermark detector"
+        description="Finds candidate marks on every page. Only marks that repeat on three or more pages of a chapter are removed, so its false finds leave the art alone."
+      >
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className={CONTROL_PAIR}>
+            <Select label="Watermark detector" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(watermarksModel) => update({ watermarksModel })} />
+            <RuntimeSelect provider={provider} draft={draft} update={update} />
+          </div>
+          {repo && <p className="truncate text-xs leading-4 text-fg-3" title={provider?.weights[0]}>Runs {repo}</p>}
+        </div>
+      </PreferenceRow>
+    </PreferenceSection>
+  );
+}
+
 function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const caps = ws.capabilities;
@@ -451,6 +511,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         const provider = id && id !== draft.inpainting && id !== draft.fill ? byStage("inpainting").find((p) => p.id === id) : undefined;
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
+      <WatermarksSection providers={caps?.providers.filter((p) => p.stage === "watermarks") ?? []} draft={draft} update={update} />
       <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">
         <ModelsFolderRow />
         <PreferenceRow

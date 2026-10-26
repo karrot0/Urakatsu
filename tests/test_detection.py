@@ -74,11 +74,23 @@ def test_detection_skips_a_page_with_existing_text(tmp_path):
     session = Session(tmp_path)
     snapshot, page = _page(session)
     edit = snapshot.edit()
-    edit.add_analysis_region(page, At.END, c.RegionKinds.TEXT, Geometry.rectangle(10, 10, 20, 20))
+    region = edit.add_analysis_region(page, At.END, c.RegionKinds.TEXT, Geometry.rectangle(10, 10, 20, 20))
+    edit.relate(c.Relations.RECOGNIZED_FROM, edit.add_text_content(page, At.END), region)
     snapshot = session.commit(edit.finish())
     stage_input = StageInput(snapshot, page, None, None, ImageCache(), None)
 
     assert DetectionStage().skip(stage_input, None)
+
+
+def test_detection_runs_again_on_a_page_whose_text_was_deleted(tmp_path):
+    # A text region left without its text (the user deleted the block) does not count as detected.
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    edit = snapshot.edit()
+    edit.add_analysis_region(page, At.END, c.RegionKinds.TEXT, Geometry.rectangle(10, 10, 20, 20))
+    snapshot = session.commit(edit.finish())
+
+    assert not DetectionStage().skip(StageInput(snapshot, page, None, None, ImageCache(), None), None)
 
 
 def test_detection_does_not_skip_a_page_without_text_regions(tmp_path):
@@ -430,6 +442,62 @@ def _outlined_text_on_textured_background():
     return image, detection
 
 
+def _text_crossing_artwork(stroke_width, bar_lefts, art_corner):
+    """Black bars on white paper, black art in the corner past ``art_corner``, an optional paper-white stroke."""
+    size = 120
+    left, top, right, bottom = 20, 20, 100, 100
+    image = np.full((size, size, 3), 255, dtype=np.uint8)
+    image[art_corner[1] :, art_corner[0] :] = (12, 12, 12)
+    bars = np.zeros((size, size), dtype=bool)
+    for x in bar_lefts:
+        bars[30:90, x : x + 3] = True
+    if stroke_width:
+        image[det._distance_from_sites(bars) <= stroke_width] = (255, 255, 255)
+    image[bars] = (0, 0, 0)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[top:bottom, left:right] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _outlined_text_joining_a_stroke_colored_area(stroke_width):
+    """Black text with a white outline on navy, the outline running into a white area to its right."""
+    size = 120
+    image = np.full((size, size, 3), (16, 24, 88), dtype=np.uint8)
+    image[40:60, 20:100] = (255, 255, 255)
+    fill = np.zeros((size, size), dtype=bool)
+    fill[40 + stroke_width : 60 - stroke_width, 20 + stroke_width : 60 - stroke_width] = True
+    image[fill] = (0, 0, 0)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[40:60, 20:60] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _text_on_a_band_across_the_page():
+    """White bars on an orange band crossing pink paper, a dark red neighbouring glyph outside the mask."""
+    size = 120
+    image = np.full((size, size, 3), (230, 178, 200), dtype=np.uint8)
+    image[:, 40:80] = (239, 159, 20)
+    for x in (50, 60, 70):
+        image[20:100, x : x + 3] = (246, 237, 238)
+    image[20:100, 95:99] = (103, 41, 32)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[16:104, 44:78] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _plain_text_beside_a_neighbouring_glyph():
+    """Blue bars inside the mask; outside it, a black ring around a white counter on pink paper."""
+    size = 120
+    image = np.full((size, size, 3), (230, 178, 200), dtype=np.uint8)
+    for x in (24, 34, 44):
+        image[30:90, x : x + 3] = (20, 60, 200)
+    image[40:80, 70:100] = (0, 0, 0)
+    image[46:74, 76:94] = (255, 255, 255)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[26:94, 20:50] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
 def test_typography_comes_from_horizontal_text_mask():
     image, detection = _masked_text(52.0, 12.0, 12.0, (24, 80, 160))
 
@@ -534,6 +602,56 @@ def test_outlined_text_is_separated_from_matching_dark_artwork():
     assert inferred.color == (0, 0, 0)
     assert inferred.stroke_color == (255, 255, 255)
     assert inferred.stroke_width == 3.0
+
+
+@pytest.mark.parametrize("stroke_width", [3, 5])
+def test_outline_width_ignores_a_same_colored_area_the_outline_runs_into(stroke_width):
+    image, detection = _outlined_text_joining_a_stroke_colored_area(stroke_width)
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color == (255, 255, 255)
+    assert inferred.stroke_width == float(stroke_width)
+
+
+def test_text_on_a_band_is_judged_against_the_band_not_the_page_beside_it():
+    image, detection = _text_on_a_band_across_the_page()
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (255, 255, 255)
+    assert inferred.stroke_color is None
+
+
+def test_counters_of_a_neighbouring_glyph_are_not_an_outlined_fill():
+    image, detection = _plain_text_beside_a_neighbouring_glyph()
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.stroke_color is None
+    assert inferred.stroke_width is None
+
+
+@pytest.mark.parametrize("stroke_width", [3, 4, 6])
+def test_stroke_matching_the_paper_shows_where_text_crosses_artwork(stroke_width):
+    image, detection = _text_crossing_artwork(stroke_width, (30, 50, 70, 90), (64, 56))
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color == (255, 255, 255)
+    assert inferred.stroke_width == float(stroke_width)
+
+
+def test_paper_between_unstroked_text_and_artwork_is_not_a_stroke():
+    image, detection = _text_crossing_artwork(0, (60,), (75, 24))
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color is None
+    assert inferred.stroke_width is None
 
 
 def test_colors_in_the_same_luminance_class_do_not_create_a_border():
@@ -785,3 +903,95 @@ def test_checkpoint_detects_the_fixture_page(tmp_path):
     assert {"bubble", "text", "panel"} <= labels
     assert committed.asset(page, "text-mask") is not None
     assert committed.asset(page, "bubble-mask") is None
+
+
+# ---- Redo: forced detection ------------------------------------------------------------------------
+
+
+def _detected_page(tmp_path, boxes):
+    session = Session(tmp_path)
+    snapshot, page = _page(session, 200.0, 200.0)
+    edit = snapshot.edit()
+    buffer = io.BytesIO()
+    Image.new("RGB", (200, 200), "white").save(buffer, format="PNG")
+    edit.set_asset(page, "source", AssetInput(data=buffer.getvalue(), media_type="image/png", metadata=AssetMetadata(width=200, height=200)))
+    snapshot = session.commit(edit.finish())
+    _detect(session, snapshot, page, boxes)
+    return session, page
+
+
+def _detect(session, snapshot, page, boxes, force=False):
+    stage_input = StageInput(snapshot, page, None, None, ImageCache(), force=force)
+    image = stage_input.images.get(snapshot, page, "source")
+    found = LayoutDetections(200, 200, [_detection("text", 0.9, box) for box in boxes])
+    return session.commit(det.build_patch(stage_input, image, found, PRODUCER_GENERATION))
+
+
+def test_a_page_with_text_is_done_and_a_forced_run_detects_it_again(tmp_path):
+    session, page = _detected_page(tmp_path, [(10, 10, 90, 40)])
+    snapshot = session.snapshot()
+    assert DetectionStage().done(StageInput(snapshot, page, None, None, ImageCache()))
+    assert DetectionStage().skip(StageInput(snapshot, page, None, None, ImageCache()), None)
+    assert not DetectionStage().skip(StageInput(snapshot, page, None, None, ImageCache(), force=True), None)
+
+
+def test_forced_detection_replaces_its_blocks_and_keeps_the_ones_the_user_edited(tmp_path):
+    session, page = _detected_page(tmp_path, [(10, 10, 90, 40), (10, 100, 90, 130)])
+    snapshot = session.snapshot()
+    first, second = snapshot.text_layers(page)
+    edit = snapshot.edit()
+    edit.set(snapshot.layer_content(first), c.Translation(text=c.Authored.user("Mine"), language="en"))
+    snapshot = session.commit(edit.finish())
+
+    # Detected again: the same two texts and a new one.
+    snapshot = _detect(session, snapshot, page, [(10, 10, 90, 40), (10, 100, 90, 130), (10, 160, 90, 190)], force=True)
+
+    layers = snapshot.text_layers(page)
+    assert len(layers) == 3  # the edited block once, not twice; the other two new
+    assert first in layers and second not in layers
+    assert snapshot.component(snapshot.layer_content(first), c.Translation).text.value == "Mine"
+    texts = [e for e in snapshot.descendants(page) if det._region_kind_of(snapshot, e) == c.RegionKinds.TEXT]
+    assert len(texts) == 3
+
+
+# ---- nested text (not in Koharu) ---------------------------------------------------------------------
+
+
+def test_lines_inside_a_paragraph_box_are_dropped():
+    # Page 03 of the webtoon test chapter: the paragraph and each of its two lines.
+    found = [_detection("text", 0.31, (89, 307, 823, 541)), _detection("text", 0.38, (266, 308, 624, 376)), _detection("text", 0.32, (96, 464, 825, 538))]
+    det.non_maximum_suppression(found, det.NON_MAXIMUM_SUPPRESSION_THRESHOLD)
+    det.suppress_nested_text(found)
+    assert [d.bbox for d in found] == [(89.0, 307.0, 823.0, 541.0)]
+
+
+def test_a_box_over_text_in_two_bubbles_is_dropped_instead():
+    found = [
+        _detection("bubble", 0.9, (0, 0, 100, 100)),
+        _detection("bubble", 0.9, (0, 120, 100, 220)),
+        _detection("text", 0.8, (10, 20, 90, 80)),
+        _detection("text", 0.8, (10, 140, 90, 200)),
+        _detection("text", 0.4, (5, 10, 95, 210)),
+    ]
+    det.suppress_nested_text(found)
+    assert sorted(d.bbox for d in found if d.label == "text") == [(10.0, 20.0, 90.0, 80.0), (10.0, 140.0, 90.0, 200.0)]
+
+
+def test_separate_text_boxes_are_kept():
+    found = [_detection("text", 0.9, (10, 10, 90, 40)), _detection("text", 0.9, (10, 60, 90, 90))]
+    det.suppress_nested_text(found)
+    assert len(found) == 2
+
+
+def test_a_line_sticking_out_of_its_paragraph_box_is_still_part_of_it():
+    # Page 15 of the webtoon test chapter: the detector drew the paragraph narrower than its middle line.
+    found = [_detection("text", 0.34, (223, 179, 696, 612)), _detection("text", 0.32, (309, 534, 612, 612)), _detection("text", 0.29, (172, 348, 735, 427))]
+    det.suppress_nested_text(found)
+    assert [d.bbox for d in found] == [(223.0, 179.0, 696.0, 612.0)]
+
+
+def test_a_paragraph_over_a_line_the_user_edited_is_not_written_again():
+    kept_line = (169.0, 454.0, 717.0, 552.0)
+    assert det._same_text((169.0, 452.0, 722.0, 666.0), kept_line)  # its paragraph
+    assert det._same_text((180.0, 460.0, 700.0, 540.0), kept_line)  # the line again
+    assert not det._same_text((169.0, 700.0, 722.0, 800.0), kept_line)  # text elsewhere

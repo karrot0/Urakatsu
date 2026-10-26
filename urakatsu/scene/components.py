@@ -202,6 +202,9 @@ class RasterLayerKind(str, Enum):
     # Not in Koharu: the result of an agent image edit (``agents/image_edit.py``). Its own
     # kind keeps the brush, which paints on the newest paint layer, off it; it draws like paint.
     EDIT = "edit"
+    # Not in Koharu: the watermarks stage's result, the page with repeated watermarks unblended
+    # (``pipeline/stages/watermarks.py``). It sits right over the source and draws like paint.
+    WATERMARK = "watermark"
 
 
 class RasterLayer(Component):

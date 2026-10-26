@@ -82,7 +82,7 @@ export interface RemoteChapter {
 }
 
 export interface DownloadState {
-  state: "queued" | "downloading" | "importing" | "failed";
+  state: "queued" | "downloading" | "importing" | "stitching" | "failed";
   done: number;
   total: number;
   error: string | null;

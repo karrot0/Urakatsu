@@ -37,6 +37,9 @@ class StageInput:
     inpainting_mask: Optional[InpaintingMask] = None
     # ``SoundEffectsConfig.mode`` for this run: detection and the sound effects stage read it.
     sound_effects: str = "off"
+    # Redo (an Urakatsu addition): stages that skip a page they already did (``done``) do it again,
+    # replacing their own results but never what the user edited.
+    force: bool = False
 
     def contains_entity(self, entity: str) -> bool:
         return contains_entity(self.scene, self.page, self.entities, self.region, entity)
@@ -46,6 +49,11 @@ class StageProcessor:
     """One stage. ``skip`` is cheap and runs before the provider is loaded."""
 
     def skip(self, input: StageInput, provider: Provider) -> bool:
+        return False
+
+    def done(self, input: StageInput) -> bool:
+        """Whether the page already has this stage's results: a skip for that reason (not for
+        having nothing to do) is reported as done, and a forced run does the stage again."""
         return False
 
     async def process(self, input: StageInput, provider: Provider) -> Patch:

@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import SOUND_EFFECT_MODES, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig
+from urakatsu.core.config import SOUND_EFFECT_MODES, WATERMARK_MODES, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -184,7 +184,25 @@ def project_to_proto(view) -> pb.Project:
         can_undo=view.can_undo,
         can_redo=view.can_redo,
         chapters=[pb.Chapter(id=ch.id, name=ch.name, page_ids=ch.page_ids) for ch in view.chapters],
+        format=format_to_proto(view.format),
     )
+
+
+def format_to_proto(value) -> pb.ProjectFormat:
+    return pb.ProjectFormat(kind=value.kind, stitch=pb.StitchSettings(**value.stitch.model_dump()))
+
+
+def format_from_proto(message: pb.ProjectFormat):
+    from urakatsu.pipeline.stitch import ProjectFormat, StitchSettings
+
+    # Settings sent are taken whole: 0 and false are real values (sensitivity 0 cuts anywhere).
+    fields = message.stitch
+    stitch = (
+        StitchSettings(height=fields.height, sensitivity=fields.sensitivity, scan_step=fields.scan_step, margin=fields.margin, detect=fields.detect)
+        if message.HasField("stitch")
+        else StitchSettings()
+    )
+    return ProjectFormat(kind=message.kind or "manga", stitch=stitch)
 
 
 def summary_to_proto(summary) -> pb.ProjectSummary:
@@ -224,6 +242,8 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         lossless_pages=config.storage.lossless_pages,
         sound_effects=config.sound_effects.mode,
         sound_effects_model=config.sound_effects.model,
+        watermarks=config.watermarks.mode,
+        watermarks_model=config.watermarks.model,
     )
     for key, value in config.processor.items():
         message.processor_json[key] = json.dumps(value)
@@ -282,6 +302,10 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
         if message.sound_effects not in SOUND_EFFECT_MODES:
             raise ValueError(f"unknown sound effects mode {message.sound_effects!r}; expected one of {list(SOUND_EFFECT_MODES)}")
         config.sound_effects = SoundEffectsConfig(mode=message.sound_effects, model=message.sound_effects_model)
+    if message.watermarks:
+        if message.watermarks not in WATERMARK_MODES:
+            raise ValueError(f"unknown watermarks mode {message.watermarks!r}; expected one of {list(WATERMARK_MODES)}")
+        config.watermarks = WatermarksConfig(mode=message.watermarks, model=message.watermarks_model or config.watermarks.model)
     config.processor = _json_map(message.processor_json, "processor")
     config.providers = _json_map(message.providers_json, "provider")
     config.runtimes = dict(message.runtimes)

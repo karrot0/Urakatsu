@@ -14,6 +14,7 @@ service Urakatsu {
   rpc CreateProject(CreateProjectRequest) returns (Project);
   rpc GetProject(ProjectRef) returns (Project);
   rpc RenameProject(RenameProjectRequest) returns (Project);
+  rpc SetProjectFormat(SetProjectFormatRequest) returns (Project);
   rpc DeleteProject(ProjectRef) returns (Empty);
   rpc Undo(ProjectRef) returns (Project);
   rpc Redo(ProjectRef) returns (Project);
@@ -22,6 +23,8 @@ service Urakatsu {
   rpc CreateChapter(CreateChapterRequest) returns (Project);
   rpc RenameChapter(RenameChapterRequest) returns (Project);
   rpc DeleteChapter(ChapterRef) returns (Project);
+  // Webtoon: joins the chapter's images and cuts them again away from text and art.
+  rpc RestitchChapter(ChapterRef) returns (Project);
   rpc ArrangeProject(ArrangeProjectRequest) returns (Project);
 
   rpc AddPage(AddPageRequest) returns (Page);
@@ -130,6 +133,8 @@ message Config {
   string sound_effects = 15;                // SoundEffectsConfig.mode: off | typeset | redraw (empty keeps it)
   string sound_effects_model = 16;          // redraw model; empty uses the generative fill model
   optional int32 idle_unload_minutes = 17;  // unload models after this many idle minutes; 0 never (unset keeps it)
+  string watermarks = 18;                   // WatermarksConfig.mode: off | remove (empty keeps it)
+  string watermarks_model = 19;             // watermark detector; empty keeps it
 }
 
 message TranslationModel {
@@ -322,6 +327,26 @@ message Project {
   bool can_redo = 8;
   // In order; page_ids reference `pages`, whose order is the chapters' pages flattened.
   repeated Chapter chapters = 9;
+  ProjectFormat format = 10;
+}
+
+// How a webtoon chapter is cut into pages (pipeline/stitch.py); SmartStitch's settings.
+message StitchSettings {
+  int32 height = 1;  // target page height in pixels; 0 = 1.5x the strip width
+  int32 sensitivity = 2;  // 0-100; 100 cuts only perfectly flat rows
+  int32 scan_step = 3;
+  int32 margin = 4;  // columns ignored at each side
+  bool detect = 5;  // never cut through text the detection model finds
+}
+
+message ProjectFormat {
+  string kind = 1;  // "manga" or "webtoon" (also manhwa and manhua)
+  StitchSettings stitch = 2;
+}
+
+message SetProjectFormatRequest {
+  string project_id = 1;
+  ProjectFormat format = 2;
 }
 
 message Chapter {
@@ -455,11 +480,13 @@ message RunRequest {
   repeated string entity_ids = 5;   // OCR / translation only
   bytes inpainting_mask = 6;        // user painted mask (PNG, L) for one page
   optional string fill_prompt = 7;  // set: generative fill of inpainting_mask by the fill model (empty removes)
+  bool force = 8;                   // Redo: stages run on pages they already did, keeping user edits
 }
 
 message ProgressEvent {
   string job_id = 1;
   string kind = 2;                  // started | loading | running | step | finished | skipped | failed | stopped | completed
+                                    // a skipped stage's message: "done" (already done), "kept" (a forced run kept user edits)
   string page_id = 3;
   string stage = 4;
   string model = 5;

@@ -268,6 +268,8 @@ class DiffusionRecipeProvider(InpaintingProvider):
         _release_torch_cache()
         server = runtime.launch(re.sub(r"[^A-Za-z0-9_.-]+", "-", name)[:60], args)
         self._processor = self._processor_for(server, recipe)
+        # An editing model with the crop as its reference follows instructions over the whole crop.
+        self.instructed = self.crop_edits = self._processor.edits
         log.info("loaded %s (recipe %s) on %s", name, recipe.id, runtime.device.label())
 
     def _unload(self) -> None:

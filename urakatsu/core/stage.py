@@ -7,6 +7,10 @@ current scene snapshot on demand.
 ``SOUND_EFFECTS`` is not in Koharu: with sound effects set to ``redraw`` it redraws each
 translated sound effect with an image model, so it waits for translation and inpainting.
 In any other mode a run leaves it out (``pipeline.py``).
+
+``WATERMARKS`` is not in Koharu either: with watermarks set to ``remove`` it removes repeated
+watermarks before detection reads the page (``pipeline/stages/watermarks.py``), and a run that
+detects gets it in front. Otherwise a run leaves it out.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from typing import Iterable
 
 
 class Stage(str, Enum):
+    WATERMARKS = "watermarks"
     DETECTION = "detection"
     OCR = "ocr"
     TRANSLATION = "translation"
@@ -24,7 +29,7 @@ class Stage(str, Enum):
 
     @classmethod
     def all(cls) -> list["Stage"]:
-        return [cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.SOUND_EFFECTS]
+        return [cls.WATERMARKS, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.SOUND_EFFECTS]
 
     @classmethod
     def parse(cls, value: "str | Stage") -> "Stage":
@@ -38,8 +43,10 @@ class Stage(str, Enum):
 
 
 # scheduler.rs ``prerequisite``: OCR and inpainting need detection, translation needs OCR.
+# Detection also waits for the watermarks stage when a run has it.
 PREREQUISITES: dict[Stage, tuple[Stage, ...]] = {
-    Stage.DETECTION: (),
+    Stage.WATERMARKS: (),
+    Stage.DETECTION: (Stage.WATERMARKS,),
     Stage.OCR: (Stage.DETECTION,),
     Stage.TRANSLATION: (Stage.OCR,),
     Stage.INPAINTING: (Stage.DETECTION,),
@@ -78,6 +85,7 @@ class Operation:
             selected = Stage.all()
         elif self.kind == "through":
             selected = {
+                Stage.WATERMARKS: [Stage.WATERMARKS],
                 Stage.DETECTION: [Stage.DETECTION],
                 Stage.OCR: [Stage.DETECTION, Stage.OCR],
                 Stage.TRANSLATION: [Stage.DETECTION, Stage.OCR, Stage.TRANSLATION],

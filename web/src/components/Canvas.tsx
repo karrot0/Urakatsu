@@ -7,10 +7,15 @@
 // Generative fill (Photoshop-style): the fill tool drags a rectangle or lasso selection, and a
 // floating prompt under it sends the selection as a mask with the prompt; the fill model paints
 // it into the Cleanup layer. The selection stays, so Generate again tries another result.
+//
+// Webtoon reader: in a webtoon project the chapter's pages are laid edge to edge as one strip,
+// in fixed strip coordinates. The current page is drawn with its layers and overlays at its place
+// in the strip, the others as plain images; scrolling makes the page under the middle of the view
+// the current one, so nothing moves and every page is edited where it is read.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
-import { CornerDownLeft, LoaderCircle, WandSparkles, X } from "lucide-react";
+import { CornerDownLeft, GalleryVertical, LoaderCircle, WandSparkles, X } from "lucide-react";
 
 import { cn } from "cn";
 
@@ -21,7 +26,7 @@ import { catalog, type InstalledModel } from "../api/catalog";
 import { assetHref, assetUrl, assetVersion } from "../api/client";
 import type { Page, RasterLayer, TextBlock } from "../gen/urakatsu/v1/urakatsu_pb";
 import { matches } from "../shortcuts";
-import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, currentPage, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
+import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, chapterOf, currentPage, selectedPages, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
 import { Slider } from "./primitives";
 import { useLayerFonts } from "../fontFaces";
 import { cssGradient } from "../richText";
@@ -207,6 +212,45 @@ const NUDGE_FAST = 10;
 const NUDGE_COMMIT_MS = 400;
 // A selection smaller than this (page pixels) on either side is a click, which clears it.
 const MIN_SELECTION = 4;
+
+// Webtoon reader: room above a page scrolled to from the sidebar, and where the choice is kept.
+const STRIP_MARGIN = 24;
+const READER_KEY = "urakatsu.webtoon-reader";
+
+type Strip = { key: string; items: { page: Page; top: number }[]; width: number; height: number };
+
+/** A chapter's pages stacked edge to edge: each page's top in strip pixels, the widest page's width. */
+function useStrip(pageIds: string[] | undefined, pages: Page[] | undefined): Strip | null {
+  return useMemo(() => {
+    if (!pageIds || pageIds.length < 2 || !pages) return null;
+    const byId = new Map(pages.map((p) => [p.id, p]));
+    let top = 0;
+    const items = [];
+    for (const id of pageIds) {
+      const page = byId.get(id);
+      if (!page) continue;
+      items.push({ page, top });
+      top += page.height;
+    }
+    return { key: pageIds.join(","), items, width: Math.max(...items.map((item) => item.page.width)), height: top };
+  }, [pageIds, pages]);
+}
+
+function loadReader(): boolean {
+  try {
+    return window.localStorage.getItem(READER_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function saveReader(on: boolean): void {
+  try {
+    window.localStorage.setItem(READER_KEY, on ? "on" : "off");
+  } catch {
+    // the choice lasts this session only
+  }
+}
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 function boundsOf(points: Pt[]): Rect {
@@ -334,9 +378,19 @@ function regionClass({ selected, user, hidden }: { selected: boolean; user: bool
 export function Canvas() {
   const ws = useWorkspace();
   const page = currentPage(ws);
+  const webtoon = ws.project?.format?.kind === "webtoon";
+  const [reader, setReaderState] = useState(loadReader);
+  const setReader = useCallback((on: boolean) => {
+    saveReader(on);
+    setReaderState(on);
+  }, []);
+  const chapter = page ? chapterOf(ws, page.id) : undefined;
+  const strip = useStrip(webtoon && reader ? chapter?.pageIds : undefined, ws.project?.pages);
   const [zoom, setZoom] = useState(1);
   const [fittedFor, setFittedFor] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  // The page `url` is for: in the strip a stale image would show at the new page's place.
+  const [urlPage, setUrlPage] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   // The drawn brush ring follows the pointer by style writes, not renders; `cursor` keeps its spot across renders.
@@ -421,6 +475,7 @@ export function Canvas() {
       if (alive) {
         urlVersion.current = version;
         setUrl(found);
+        setUrlPage(pageId);
       }
     })();
     return () => {
@@ -520,13 +575,15 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws.job?.status]);
 
+  // A strip fits its width (it is read by scrolling down); a page fits whole.
   const fit = useCallback(() => {
     const el = scroll.current;
     if (!el || !page) return;
     center.current = true;
     setViewport({ width: el.clientWidth, height: el.clientHeight });
-    setZoom(clamp(Math.min((el.clientWidth - 120) / page.width, (el.clientHeight - 80) / page.height, 2), MIN_ZOOM, MAX_ZOOM));
-  }, [page]);
+    const fitted = strip ? (el.clientWidth - 120) / strip.width : Math.min((el.clientWidth - 120) / page.width, (el.clientHeight - 80) / page.height);
+    setZoom(clamp(Math.min(fitted, 2), MIN_ZOOM, MAX_ZOOM));
+  }, [page, strip]);
 
   const hasPage = !!page;
   useLayoutEffect(() => {
@@ -539,21 +596,86 @@ export function Canvas() {
     return () => observer.disconnect();
   }, [hasPage]);
 
-  // After fitting, center the page in the scroll area.
+  // Where the page sits: in the scroll area's padding, and in a strip at its place in the chapter.
+  const padX = Math.max(viewport.width - MIN_OVERLAP, 40);
+  const padY = Math.max(viewport.height - MIN_OVERLAP, 40);
+  const columnWidth = strip?.width ?? page?.width ?? 0;
+  const pageTop = (strip && page && strip.items.find((item) => item.page.id === page.id)?.top) || 0;
+  const pageLeft = page ? (columnWidth - page.width) / 2 : 0;
+  // The scroll position code set, which the strip's page tracking leaves alone.
+  const placedScroll = useRef<number | null>(null);
+  const placeStrip = (el: HTMLElement) => {
+    el.scrollTop = padY + pageTop * zoom - STRIP_MARGIN;
+    placedScroll.current = el.scrollTop;
+  };
+
+  // After fitting, center the page in the scroll area; a strip shows the current page's top.
   useLayoutEffect(() => {
     const el = scroll.current;
     if (!center.current || !el) return;
     center.current = false;
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
-    el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
+    if (strip) placeStrip(el);
+    else el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, viewport]);
 
+  // A page fits when it opens; a strip when its chapter opens, not as it is scrolled through.
+  const fitKey = strip && chapter ? `strip:${chapter.id}` : page?.id;
   useEffect(() => {
-    if (page && fittedFor !== page.id) {
+    if (page && fitKey && fittedFor !== fitKey) {
       fit();
-      setFittedFor(page.id);
+      setFittedFor(fitKey);
     }
-  }, [page, fittedFor, fit]);
+  }, [page, fitKey, fittedFor, fit]);
+
+  // The page the strip's scrolling chose stays where it is; one chosen elsewhere (the sidebar) is scrolled to.
+  const fromStrip = useRef<string | null>(null);
+  const showPage = useCallback(
+    (id: string) => {
+      fromStrip.current = id;
+      ws.selectPage(id);
+    },
+    [ws],
+  );
+  useLayoutEffect(() => {
+    const el = scroll.current;
+    if (!strip || !page || !el) return;
+    if (fromStrip.current === page.id) {
+      fromStrip.current = null;
+      return;
+    }
+    if (!center.current) placeStrip(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.id, strip?.key]);
+
+  // Scrolling the strip makes the page under the middle of the view the current one, unless
+  // something is going on in the current page (a stroke, a move, text editing, a fill selection).
+  const holdPage = (!!gesture && gesture.kind !== "pan") || !!editing || !!nudge || !!selection || selectedPages(ws).length > 1;
+  const stripState = useRef({ holdPage, pageId: page?.id, showPage });
+  stripState.current = { holdPage, pageId: page?.id, showPage };
+  useEffect(() => {
+    const el = scroll.current;
+    if (!strip || !el) return;
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (placedScroll.current !== null && Math.abs(el.scrollTop - placedScroll.current) < 2) return;
+        placedScroll.current = null;
+        const state = stripState.current;
+        if (state.holdPage) return;
+        const middle = (el.scrollTop + el.clientHeight / 2 - padY) / zoom;
+        const item = strip.items.find((entry) => middle < entry.top + entry.page.height) ?? strip.items[strip.items.length - 1];
+        if (item && item.page.id !== state.pageId) state.showPage(item.page.id);
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [strip, zoom, padY]);
 
   // Keep the page point under the cursor fixed while zooming.
   useLayoutEffect(() => {
@@ -1136,15 +1258,36 @@ export function Canvas() {
           <div
             className="relative"
             style={{
-              width: page.width * zoom + 2 * Math.max(viewport.width - MIN_OVERLAP, 40),
-              height: page.height * zoom + 2 * Math.max(viewport.height - MIN_OVERLAP, 40),
+              width: columnWidth * zoom + 2 * padX,
+              height: (strip?.height ?? page.height) * zoom + 2 * padY,
             }}
           >
+          {strip && (
+            <StripPages
+              strip={strip}
+              projectId={ws.project!.id}
+              view={ws.view}
+              zoom={zoom}
+              left={padX}
+              top={padY}
+              onPointerDown={(event, id) => {
+                if (event.button === 1 || ws.tool === "pan" || spaceHeld) {
+                  // Dragging the strip pans it, from any page.
+                  if (!scroll.current || !svg.current) return;
+                  event.preventDefault();
+                  svg.current.setPointerCapture(event.pointerId);
+                  setGesture({ kind: "pan", client: { x: event.clientX, y: event.clientY }, scroll: { x: scroll.current.scrollLeft, y: scroll.current.scrollTop } });
+                } else if (event.button === 0 && !holdPage) {
+                  showPage(id);
+                }
+              }}
+            />
+          )}
           <div
-            className="absolute rounded-pill bg-surface shadow-floating"
-            style={{ width: page.width * zoom, height: page.height * zoom, left: Math.max(viewport.width - MIN_OVERLAP, 40), top: Math.max(viewport.height - MIN_OVERLAP, 40) }}
+            className={cn("absolute", strip ? "" : "rounded-pill bg-surface shadow-floating")}
+            style={{ width: page.width * zoom, height: page.height * zoom, left: padX + pageLeft * zoom, top: padY + pageTop * zoom }}
           >
-            {url && (
+            {url && (!strip || urlPage === page.id) && (
               <img
                 ref={baseImage}
                 className="block rounded-[inherit] select-none"
@@ -1298,7 +1441,18 @@ export function Canvas() {
           </div>
         </ScrollArea>
       )}
-      {page && <StatusBar zoom={zoom} setZoom={setZoom} fit={fit} fitKey={ws.shortcuts.fit} missing={missing} width={page.width} height={page.height} />}
+      {page && (
+        <StatusBar
+          zoom={zoom}
+          setZoom={setZoom}
+          fit={fit}
+          fitKey={ws.shortcuts.fit}
+          missing={missing}
+          width={page.width}
+          height={page.height}
+          reader={webtoon ? { on: reader, set: setReader } : undefined}
+        />
+      )}
     </div>
   );
 }
@@ -1312,6 +1466,7 @@ const StatusBar = memo(function StatusBar({
   missing,
   width,
   height,
+  reader,
 }: {
   zoom: number;
   setZoom: (zoom: number) => void;
@@ -1320,6 +1475,8 @@ const StatusBar = memo(function StatusBar({
   missing: boolean;
   width: number;
   height: number;
+  /** Webtoon projects: the strip reader, on or off. */
+  reader?: { on: boolean; set: (on: boolean) => void };
 }) {
   return (
     <footer className="flex h-[30px] items-center gap-3 px-3 text-xs tabular-nums text-fg-3 shadow-[inset_0_1px_0_var(--border-soft)]">
@@ -1331,10 +1488,65 @@ const StatusBar = memo(function StatusBar({
       </div>
       {missing && <span className="text-warning">Render not ready: showing the source.</span>}
       <span style={{ flex: 1 }} />
+      {reader && (
+        <button
+          className="inline-flex h-[22px] cursor-pointer items-center gap-1 rounded-pill bg-transparent px-1.5 text-xs text-fg-3 hover:bg-hover hover:text-fg aria-pressed:text-fg aria-pressed:[&_svg]:text-brand"
+          aria-pressed={reader.on}
+          title={reader.on ? "Strip: the chapter's pages joined, read by scrolling. Click for one page at a time." : "One page at a time. Click to join the chapter's pages into one strip."}
+          onClick={() => reader.set(!reader.on)}
+        >
+          <GalleryVertical size={14} /> Strip
+        </button>
+      )}
       <span>
         {width} × {height} px
       </span>
     </footer>
+  );
+});
+
+/** The strip's pages as plain images, edge to edge. Tops are floored and bottoms ceiled to whole
+ * screen pixels, so neighbours overlap by under a pixel rather than leave a hairline between them;
+ * the current page is drawn over its own image once its layers are ready. */
+const StripPages = memo(function StripPages({
+  strip,
+  projectId,
+  view,
+  zoom,
+  left,
+  top,
+  onPointerDown,
+}: {
+  strip: Strip;
+  projectId: string;
+  view: string;
+  zoom: number;
+  left: number;
+  top: number;
+  onPointerDown: (event: ReactPointerEvent, pageId: string) => void;
+}) {
+  return (
+    <>
+      <div className="pointer-events-none absolute bg-surface shadow-floating" style={{ left, top, width: strip.width * zoom, height: strip.height * zoom }} />
+      {strip.items.map(({ page, top: y }) => {
+        // The render once the page has one worth showing; until then the source, without a render per page.
+        const kind = view === "render" && page.stages.some((stage) => stage.done) ? "render" : "source";
+        const from = Math.floor(y * zoom);
+        return (
+          <img
+            key={page.id}
+            className="absolute max-w-none select-none"
+            src={assetHref(projectId, page.id, kind, assetVersion(page, kind))}
+            alt={page.name}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            style={{ left: left + ((strip.width - page.width) / 2) * zoom, top: top + from, width: page.width * zoom, height: Math.ceil((y + page.height) * zoom) - from }}
+            onPointerDown={(event) => onPointerDown(event, page.id)}
+          />
+        );
+      })}
+    </>
   );
 });
 

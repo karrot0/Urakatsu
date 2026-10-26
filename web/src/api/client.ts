@@ -92,8 +92,8 @@ export async function exportPage(projectId: string, page: Page): Promise<void> {
   saveBlob(await response.blob(), `${stem}.png`);
 }
 
-/** A chapter's rendered pages as one archive, with the file name the server chose. */
-export async function exportChapter(projectId: string, chapterId: string, format: "cbz" | "zip"): Promise<{ blob: Blob; filename: string }> {
+/** A chapter's rendered pages as one archive (or one long strip PNG), with the file name the server chose. */
+export async function exportChapter(projectId: string, chapterId: string, format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(`/api/v1/projects/${projectId}/chapters/${chapterId}/export?format=${format}`);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -102,7 +102,7 @@ export async function exportChapter(projectId: string, chapterId: string, format
   const disposition = response.headers.get("content-disposition") ?? "";
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
   const plain = /filename="([^"]+)"/i.exec(disposition)?.[1];
-  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format}` };
+  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format === "strip" ? "png" : format}` };
 }
 
 export function describeError(error: unknown): string {

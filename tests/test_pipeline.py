@@ -1,15 +1,18 @@
 """Orchestration (port of execution.rs / stage_runner.rs) with fake providers and stages."""
 
+import asyncio
+
 import pytest
 
 import urakatsu.pipeline.pipeline as pipeline_module
 from urakatsu.core import Operation, Progress, ProgressKind, Stage
+from urakatsu.core.stop import interruptible
 from urakatsu.pipeline import PagesScope, Pipeline, PipelineError, ProjectStore, Request, RunStatus
 from urakatsu.pipeline.scheduler import Scheduler
 from urakatsu.runtimes import RuntimeManager
 from urakatsu.scene import RasterLayerKind, Translation
 
-from fakes import FailingTranslator, fake_config, fake_processors, fake_registry, page_png
+from fakes import FailingTranslator, FakeTranslator, fake_config, fake_processors, fake_registry, page_png
 
 
 @pytest.fixture
@@ -62,6 +65,14 @@ async def test_full_run_commits_each_stage(project):
     report = await make_pipeline().execute(session, Request(operation=Operation.through(Stage.INPAINTING), progress=events.append))
     assert report.status is RunStatus.COMPLETED
     assert {e.kind for e in events if e.page} == {ProgressKind.SKIPPED} | {ProgressKind.LOADING} - {ProgressKind.LOADING}
+    # ...and say so, so the UI can offer to redo them.
+    assert {e.message for e in events if e.kind is ProgressKind.SKIPPED} == {"done"}
+
+    # Redo: a forced run does them again.
+    events.clear()
+    report = await make_pipeline().execute(session, Request(operation=Operation.through(Stage.INPAINTING), progress=events.append, force=True))
+    assert report.status is RunStatus.COMPLETED
+    assert sum(e.kind is ProgressKind.FINISHED for e in events) == 4
 
 
 @pytest.mark.asyncio
@@ -116,3 +127,37 @@ def test_config_roundtrip(isolated_home):
     config.providers["openai"] = {"api_key": "sk-test"}
     config.processor["flux2-klein"] = {"prompt": "saved prompt"}
     assert load_config(save_config(config)) == config
+
+
+class HangingTranslator(FakeTranslator):
+    """Waits on a request that never answers, as a slow cloud model does; only a stop ends it."""
+
+    id = "hanging-translator"
+
+    async def translate(self, request) -> list[str]:
+        await interruptible(asyncio.sleep(60))
+        return []
+
+
+@pytest.mark.asyncio
+async def test_stop_ends_a_stage_waiting_on_a_slow_request_and_frees_the_lane(project):
+    store, project_id, pages = project
+    registry = fake_registry()
+    registry.add(HangingTranslator)
+    pipeline = Pipeline(fake_config("hanging-translator"), RuntimeManager("cpu"), registry, fake_processors())
+    request = Request(operation=Operation.through(Stage.TRANSLATION), scope=PagesScope((pages[0],)))
+    events: list[Progress] = []
+
+    def stop_when_translating(event: Progress):
+        events.append(event)
+        if event.kind is ProgressKind.RUNNING and event.stage is Stage.TRANSLATION:
+            asyncio.get_running_loop().call_later(0.1, request.stop.stop)
+
+    request.progress = stop_when_translating
+    report = await asyncio.wait_for(pipeline.execute(store.session(project_id), request), timeout=5)
+    assert report.status is RunStatus.STOPPED
+    assert not any(e.kind is ProgressKind.FAILED for e in events)  # stopped, not failed
+
+    # The lane is free: the next run starts and finishes.
+    report = await asyncio.wait_for(make_pipeline().execute(store.session(project_id), Request(scope=PagesScope((pages[1],)))), timeout=5)
+    assert report.status is RunStatus.COMPLETED

@@ -44,7 +44,11 @@ Urakatsu keeps Koharu's stage semantics:
   project.
 - A user edit (`origin = user`) is never overwritten by a later generated result.
 - Detection, inpainting and rendering are skipped when their output already exists, unless
-  the request sets `force`.
+  the request sets `force`. A forced run replaces a stage's own results and keeps what the user
+  edited: detection keeps edited text blocks (and does not detect them twice), inpainting keeps
+  a cleanup the user painted. A skip for existing output is reported with the message `done`;
+  the Activity tab offers **Redo** for those pages, which runs the same stages forced. Deleting
+  every text block on a page also removes their regions, so the next run detects it again.
 
 Projects are organized as Project, then Chapters, then Pages (`urakatsu/pipeline/projects.py`).
 
