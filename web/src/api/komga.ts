@@ -40,6 +40,8 @@ export interface ExportReport {
   /** Chapters written. */
   books: number;
   error: string | null;
+  /** Stopped before every chapter was written (and before Komga's scan). */
+  stopped: boolean;
   /** Komga had not listed the new series yet; the next export links it. */
   pending: boolean;
 }
@@ -74,7 +76,7 @@ const project = (projectId: string) => `/projects/${encodeURIComponent(projectId
 
 export const komga = {
   status: () => call<KomgaStatus>("/komga"),
-  /** Saves the server; an `api_key` of null keeps the saved key (the service never sends it back). */
+  /** Saves the server; an `api_key` of null keeps the saved key, for the same address only (the service never sends it back). */
   connect: (url: string, apiKey: string | null) => call<KomgaStatus>("/komga", json("PUT", { url, api_key: apiKey })),
   /** Where the library's folder is on this computer; null goes back to Komga's own path. */
   setFolder: (libraryId: string, folder: string | null) => call<KomgaStatus>(`/komga/libraries/${encodeURIComponent(libraryId)}/folder`, json("PUT", { folder })),

@@ -76,43 +76,51 @@ class KomgaClient:
         if response.status_code >= 400:
             try:
                 message = response.json().get("message") or response.text
-            except ValueError:
+            except (ValueError, AttributeError):  # not JSON, or not an object
                 message = response.text
             raise KomgaError(f"Komga answered {response.status_code} to {method} {path}: {str(message)[:200]}")
         return response
+
+    def _json(self, method: str, path: str, **kwargs) -> Any:
+        """The answer's JSON; an answer that is not JSON (a web page at a wrong address) is a KomgaError."""
+        response = self._request(method, path, **kwargs)
+        try:
+            return response.json()
+        except ValueError as error:
+            raise KomgaError(f"{self.url} did not answer like Komga (not JSON); check the address") from error
 
     # -- reading -----------------------------------------------------------------------------------
 
     def user(self) -> str:
         """The email of the account the key belongs to; also checks the address and the key."""
-        return str(self._request("GET", "/api/v2/users/me").json().get("email", ""))
+        return str(self._json("GET", "/api/v2/users/me").get("email", ""))
 
     def version(self) -> Optional[str]:
         """Komga's version, when the server tells it."""
         try:
-            return self._request("GET", "/actuator/info").json()["build"]["version"]
+            return self._json("GET", "/actuator/info")["build"]["version"]
         except (KomgaError, ValueError, KeyError, TypeError):
             return None
 
     def libraries(self) -> list[Library]:
-        return [Library(id=item["id"], name=item["name"], root=item["root"]) for item in self._request("GET", "/api/v1/libraries").json()]
+        return [Library(id=item["id"], name=item["name"], root=item["root"]) for item in self._json("GET", "/api/v1/libraries")]
 
     def library(self, library_id: str) -> Library:
-        item = self._request("GET", f"/api/v1/libraries/{library_id}").json()
+        item = self._json("GET", f"/api/v1/libraries/{library_id}")
         return Library(id=item["id"], name=item["name"], root=item["root"])
 
     def search(self, library_id: str, query: str, size: int = 20) -> list[Series]:
         params = {"library_id": library_id, "search": query, "size": size} if query.strip() else {"library_id": library_id, "size": size, "sort": "lastModified,desc"}
-        return [_series(item) for item in self._request("GET", "/api/v1/series", params=params).json()["content"]]
+        return [_series(item) for item in self._json("GET", "/api/v1/series", params=params)["content"]]
 
     def series(self, series_id: str) -> Series:
-        return _series(self._request("GET", f"/api/v1/series/{series_id}").json())
+        return _series(self._json("GET", f"/api/v1/series/{series_id}"))
 
     def all_series(self, library_id: str) -> Iterator[Series]:
         """Every series in the library, a page at a time."""
         page = 0
         while True:
-            data = self._request("GET", "/api/v1/series", params={"library_id": library_id, "page": page, "size": PAGE_SIZE}).json()
+            data = self._json("GET", "/api/v1/series", params={"library_id": library_id, "page": page, "size": PAGE_SIZE})
             yield from (_series(item) for item in data["content"])
             if data.get("last", True):
                 return

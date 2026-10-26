@@ -583,8 +583,8 @@ class Automations:
         notify = automation.notify
         if not notify.enabled or not notify.webhook_url:
             return
-        if run.status == "completed" and not run.chapters and not run.downloaded:
-            return  # nothing new to process: no message every night
+        if run.status == "completed" and not run.chapters and not run.downloaded and not (run.komga and run.komga.books):
+            return  # nothing new to process or export: no message every night
         try:
             asyncio.get_running_loop().create_task(self._send(run, notify))
         except RuntimeError:  # no event loop (a synchronous caller)
@@ -637,7 +637,9 @@ class Automations:
                     run.status = "stopped"
                     return
                 if not chapters:
-                    run.status = "completed"
+                    if automation.komga:  # nothing new; earlier chapters whose books were never written go now
+                        await self._export_to_komga(run, automation, [], stop)
+                    run.status = "stopped" if stop.stopped else "completed"
                     return
                 run.status = "running"
                 run.started_at = time.time()
@@ -656,15 +658,14 @@ class Automations:
                 run.models = [f"{stage.value}: {model}" for stage, model in result.models]
                 run.chapters = [self._result(chapter, result.failed, result.stopped) for chapter in chapters]
                 done = [chapter.id for chapter in run.chapters if chapter.status == "done"]
-                if automation.komga and done and not stop.stopped:
-                    run.status = "exporting"
-                    run.komga = await asyncio.to_thread(ws.komga_links.export, run.project_id, done)
-                run.status = "stopped" if result.stopped else "completed"
                 known = set(automation.completed_chapters)
-                finished = [chapter.id for chapter in run.chapters if chapter.status == "done" and chapter.id not in known]
+                finished = [chapter_id for chapter_id in done if chapter_id not in known]
                 if finished and automation.target.kind == "pending":
                     automation.completed_chapters = [*automation.completed_chapters, *finished]
                     self._save(run.project_id)
+                if automation.komga and not stop.stopped:
+                    await self._export_to_komga(run, automation, done, stop)
+                run.status = "stopped" if result.stopped or stop.stopped else "completed"
         except Exception as error:
             run.status = "failed"
             run.error = str(error) or error.__class__.__name__
@@ -678,6 +679,21 @@ class Automations:
                 self.store.touch(run.project_id)
             except Exception:  # noqa: BLE001 - the project may be gone
                 pass
+
+    async def _export_to_komga(self, run: RunRecord, automation: Automation, done: list[str], stop: StopToken) -> None:
+        """Exports the chapters the run finished to the project's Komga series, with the chapters
+        this automation finished before whose books were never written (an export that failed or
+        was stopped, or ran before exporting was turned on)."""
+        links = self.workspace.komga_links
+        link = links.get(run.project_id)
+        written = set(link.books) if link else set()
+        present = {chapter.id for chapter in chapters_of(self.workspace.session(run.project_id).snapshot()) if chapter.pages}
+        backlog = [chapter_id for chapter_id in automation.completed_chapters if chapter_id in present and chapter_id not in written and chapter_id not in done]
+        wanted = [*done, *backlog]
+        if not wanted:
+            return
+        run.status = "exporting"
+        run.komga = await asyncio.to_thread(links.export, run.project_id, wanted, stop)
 
     @staticmethod
     def _result(chapter: BatchChapter, failed: dict[str, list[str]], stopped: bool) -> ChapterResult:
@@ -787,7 +803,7 @@ def discord_message(run: RunRecord, mention: str = "") -> dict:
         fields.append({"name": "Chapters", "value": f"{summary}\n{names}"[:1024], "inline": False})
         fields.append({"name": "Pages", "value": str(sum(chapter.pages for chapter in run.chapters)), "inline": True})
     if run.komga is not None:
-        exported = f"{run.komga.books} chapter{'s' if run.komga.books != 1 else ''} exported"
+        exported = f"{run.komga.books} chapter{'s' if run.komga.books != 1 else ''} exported" + (", then stopped" if run.komga.stopped else "")
         fields.append({"name": "Komga", "value": (f"{exported}; {run.komga.error}" if run.komga.error else exported)[:1024], "inline": not run.komga.error})
     if run.downloaded:
         fields.append({"name": "Downloaded", "value": f"{run.downloaded} chapter{'s' if run.downloaded != 1 else ''}", "inline": True})

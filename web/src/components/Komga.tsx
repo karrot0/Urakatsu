@@ -57,7 +57,10 @@ export function useKomgaLink(projectId: string, active = true): [KomgaLink | nul
         setError(undefined);
         if (next?.export) timer = window.setTimeout(read, EXPORT_POLL_MS);
       } catch (failure) {
-        if (!stopped) setError(describeError(failure));
+        if (stopped) return;
+        setError(describeError(failure));
+        // A read that fails mid-export (a network blip, Komga restarting) tries again rather than leaving the dialog stuck.
+        if (exporting) timer = window.setTimeout(read, EXPORT_POLL_MS);
       }
     };
     void read();
@@ -324,7 +327,7 @@ function SeriesPanel({ link, act, onClose }: { link: KomgaLink; act: (work: () =
                 <span className={cn("text-sm", last.error ? "text-danger" : "text-fg-2")}>
                   {last.error
                     ? `${last.books ? `${plural(last.books, "chapter")} exported, then: ` : ""}${last.error}`
-                    : `${plural(last.books, "chapter")} exported ${formatTimestamp(last.finished_at ?? last.started_at)}${last.pending ? ". Komga has not listed the series yet; it appears after Komga's next scan." : ""}`}
+                    : `${plural(last.books, "chapter")} exported ${formatTimestamp(last.finished_at ?? last.started_at)}${last.stopped ? ", then the run was stopped" : ""}${last.pending ? ". Komga has not listed the series yet; it appears after Komga's next scan." : ""}`}
                 </span>
               )
             )}

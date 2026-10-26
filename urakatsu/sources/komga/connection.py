@@ -120,8 +120,9 @@ class KomgaConnection:
         files.write_text(self.path, settings.model_dump_json(indent=1))
 
     def update(self, url: str, api_key: Optional[str] = None) -> KomgaStatus:
-        """Saves the server and key (None keeps the saved key; folders set for the same server's
-        libraries stay), then reports on them."""
+        """Saves the server and key, then reports on them. None keeps the saved key, for the same
+        server only: the key is never sent to another address. Folders set for the same server's
+        libraries stay."""
         with self._lock:
             current = self.settings()
             same = url.strip().rstrip("/") == current.url
@@ -129,6 +130,8 @@ class KomgaConnection:
                 settings = KomgaSettings(url=url, api_key=current.api_key if api_key is None else api_key, folders=current.folders if same else {})
             except ValidationError as error:
                 raise ValueError(error.errors()[0]["msg"].removeprefix("Value error, ")) from None
+            if api_key is None and current.api_key and not same:
+                raise ValueError("enter the API key for the new address; the saved key stays with the old one")
             self._write(settings)
         return self.status()
 
@@ -153,6 +156,8 @@ class KomgaConnection:
             status.connected = True
         except KomgaError as error:
             status.error = str(error)
+        except (KeyError, TypeError) as error:  # an answer shaped unlike Komga's
+            status.error = f"{settings.url} did not answer like Komga ({error.__class__.__name__}: {error}); check the address"
         return status
 
     @staticmethod

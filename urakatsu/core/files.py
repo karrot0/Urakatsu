@@ -48,10 +48,13 @@ def write_bytes(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def safe_stem(label: str) -> str:
-    """A file or folder name safe on every file system: no extension, no reserved characters."""
+def safe_stem(label: str, extension: bool = True) -> str:
+    """A file or folder name safe on every file system: no reserved characters, and no extension.
+
+    With ``extension`` False, ``label`` is a name rather than a file name, and keeps its dots
+    ("Chapter 12.5", "Dr.STONE")."""
     name = label.strip().rstrip(". ")
-    stem, dot, extension = name.rpartition(".")
-    if dot and stem and 1 <= len(extension) <= 5 and extension.isalnum():
+    stem, dot, suffix = name.rpartition(".")
+    if extension and dot and stem and 1 <= len(suffix) <= 5 and suffix.isalnum():
         name = stem
     return "".join("_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in name).strip()

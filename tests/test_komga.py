@@ -12,11 +12,13 @@ from xml.etree import ElementTree
 import httpx
 import pytest
 
+from urakatsu.core.files import safe_stem
 from urakatsu.core.registry import registry
+from urakatsu.core.stop import StopToken
 from urakatsu.pipeline.batch import BatchResult
 from urakatsu.service import automations as automations_module
 from urakatsu.service.app import build_app
-from urakatsu.service.automations import AutomationBody, Schedule
+from urakatsu.service.automations import AutomationBody, Schedule, Target
 from urakatsu.service.servicer import UrakatsuServicer
 from urakatsu.service.workspace import Workspace
 from urakatsu.sources import Image, RemoteChapter, Series
@@ -42,6 +44,7 @@ class FakeKomga:
         self.patches: list[tuple[str, dict]] = []
         self.covers: list[tuple[str, bytes]] = []
         self.scans = 0
+        self.web_page = False  # answer like a web server that is not Komga
         self.transport = httpx.MockTransport(self.handle)
 
     def add_series(self, name: str) -> str:
@@ -61,6 +64,8 @@ class FakeKomga:
             series["booksCount"] = len(list((self.folder / series["name"]).glob("*.cbz")))
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        if self.web_page:
+            return httpx.Response(200, text="<html>Welcome to nginx!</html>", headers={"content-type": "text/html"})
         if request.headers.get("X-API-Key") != KEY:
             return httpx.Response(401)
         path, method = request.url.path, request.method
@@ -330,3 +335,126 @@ async def test_komga_routes(workspace, komga):
         found = (await client.get("/komga/libraries/L1/series", params={"q": "blue"})).json()["series"]
         assert [s["title"] for s in found] == ["Blue Box (EN)"]
         assert (await client.delete(f"/projects/{project_id}/komga")).status_code == 204
+
+
+# ---- review fixes ------------------------------------------------------------------------------------
+
+
+def test_names_keep_their_dots_but_files_lose_their_extension():
+    assert safe_stem("001.png") == "001" and safe_stem("Chapter 12.5") == "Chapter 12"  # file names, as before
+    assert safe_stem("Chapter 12.5", extension=False) == "Chapter 12.5" and safe_stem("Dr.STONE", extension=False) == "Dr.STONE"
+
+
+def test_dotted_series_and_chapter_names_reach_komga_whole(workspace, komga):
+    ws = workspace
+    project_id = ws.create_project("Dr.STONE").id
+    for name in ("Chapter 12", "Chapter 12.5"):
+        chapter = ws.store.create_chapter(project_id, name)
+        ws.add_page(project_id, f"{name}.png", page_png(), None, chapter)
+    assert ws.komga_links.add(project_id, "L1").folder == "Dr.STONE"
+    assert ws.komga_links.export(project_id).books == 2
+    assert sorted(path.name for path in (komga.folder / "Dr.STONE").glob("*.cbz")) == ["Chapter 12.5.cbz", "Chapter 12.cbz"]
+
+
+def test_the_saved_key_never_goes_to_another_address(isolated_home, komga):
+    connection = KomgaConnection(transport=komga.transport)
+    connection.update("http://komga.local:25600", KEY)
+    with pytest.raises(ValueError, match="API key for the new address"):
+        connection.update("http://elsewhere:25600")
+    assert connection.settings().url == "http://komga.local:25600" and connection.settings().api_key == KEY
+
+
+async def test_an_address_that_is_not_komga_is_reported_not_raised(workspace, komga):
+    komga.web_page = True
+    status = workspace.komga.status()
+    assert not status.connected and "did not answer like Komga" in status.error
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test/api/v1") as client:
+        answer = await client.get("/komga")
+        assert answer.status_code == 200 and answer.json()["configured"] and "did not answer like Komga" in answer.json()["error"]
+
+
+def test_any_rendering_failure_is_recorded_on_the_export(workspace, komga, monkeypatch):
+    ws = workspace
+    project_id, _ = project_with_chapters(ws)
+    ws.komga_links.add(project_id, "L1")
+
+    def broken(project_id, chapter_id):
+        raise RuntimeError("Skia could not draw the page")
+
+    monkeypatch.setattr(ws.komga_links, "render", broken)
+    report = ws.komga_links.export(project_id)
+    assert report.error == "Skia could not draw the page" and report.books == 0
+    assert ws.komga_links.view(project_id).last_export.error == report.error
+
+
+def test_a_stopped_export_ends_between_chapters_without_scanning(workspace, komga, monkeypatch):
+    ws = workspace
+    project_id, _ = project_with_chapters(ws)
+    ws.komga_links.add(project_id, "L1")
+    stop = StopToken()
+    render = ws.komga_links.render
+
+    def render_then_stop(project_id, chapter_id):
+        stop.stop()  # the run is stopped while the first chapter is written
+        return render(project_id, chapter_id)
+
+    monkeypatch.setattr(ws.komga_links, "render", render_then_stop)
+    report = ws.komga_links.export(project_id, stop=stop)
+    assert report.stopped and report.books == 1 and report.error is None and komga.scans == 0
+
+
+async def run_automation(ws: Workspace, project_id: str, automation_id: str):
+    ws.automations.run_now(project_id, automation_id)
+    while ws.automations._worker is not None and not ws.automations._worker.done():
+        await asyncio.sleep(0.01)
+    return ws.automations.runs(project_id)[0]
+
+
+async def test_stopping_a_run_while_it_exports_leaves_it_stopped(workspace, komga, monkeypatch):
+    ws = workspace
+    project_id, chapters = project_with_chapters(ws)
+    ws.komga_links.add(project_id, "L1")
+
+    async def batch(pipeline, session, picked, stages, stop, **kwargs):
+        return BatchResult(stopped=False)
+
+    monkeypatch.setattr(automations_module, "run_batch", batch)
+    export = ws.komga_links.export
+
+    def export_then_stop(project_id, chapter_ids, stop):
+        ws.automations.stop(ws.automations._active.id)  # Stop pressed while the run shows "exporting"
+        return export(project_id, chapter_ids, stop)
+
+    monkeypatch.setattr(ws.komga_links, "export", export_then_stop)
+    automation = ws.automations.create(project_id, AutomationBody(name="Nightly", schedule=Schedule(kind="manual"), komga=True))
+    record = await run_automation(ws, project_id, automation.id)
+    assert record.status == "stopped" and record.komga.stopped and record.komga.books == 0
+
+
+async def test_chapters_whose_export_failed_are_exported_by_the_next_run(workspace, komga, monkeypatch):
+    ws = workspace
+    project_id, chapters = project_with_chapters(ws)
+    ws.komga_links.add(project_id, "L1")
+    batches = []
+
+    async def batch(pipeline, session, picked, stages, stop, **kwargs):
+        batches.append([chapter.id for chapter in picked])
+        return BatchResult(stopped=False)
+
+    monkeypatch.setattr(automations_module, "run_batch", batch)
+    automation = ws.automations.create(project_id, AutomationBody(name="Nightly", schedule=Schedule(kind="manual"), target=Target(kind="pending"), komga=True))
+
+    ws.komga.update("http://komga.local:25600", "revoked")  # Komga refuses the first export
+    first = await run_automation(ws, project_id, automation.id)
+    assert first.status == "completed" and first.komga.books == 0 and "rejected the API key" in first.komga.error
+    assert ws.automations.list(project_id)[0].completed_chapters == chapters  # translated all the same
+
+    ws.komga.update("http://komga.local:25600", KEY)
+    monkeypatch.setattr(automations_module.Automations, "_chapters", lambda self, project_id, automation: [])  # nothing new to translate
+    second = await run_automation(ws, project_id, automation.id)
+    assert second.status == "completed" and second.chapters == [] and second.komga.books == 2 and second.komga.error is None
+    assert set(ws.komga_links.view(project_id).exported) == set(chapters) and len(batches) == 1
+
+    third = await run_automation(ws, project_id, automation.id)
+    assert third.komga is None  # nothing left to export

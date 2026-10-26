@@ -416,7 +416,9 @@ function RunRow({ run, onStop }: { run: RunRecord; onStop: () => void }) {
       </span>
       {run.komga && (
         <span className={cn("truncate pl-5.5 text-xs", run.komga.error ? "text-[var(--warning)]" : "text-fg-3")} title={run.komga.error ?? undefined}>
-          {run.komga.error ? `Komga export stopped after ${plural(run.komga.books, "chapter")}: ${run.komga.error}` : `${plural(run.komga.books, "chapter")} exported to Komga`}
+          {run.komga.error
+            ? `Komga export stopped after ${plural(run.komga.books, "chapter")}: ${run.komga.error}`
+            : `${plural(run.komga.books, "chapter")} exported to Komga${run.komga.stopped ? ", then stopped" : ""}`}
         </span>
       )}
       {run.notified && run.notified !== "sent" && (

@@ -95,7 +95,10 @@ function ConnectionForm({ status, busy, onSave }: { status: KomgaStatus; busy: b
   const [key, setKey] = useState("");
   const [shown, setShown] = useState(false);
   useEffect(() => setUrl(status.url), [status.url]);
-  const changed = url.trim().replace(/\/+$/, "") !== status.url || key.trim() !== "";
+  const moved = url.trim().replace(/\/+$/, "") !== status.url;
+  const changed = moved || key.trim() !== "";
+  // The saved key is only ever sent to the address it was saved for: a new address needs its own.
+  const keyNeeded = (!status.configured || moved) && !key.trim();
   return (
     <form
       onSubmit={async (event) => {
@@ -106,13 +109,16 @@ function ConnectionForm({ status, busy, onSave }: { status: KomgaStatus; busy: b
       <PreferenceRow title="Address" description="Such as http://localhost:25600.">
         <Input aria-label="Komga address" placeholder="http://localhost:25600" value={url} onChange={(e) => setUrl(e.target.value)} />
       </PreferenceRow>
-      <PreferenceRow title="API key" description={status.configured ? "Saved. Enter a new one to replace it." : undefined}>
+      <PreferenceRow
+        title="API key"
+        description={status.configured ? (moved ? "Enter the key for the new address; the saved key stays with the old one." : "Saved. Enter a new one to replace it.") : undefined}
+      >
         <div className="flex gap-0.5">
           <Input
             aria-label="Komga API key"
             type={shown ? "text" : "password"}
             autoComplete="off"
-            placeholder={status.configured ? "Saved" : "Not set"}
+            placeholder={status.configured && !moved ? "Saved" : "Not set"}
             value={key}
             onChange={(e) => setKey(e.target.value)}
           />
@@ -122,7 +128,7 @@ function ConnectionForm({ status, busy, onSave }: { status: KomgaStatus; busy: b
         </div>
       </PreferenceRow>
       <div className="flex justify-end py-3">
-        <Button type="submit" size="sm" disabled={busy || !url.trim() || (!changed && status.connected) || (!status.configured && !key.trim())}>
+        <Button type="submit" size="sm" disabled={busy || !url.trim() || (!changed && status.connected) || keyNeeded}>
           {status.configured ? "Save and connect" : "Connect"}
         </Button>
       </div>

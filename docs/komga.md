@@ -11,7 +11,8 @@ Open Settings, then Sources; Komga is below the source systems:
 1. Enter Komga's address, such as `http://localhost:25600`.
 2. Enter an API key from an admin account (in Komga: Account Settings, API Keys; Komga 1.13
    or newer). Exporting starts library scans, which only admins may do. The key is kept in
-   `URAKATSU_HOME/komga.json` and is never sent back to the UI.
+   `URAKATSU_HOME/komga.json` and is never sent back to the UI. It is only sent to the address
+   it was saved with: changing the address needs the key again.
 3. Check each library's folder.
 
 Komga has no upload: it reads books from its libraries' folders. Urakatsu writes the books
@@ -64,8 +65,11 @@ Turn on **Export finished chapters to Komga** in an automation (the project must
 first). When a run ends, the chapters it finished without errors are exported before the run
 is reported. Partly done or failed chapters wait for a later run. The run history and the
 Discord message say how many chapters were exported, or why the export stopped. A failed
-export does not fail the run: the chapters are translated, and can be exported again from the
-Komga dialog.
+export does not fail the run: the chapters are translated, and the next run exports the
+chapters the automation finished whose books were never written, even when it has nothing new
+to translate (so do chapters finished before exporting was turned on). They can also be
+exported from the Komga dialog. Stopping a run while it exports ends the export after the
+chapter it is writing; the run is reported as stopped.
 
 ## Storage and API
 

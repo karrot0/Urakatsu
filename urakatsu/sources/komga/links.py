@@ -31,6 +31,7 @@ from typing import Callable, Literal, Optional
 from pydantic import BaseModel, Field
 
 from urakatsu.core import files
+from urakatsu.core.stop import StopToken
 from urakatsu.pipeline.projects import ProjectStore, chapters_of
 from urakatsu.scene import Chapter
 from urakatsu.sources.links import SourceLink, SourceLinks, remote_key
@@ -73,6 +74,7 @@ class ExportReport(BaseModel):
     finished_at: Optional[float] = None
     books: int = 0  # chapters written
     error: Optional[str] = None
+    stopped: bool = False  # stopped before every chapter was written (and before the scan)
     pending: bool = False  # Komga had not listed the new series yet; the next export links it
 
 
@@ -202,7 +204,7 @@ class KomgaLinks:
         self._idle(project_id)
         source = self.sources.get(project_id)
         title = (title or "").strip() or (source.series.title if source else "") or self.store.name(project_id)
-        folder = files.safe_stem(title)
+        folder = files.safe_stem(title, extension=False)
         if not folder:
             raise ValueError("choose a title for the series")
         with self.connection.client() as client:
@@ -270,23 +272,24 @@ class KomgaLinks:
                 for key, value in changes.items():
                     setattr(state, key, value)
 
-    def export(self, project_id: str, chapter_ids: Optional[list[str]] = None) -> ExportReport:
+    def export(self, project_id: str, chapter_ids: Optional[list[str]] = None, stop: Optional[StopToken] = None) -> ExportReport:
         """Writes the chapters (all with pages, by default) as books of the project's series, then
         has Komga scan them. Failures end the export and are reported, not raised; so is a
-        project that is not on Komga."""
+        project that is not on Komga. ``stop`` ends it between chapters (the books written stay;
+        Komga finds them at its next scan)."""
         with self._lock:
             owned = project_id not in self._exports  # not started by start_export: shown all the same
             if owned:
                 self._exports[project_id] = ExportState()
         try:
             with self._project_lock(project_id):
-                return self._export(project_id, chapter_ids)
+                return self._export(project_id, chapter_ids, stop)
         finally:
             if owned:
                 with self._lock:
                     self._exports.pop(project_id, None)
 
-    def _export(self, project_id: str, chapter_ids: Optional[list[str]]) -> ExportReport:
+    def _export(self, project_id: str, chapter_ids: Optional[list[str]], stop: Optional[StopToken]) -> ExportReport:
         report = ExportReport(started_at=time.time())
         link = self.get(project_id)
         if link is None:  # removed from Komga since the automation was set up
@@ -302,6 +305,9 @@ class KomgaLinks:
                 source = self.sources.get(project_id)
                 numbers = _chapter_numbers(source, project_id, self.store)
                 for chapter in chapters:
+                    if stop is not None and stop.stopped:
+                        report.stopped = True
+                        break
                     self._progress(project_id, chapter=chapter.name)
                     _, pages = self.render(project_id, chapter.id)
                     book = self._book_info(link, chapter, numbers.get(chapter.id), source)
@@ -311,14 +317,16 @@ class KomgaLinks:
                     report.books += 1
                     self._save(project_id, link)
                     self._progress(project_id, done=report.books)
-                self._progress(project_id, state="scanning", chapter="")
-                client.scan(link.library_id)
-                if link.series_id is None and report.books:
-                    link.series_id = self._find_series(client, link)
-                    report.pending = link.series_id is None
-                if link.series_id and link.created and not link.described:
-                    self._describe(client, link, project_id, source)
-        except (KomgaError, OSError, ValueError, KeyError) as error:
+                if not report.stopped:
+                    self._progress(project_id, state="scanning", chapter="")
+                    client.scan(link.library_id)
+                    if link.series_id is None and report.books:
+                        link.series_id = self._find_series(client, link, stop)
+                        report.pending = link.series_id is None
+                        report.stopped = bool(stop and stop.stopped)
+                    if link.series_id and link.created and not link.described:
+                        self._describe(client, link, project_id, source)
+        except Exception as error:  # noqa: BLE001 - every failure (rendering too) is reported on the export
             report.error = str(error) or error.__class__.__name__
             log.warning("exporting project %s to Komga stopped: %s", project_id, report.error)
         report.finished_at = time.time()
@@ -333,7 +341,7 @@ class KomgaLinks:
         if chapter.id in link.books:
             return link.books[chapter.id].file
         ours = {book.file.lower() for book in link.books.values()}
-        stem = files.safe_stem(chapter.name) or "Chapter"
+        stem = files.safe_stem(chapter.name, extension=False) or "Chapter"
         for attempt in range(1, 1000):
             name = f"{stem}.cbz" if attempt == 1 else f"{stem} ({attempt}).cbz"
             if name.lower() not in ours and not (folder / name).exists():
@@ -353,8 +361,9 @@ class KomgaLinks:
             right_to_left=bool(source and source.source_language.lower().startswith("ja")),
         )
 
-    def _find_series(self, client: KomgaClient, link: KomgaLink) -> Optional[str]:
-        """Waits for Komga's scan to list the series in the link's folder; its id, or None."""
+    def _find_series(self, client: KomgaClient, link: KomgaLink, stop: Optional[StopToken] = None) -> Optional[str]:
+        """Waits for Komga's scan to list the series in the link's folder; its id, or None (also
+        when stopped)."""
         root = client.library(link.library_id).root
         names = list(dict.fromkeys([link.title, PurePosixPath(link.folder).name]))
         deadline = time.monotonic() + SCAN_WAIT_SECONDS
@@ -367,7 +376,7 @@ class KomgaLinks:
                         return series.id
                 except ValueError:
                     continue
-            if last:
+            if last or (stop is not None and stop.stopped):
                 return None
             time.sleep(SCAN_POLL_SECONDS)
 
