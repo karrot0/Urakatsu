@@ -552,6 +552,7 @@ function InstalledModelSelect({ providerId, value, onChange }: { providerId: str
 const FIELD_TITLES: Record<string, string> = {
   api_key: "API key",
   base_url: "Base URL",
+  cfg_scale: "Guidance scale",
   model: "Model",
   remote_url: "Worker URL",
   remote_api_key: "Worker token",

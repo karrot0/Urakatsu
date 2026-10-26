@@ -346,6 +346,29 @@ async def test_flux2_klein_uses_an_attached_sd_server(monkeypatch):
     mask[16:48, 16:80] = 255
     result = provider._inpaint(Image.new("RGB", (96, 64), "white"), mask)
     assert result.size == (96, 64) and seen[0]["prompt"] == provider.settings.prompt
+    assert seen[0]["sample_params"]["sample_steps"] == 4 and seen[0]["sample_params"]["guidance"]["txt_cfg"] == 1.0
+    provider.unload()
+
+
+@pytest.mark.parametrize("module, cls", [("flux2_klein", "Flux2KleinProvider"), ("rorem_mixed", "RoremMixedProvider")])
+async def test_diffusion_inpainters_send_the_steps_and_guidance_set(monkeypatch, module, cls):
+    import importlib
+
+    from urakatsu.runtimes.diffusion import SdServer
+
+    provider_module = importlib.import_module(f"urakatsu.providers.inpainting.{module}")
+    seen: list[dict] = []
+    original = SdServer.attach.__func__
+    monkeypatch.setattr(provider_module.SdServer, "attach", classmethod(lambda c, url, key=None: original(c, url, key, fake_sd(seen))))
+    provider = getattr(provider_module, cls)({"server_url": "http://gpu-box:1234", "steps": 7, "cfg_scale": 2.5}, None, "diffusion")
+    await provider.load()
+    mask = np.zeros((64, 96), np.uint8)
+    mask[16:48, 16:80] = 255
+    provider._inpaint(Image.new("RGB", (96, 64), "white"), mask)
+    params = seen[0]["sample_params"]
+    assert params["sample_steps"] == 7 and params["guidance"]["txt_cfg"] == 2.5
+    if "custom_sigmas" in params:  # FLUX.2: the schedule follows the step count
+        assert len(params["custom_sigmas"]) == 8
     provider.unload()
 
 

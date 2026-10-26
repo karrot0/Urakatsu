@@ -280,6 +280,9 @@ def test_rorem_defaults_match_converted_model_card():
     )
     settings = RoremMixedProvider.Settings()
     assert settings.prompt == DEFAULT_PROMPT and settings.negative_prompt == DEFAULT_NEGATIVE_PROMPT
+    assert (settings.steps, settings.cfg_scale) == (r.NUM_INFERENCE_STEPS, r.GUIDANCE_SCALE)
+    with pytest.raises(ValueError):
+        RoremMixedProvider.Settings(steps=0)
 
 
 def test_rorem_mask_is_binary_and_resized_nearest():

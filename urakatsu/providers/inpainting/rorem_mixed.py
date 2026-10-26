@@ -4,6 +4,9 @@ Runs on the ``diffusion`` runtime (stable-diffusion.cpp), with the upstream comp
 from ``rorem_mixed/mod.rs`` and ``model.rs``. Preprocessing and compositing follow
 ``rorem_mixed/processor.rs`` and the reference script
 https://github.com/leeruibin/RORem/blob/891ab8a17bbcfb16a773c078cb256aae8cb30468/inference_RORem.py
+
+Koharu fixes the step count and guidance scale; here they are settings whose defaults are
+Koharu's values.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from typing import ClassVar, Optional
 
 import numpy as np
 from PIL import Image
+from pydantic import Field
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings, server_fields
@@ -72,6 +76,8 @@ class RoremMixedSettings(ProviderSettings):
 
     prompt: str = DEFAULT_PROMPT
     negative_prompt: str = DEFAULT_NEGATIVE_PROMPT
+    steps: int = Field(default=NUM_INFERENCE_STEPS, ge=1, description="Sampling steps. Fewer is faster and leaves more traces of the text.")
+    cfg_scale: float = Field(default=GUIDANCE_SCALE, ge=0, description="Guidance scale: how strongly the prompts steer the fill.")
     server_url: Optional[str] = _SERVER_URL
     server_api_key: Optional[str] = _SERVER_KEY
 
@@ -98,10 +104,12 @@ def composite(original: Image.Image, native_mask: np.ndarray, generated: Image.I
 
 
 class RoremMixedProcessor:
-    def __init__(self, server: SdServer, prompt: str, negative_prompt: str):
+    def __init__(self, server: SdServer, prompt: str, negative_prompt: str, steps: int = NUM_INFERENCE_STEPS, cfg_scale: float = GUIDANCE_SCALE):
         self.server = server
         self.prompt = prompt
         self.negative_prompt = negative_prompt
+        self.steps = steps
+        self.cfg_scale = cfg_scale
 
     def inference(self, image: Image.Image, mask: np.ndarray, prompt: Optional[str] = None) -> Image.Image:
         if image.width <= 0 or image.height <= 0:
@@ -129,8 +137,8 @@ class RoremMixedProcessor:
                 "sample_params": {
                     "scheduler": "discrete",
                     "sample_method": "euler",
-                    "sample_steps": NUM_INFERENCE_STEPS,
-                    "guidance": {"txt_cfg": GUIDANCE_SCALE, "distilled_guidance": 3.5},
+                    "sample_steps": self.steps,
+                    "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": 3.5},
                 },
                 "output_format": "png",
             }
@@ -160,12 +168,15 @@ class RoremMixedProvider(InpaintingProvider):
     def weight_sources(cls, runtime=None):
         return (DIFFUSION_MODEL, SDXL_VERSION_MARKER, VAE_MODEL, CLIP_L_MODEL, CLIP_G_MODEL)
 
+    def _processor_for(self, server: SdServer) -> RoremMixedProcessor:
+        settings = self.settings
+        return RoremMixedProcessor(server, settings.prompt, settings.negative_prompt, settings.steps, settings.cfg_scale)
+
     def _load(self) -> None:
         if "\0" in self.settings.prompt or "\0" in self.settings.negative_prompt:
             raise ValueError("RORem prompt contains NUL")
         if self.attached():  # an sd-server started elsewhere with the RORem weights
-            server = SdServer.attach(self.settings.server_url, self.settings.server_api_key)
-            self._processor = RoremMixedProcessor(server, self.settings.prompt, self.settings.negative_prompt)
+            self._processor = self._processor_for(SdServer.attach(self.settings.server_url, self.settings.server_api_key))
             log.info("attached RORem mixed to %s", self.settings.server_url)
             return
         runtime = self.runtime_instance()
@@ -177,8 +188,7 @@ class RoremMixedProvider(InpaintingProvider):
         args += ["--clip_l", str(clip_l), "--clip_g", str(clip_g), "--mmap", "--flash-attn", "on" if use_cuda else "off"]
         if use_cuda:
             args += ["--conv-direct", "auto,diffusion=on,vae=on"]
-        server = runtime.launch("rorem-mixed", args)
-        self._processor = RoremMixedProcessor(server, self.settings.prompt, self.settings.negative_prompt)
+        self._processor = self._processor_for(runtime.launch("rorem-mixed", args))
         log.info("loaded RORem mixed on %s", runtime.device.label())
 
     def _unload(self) -> None:

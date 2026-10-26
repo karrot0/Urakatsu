@@ -9,6 +9,9 @@ The FLUX.2 scheduler (``Scheduler::Flux2``) is computed here and passed to
 stable-diffusion.cpp as custom sigmas, which also pins the schedule to exactly
 values. They are identical to upstream's ``Flux2Scheduler`` (``black-forest-labs/flux2
 sampling.py``, as ported in stable-diffusion.cpp).
+
+Koharu fixes the step count and text CFG; here they are settings whose defaults are
+Koharu's values, and the schedule and strength boundary follow the chosen step count.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from typing import Optional, ClassVar
 
 import numpy as np
 from PIL import Image
+from pydantic import Field
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings, server_fields
@@ -58,6 +62,8 @@ class Flux2KleinSettings(ProviderSettings):
     """``Flux2KleinConfig``."""
 
     prompt: str = "Remove the text and reconstruct the background."
+    steps: int = Field(default=INPAINT_STEPS, ge=1, description="Sampling steps. FLUX.2 Klein is distilled for 4.")
+    cfg_scale: float = Field(default=TEXT_CFG, ge=0, description="Text guidance scale. Above 1 also runs the negative pass, about doubling the time.")
     server_url: Optional[str] = _SERVER_URL
     server_api_key: Optional[str] = _SERVER_KEY
 
@@ -122,9 +128,11 @@ def apply_overlay(mask: np.ndarray, init_image: np.ndarray, generated: np.ndarra
 class Flux2KleinProcessor:
     """``Flux2KleinInpaint::inference`` with the default options (no padding crop, no reference)."""
 
-    def __init__(self, server: SdServer, prompt: str):
+    def __init__(self, server: SdServer, prompt: str, steps: int = INPAINT_STEPS, cfg_scale: float = TEXT_CFG):
         self.server = server
         self.prompt = prompt
+        self.steps = steps
+        self.cfg_scale = cfg_scale
 
     def inference(self, image: Image.Image, mask: np.ndarray, prompt: Optional[str] = None) -> Image.Image:
         if image.size != (mask.shape[1], mask.shape[0]):
@@ -141,8 +149,8 @@ class Flux2KleinProcessor:
         mask_array = np.asarray(mask_image)  # kept unbinarized for the overlay
         native_mask = Image.fromarray(_binarize(mask_array), "L")
 
-        strength = inpaint_strength(INPAINT_STEPS, INPAINT_STRENGTH)
-        sigmas = flux2_sigmas((height // GRID) * (width // GRID), INPAINT_STEPS)
+        strength = inpaint_strength(self.steps, INPAINT_STRENGTH)
+        sigmas = flux2_sigmas((height // GRID) * (width // GRID), self.steps)
         generated = self.server.generate(
             {
                 "prompt": prompt or self.prompt,
@@ -157,9 +165,9 @@ class Flux2KleinProcessor:
                 "mask_image": image_b64(native_mask),
                 "sample_params": {
                     "sample_method": "euler",
-                    "sample_steps": INPAINT_STEPS,
+                    "sample_steps": self.steps,
                     "custom_sigmas": [float(s) for s in sigmas],
-                    "guidance": {"txt_cfg": TEXT_CFG, "distilled_guidance": DISTILLED_GUIDANCE},
+                    "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": DISTILLED_GUIDANCE},
                 },
                 "output_format": "png",
             }
@@ -202,12 +210,14 @@ class Flux2KleinProvider(InpaintingProvider):
     def weight_sources(cls, runtime=None):
         return (TRANSFORMER_WEIGHTS, TEXT_ENCODER_WEIGHTS, VAE_WEIGHTS)
 
+    def _processor_for(self, server: SdServer) -> Flux2KleinProcessor:
+        return Flux2KleinProcessor(server, self.settings.prompt, self.settings.steps, self.settings.cfg_scale)
+
     def _load(self) -> None:
-        prompt = self.settings.prompt
-        if "\0" in prompt:
+        if "\0" in self.settings.prompt:
             raise ValueError("FLUX.2 prompt contains NUL")
         if self.attached():  # an sd-server started elsewhere with the Klein weights
-            self._processor = Flux2KleinProcessor(SdServer.attach(self.settings.server_url, self.settings.server_api_key), prompt)
+            self._processor = self._processor_for(SdServer.attach(self.settings.server_url, self.settings.server_api_key))
             log.info("attached FLUX.2 Klein to %s", self.settings.server_url)
             return
         runtime = self.runtime_instance()
@@ -224,7 +234,7 @@ class Flux2KleinProvider(InpaintingProvider):
             args += ["--conv-direct", "auto,diffusion=on,vae=on"]
         if use_accelerator and not keep_resident:
             args.append("--offload-to-cpu")
-        self._processor = Flux2KleinProcessor(runtime.launch("flux2-klein", args), prompt)
+        self._processor = self._processor_for(runtime.launch("flux2-klein", args))
         log.info("loaded FLUX.2 Klein on %s", device.label())
 
     def _unload(self) -> None:
