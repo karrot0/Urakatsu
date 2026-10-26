@@ -40,13 +40,14 @@ import {
   Pencil,
   Plus,
   RotateCw,
+  Scissors,
   Settings,
   ShieldCheck,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEventHandler, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEventHandler, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
@@ -58,6 +59,7 @@ import { AutomationsButton } from "./Automations";
 import { KomgaButton } from "./Komga";
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
+import { ProjectFormatButton } from "./ProjectFormat";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
 
@@ -186,6 +188,19 @@ export function Sidebar() {
     return twice;
   }, [ws.link]);
 
+  // A long series lists a thousand chapters or more that are not downloaded. Their rows get these
+  // stable actions rather than the workspace, so a page change does not re-render every one.
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+  const remoteActions = useMemo<RemoteActions>(
+    () => ({
+      download: (id) => void wsRef.current.downloadChapters([id]),
+      cancel: (id) => void wsRef.current.cancelDownload(id),
+      check: (url, id) => wsRef.current.openBrowser({ system: wsRef.current.link!.system, url }, () => void wsRef.current.downloadChapters([id])),
+    }),
+    [],
+  );
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -309,7 +324,7 @@ export function Sidebar() {
           <SortableContext items={layout.map((c) => CHAPTER + c.id)} strategy={verticalListSortingStrategy}>
             {entries.map((entry) =>
               entry.kind === "remote" ? (
-                <RemoteChapterRow key={`remote:${entry.chapter.id}`} chapter={entry.chapter} showGroup={shared.has(entry.chapter.name)} />
+                <RemoteChapterRow key={`remote:${entry.chapter.id}`} chapter={entry.chapter} showGroup={shared.has(entry.chapter.name)} actions={remoteActions} />
               ) : (
               <ChapterItem
                 key={entry.chapter.id}
@@ -432,6 +447,7 @@ function ProjectHead() {
           {project.name}
         </span>
       )}
+      <ProjectFormatButton />
       <KomgaButton />
       <AutomationsButton />
     </div>
@@ -502,14 +518,21 @@ function SourceBar() {
 }
 
 /** A chapter that is still on the source: grayed out until downloaded, and not openable. */
-function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; showGroup: boolean }) {
-  const ws = useWorkspace();
+type RemoteActions = {
+  download: (chapterId: string) => void;
+  cancel: (chapterId: string) => void;
+  /** Opens the site's check in the browser, then downloads the chapter again. */
+  check: (url: string, chapterId: string) => void;
+};
+
+const RemoteChapterRow = memo(function RemoteChapterRow({ chapter, showGroup, actions }: { chapter: LinkedChapter; showGroup: boolean; actions: RemoteActions }) {
   const state = chapter.download;
   const number = chapterNumber(chapter);
   const detail = [number && !chapter.name.includes(String(chapter.number)) ? number : null, chapter.scanlator].filter(Boolean).join(" · ");
-  const emphasized = state?.state === "downloading" || state?.state === "importing" || state?.state === "queued";
+  const emphasized = state?.state === "downloading" || state?.state === "importing" || state?.state === "stitching" || state?.state === "queued";
   return (
-    <div className="rounded-control">
+    // Rows off screen skip style and layout: a long series lists a thousand of them.
+    <div className="rounded-control [contain-intrinsic-size:auto_30px] [content-visibility:auto]">
       <div className={cn(ROW, "hover:bg-hover", emphasized ? "text-fg-2" : "text-fg-3")} title={detail ? `${chapter.name}\n${detail}` : chapter.name}>
         <span className="w-10 flex-none" aria-hidden />
         <span className="min-w-0 flex-1 truncate px-0.5 font-normal">
@@ -517,7 +540,7 @@ function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; show
           {showGroup && chapter.scanlator && <span className="text-fg-disabled"> · {chapter.scanlator}</span>}
         </span>
         {!state && (
-          <Button variant="ghost" size="icon-xs" className="hover:[&_svg]:text-brand" aria-label={`Download ${chapter.name}`} title="Download chapter" onClick={() => void ws.downloadChapters([chapter.id])}>
+          <Button variant="ghost" size="icon-xs" className="hover:[&_svg]:text-brand" aria-label={`Download ${chapter.name}`} title="Download chapter" onClick={() => actions.download(chapter.id)}>
             <Download size={14} />
           </Button>
         )}
@@ -536,9 +559,14 @@ function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; show
                 style={{ width: state.total ? `${(100 * state.done) / state.total}%` : "0%" }}
               />
             </span>
-            <span className="px-1 text-xs tabular-nums text-fg-3">{state.state === "queued" ? "Queued" : state.state === "importing" ? "Adding" : `${state.done}/${state.total || "?"}`}</span>
-            {state.state !== "importing" && (
-              <Button variant="ghost" size="icon-xs" aria-label={`Cancel ${chapter.name}`} title="Cancel download" onClick={() => void ws.cancelDownload(chapter.id)}>
+            <span
+              className="px-1 text-xs tabular-nums text-fg-3"
+              title={state.state === "stitching" ? "Joining the pages into one strip and cutting it where no text is cut" : undefined}
+            >
+              {state.state === "queued" ? "Queued" : state.state === "importing" ? "Adding" : state.state === "stitching" ? "Stitching" : `${state.done}/${state.total || "?"}`}
+            </span>
+            {state.state !== "importing" && state.state !== "stitching" && (
+              <Button variant="ghost" size="icon-xs" aria-label={`Cancel ${chapter.name}`} title="Cancel download" onClick={() => actions.cancel(chapter.id)}>
                 <X size={14} />
               </Button>
             )}
@@ -550,7 +578,7 @@ function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; show
             size="xs"
             className="gap-0.5 px-1 text-sm text-warning hover:text-warning"
             title={`${new URL(state.challenge).host} wants a quick check. Open the browser to continue.`}
-            onClick={() => ws.openBrowser({ system: ws.link!.system, url: state.challenge! }, () => void ws.downloadChapters([chapter.id]))}
+            onClick={() => actions.check(state.challenge!, chapter.id)}
           >
             <ShieldCheck size={14} /> Check
           </Button>
@@ -565,7 +593,7 @@ function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; show
               size="icon-xs"
               aria-label={`Retry ${chapter.name}`}
               title={state.error ? `Retry. ${state.error}` : "Retry"}
-              onClick={() => void ws.downloadChapters([chapter.id])}
+              onClick={() => actions.download(chapter.id)}
             >
               <RotateCw size={14} />
             </Button>
@@ -574,7 +602,7 @@ function RemoteChapterRow({ chapter, showGroup }: { chapter: LinkedChapter; show
       </div>
     </div>
   );
-}
+});
 
 function InlineName({ value, label, onDone }: { value: string; label: string; onDone: (value: string | null) => void }) {
   const [text, setText] = useState(value);
@@ -626,9 +654,24 @@ function ChapterItem({
   const items = chapter.pageIds.filter((id) => pages.has(id));
   const complete = items.length > 0 && items.every((id) => pageComplete(pages.get(id)!));
 
+  const webtoon = ws.project?.format?.kind === "webtoon";
+  const [restitching, setRestitching] = useState(false);
+  /** Joins the chapter's pages and cuts them again; work done on the old pages goes with them. */
+  const restitch = async () => {
+    const worked = items.filter((id) => STAGES.some((stage) => stageDone(pages.get(id)!, stage))).length;
+    const loss = worked ? ` Work on ${worked} of its pages (text, cleanup) is discarded.` : "";
+    if (!window.confirm(`Restitch ${name}? Its ${items.length} pages are joined into one strip and cut again where no text is cut.${loss} You can undo this.`)) return;
+    setRestitching(true);
+    try {
+      await ws.restitchChapter(chapter.id);
+    } finally {
+      setRestitching(false);
+    }
+  };
+
   const [exporting, setExporting] = useState<string>();
   /** Renders every page with its translation and saves the archive; large chapters take a few seconds. */
-  const exportAs = async (format: "cbz" | "zip") => {
+  const exportAs = async (format: "cbz" | "zip" | "strip") => {
     if (!ws.project) return;
     setExporting(format);
     try {
@@ -702,8 +745,21 @@ function ChapterItem({
                 actions={[
                   { label: "Comic book (.cbz)", onSelect: () => void exportAs("cbz") },
                   { label: "Images (.zip)", onSelect: () => void exportAs("zip") },
+                  ...(webtoon ? [{ label: "Long strip (.png)", onSelect: () => void exportAs("strip") }] : []),
                 ]}
               />
+            )}
+            {webtoon && items.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title={restitching ? "Restitching" : "Restitch: join the pages and cut them again where no text is cut"}
+                aria-label={`Restitch ${name}`}
+                disabled={disabled || restitching}
+                onClick={() => void restitch()}
+              >
+                {restitching ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Scissors size={14} />}
+              </Button>
             )}
             <Button variant="ghost" size="icon-xs" title="Rename" aria-label={`Rename ${name}`} onClick={() => setEditing(true)}>
               <Pencil size={14} />

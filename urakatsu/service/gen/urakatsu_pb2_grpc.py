@@ -76,6 +76,11 @@ class UrakatsuStub:
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.RenameProjectRequest.SerializeToString,
                 response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
                 _registered_method=True)
+        self.SetProjectFormat = channel.unary_unary(
+                '/urakatsu.v1.Urakatsu/SetProjectFormat',
+                request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.SetProjectFormatRequest.SerializeToString,
+                response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
+                _registered_method=True)
         self.DeleteProject = channel.unary_unary(
                 '/urakatsu.v1.Urakatsu/DeleteProject',
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.ProjectRef.SerializeToString,
@@ -103,6 +108,11 @@ class UrakatsuStub:
                 _registered_method=True)
         self.DeleteChapter = channel.unary_unary(
                 '/urakatsu.v1.Urakatsu/DeleteChapter',
+                request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.SerializeToString,
+                response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
+                _registered_method=True)
+        self.RestitchChapter = channel.unary_unary(
+                '/urakatsu.v1.Urakatsu/RestitchChapter',
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.SerializeToString,
                 response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
                 _registered_method=True)
@@ -246,6 +256,12 @@ class UrakatsuServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetProjectFormat(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DeleteProject(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -279,6 +295,13 @@ class UrakatsuServicer:
 
     def DeleteChapter(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RestitchChapter(self, request, context):
+        """Webtoon: joins the chapter's images and cuts them again away from text and art.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -429,6 +452,11 @@ def add_UrakatsuServicer_to_server(servicer, server):
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.RenameProjectRequest.FromString,
                     response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.SerializeToString,
             ),
+            'SetProjectFormat': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetProjectFormat,
+                    request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.SetProjectFormatRequest.FromString,
+                    response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.SerializeToString,
+            ),
             'DeleteProject': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteProject,
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.ProjectRef.FromString,
@@ -456,6 +484,11 @@ def add_UrakatsuServicer_to_server(servicer, server):
             ),
             'DeleteChapter': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteChapter,
+                    request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.FromString,
+                    response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.SerializeToString,
+            ),
+            'RestitchChapter': grpc.unary_unary_rpc_method_handler(
+                    servicer.RestitchChapter,
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.FromString,
                     response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Project.SerializeToString,
             ),
@@ -774,6 +807,33 @@ class Urakatsu:
             _registered_method=True)
 
     @staticmethod
+    def SetProjectFormat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/urakatsu.v1.Urakatsu/SetProjectFormat',
+            urakatsu_dot_v1_dot_urakatsu__pb2.SetProjectFormatRequest.SerializeToString,
+            urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def DeleteProject(request,
             target,
             options=(),
@@ -923,6 +983,33 @@ class Urakatsu:
             request,
             target,
             '/urakatsu.v1.Urakatsu/DeleteChapter',
+            urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.SerializeToString,
+            urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RestitchChapter(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/urakatsu.v1.Urakatsu/RestitchChapter',
             urakatsu_dot_v1_dot_urakatsu__pb2.ChapterRef.SerializeToString,
             urakatsu_dot_v1_dot_urakatsu__pb2.Project.FromString,
             options,

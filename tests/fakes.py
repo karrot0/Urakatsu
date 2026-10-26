@@ -91,6 +91,9 @@ class FakeDetectionStage(StageProcessor):
     """Writes one text region, content, and layer per page."""
 
     def skip(self, input: StageInput, provider) -> bool:
+        return not input.force and self.done(input)
+
+    def done(self, input: StageInput) -> bool:
         return any(input.scene.region_kind(e) == RegionKinds.TEXT for e in input.scene.descendants(input.page))
 
     async def process(self, input: StageInput, provider):
@@ -127,6 +130,9 @@ class FakeTranslationStage(StageProcessor):
 
 class FakeInpaintingStage(StageProcessor):
     def skip(self, input: StageInput, provider) -> bool:
+        return not input.force and self.done(input)
+
+    def done(self, input: StageInput) -> bool:
         return bool(input.scene.raster_layers(input.page, RasterLayerKind.CLEANUP))
 
     async def process(self, input: StageInput, provider):

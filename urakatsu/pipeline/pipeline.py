@@ -70,6 +70,8 @@ class Request:
     stop: StopToken = field(default_factory=StopToken)
     progress: Optional[ProgressSink] = None
     inpainting_mask: Optional[InpaintingMask] = None
+    # Redo: stages run on pages they already did (``StageInput.force``).
+    force: bool = False
 
 
 @dataclass
@@ -168,6 +170,32 @@ class Pipeline:
             finally:
                 self.touch()
 
+    async def detect_layout(self, images: list, stop: StopToken | None = None) -> list:
+        """The detection provider's ``LayoutDetections`` for each image, outside a stage: webtoon
+        restitching (``pipeline/stitch.py``) asks where text is before it cuts. Inference takes
+        the accelerator lane like a stage, so it interleaves with a running pipeline."""
+        stop = stop or StopToken()
+        provider = self.provider(Stage.DETECTION)
+        results = []
+        await self._accelerator.acquire()
+        try:
+            with stopping(stop):
+                await provider.load()
+                for image in images:
+                    if stop.stopped:
+                        break
+                    try:
+                        results.append(await provider.detect(image))
+                    except Exception as error:  # one retry: a remote worker's job can fail once
+                        if stop.stopped or is_out_of_memory(error):
+                            raise
+                        log.warning("detection failed on a restitch tile, retrying: %s", error)
+                        results.append(await provider.detect(image))
+        finally:
+            self._accelerator.release()
+            self.touch()
+        return results
+
     # -- idle unload -----------------------------------------------------------------------------
 
     def touch(self) -> None:
@@ -223,7 +251,9 @@ class Pipeline:
             return _Completion(input.page, stage, model, 0.0, _STOPPED)
         try:
             if processor.skip(input, provider):
-                return _Completion(input.page, stage, model, 0.0, _SKIPPED)
+                # Done before (a forced run keeps it only when the user edited it), or nothing to do.
+                reason = ("kept" if input.force else "done") if processor.done(input) else None
+                return _Completion(input.page, stage, model, 0.0, _SKIPPED, reason)
         except Exception as error:
             return _Completion(input.page, stage, model, 0.0, self._stage_error(stage, provider, ErrorKind.PROCESSING, error))
 
@@ -288,6 +318,9 @@ class _Completion:
     model: str
     elapsed_ms: float
     outcome: object
+    # Why a skipped stage was skipped: "done" (its results are there), "kept" (a forced run left
+    # what the user edited), or None (nothing to do).
+    reason: Optional[str] = None
 
 
 _SKIPPED = object()
@@ -358,6 +391,7 @@ class _Execution:
                 ErrorKind.INVALID_INPUT, Stage.INPAINTING, "the inpainting mask page is outside the inpainting scope"
             )
         self.inpainting_mask = mask
+        self.force = request.force
         self.scheduler = Scheduler(pages, stages)
         self.images: dict[str, ImageCache] = {}
         self.busy: set[Stage] = set()
@@ -398,7 +432,7 @@ class _Execution:
         images = self.images.setdefault(page, ImageCache())
         mask = self.inpainting_mask if (stage is Stage.INPAINTING and self.inpainting_mask and self.inpainting_mask.page == page) else None
         sound_effects = self.pipeline.config.sound_effects.mode
-        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects)
+        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, self.force)
 
     def _apply(self, completion: _Completion) -> None:
         outcome = completion.outcome
@@ -409,7 +443,7 @@ class _Execution:
             return
         if outcome is _SKIPPED:
             self._mark_complete(completion.page, completion.stage)
-            _emit(self.progress, Progress(kind=ProgressKind.SKIPPED, page=completion.page, stage=completion.stage, model=completion.model))
+            _emit(self.progress, Progress(kind=ProgressKind.SKIPPED, page=completion.page, stage=completion.stage, model=completion.model, message=completion.reason or ""))
             return
         assert isinstance(outcome, Patch)
         if self.stop.stopped:

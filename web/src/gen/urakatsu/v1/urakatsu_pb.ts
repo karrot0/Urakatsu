@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file urakatsu/v1/urakatsu.proto.
  */
 export const file_urakatsu_v1_urakatsu: GenFile = /*@__PURE__*/
-  fileDesc("Chp1cmFrYXRzdS92MS91cmFrYXRzdS5wcm90bxILdXJha2F0c3UudjEiBwoFRW1wdHkiiwEKBkRldmljZRINCgVpbmRleBgBIAEoBRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg8KB2JhY2tlbmQYBCABKAkSEwoLZGV2aWNlX3R5cGUYBSABKAkSFAoMbWVtb3J5X3RvdGFsGAYgASgDEhMKC21lbW9yeV9mcmVlGAcgASgDIkAKDVJ1bnRpbWVPcHRpb24SDAoEbmFtZRgBIAEoCRIRCglhdmFpbGFibGUYAiABKAgSDgoGcmVhc29uGAMgASgJIq4CCgxQcm92aWRlckluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVzdGFnZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIsCghydW50aW1lcxgFIAMoCzIaLnVyYWthdHN1LnYxLlJ1bnRpbWVPcHRpb24SFwoPZGVmYXVsdF9ydW50aW1lGAYgASgJEhEKCWF2YWlsYWJsZRgHIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCCABKAkSDwoHd2VpZ2h0cxgJIAMoCRIcChRzZXR0aW5nc19zY2hlbWFfanNvbhgKIAEoCRIVCg1kZWZhdWx0c19qc29uGAsgASgJEhAKCHByb21wdGVkGAwgASgIEhIKCmluc3RydWN0ZWQYDSABKAgiigMKDENhcGFiaWxpdGllcxIPCgd2ZXJzaW9uGAEgASgJEiMKBmRldmljZRgCIAEoCzITLnVyYWthdHN1LnYxLkRldmljZRIkCgdkZXZpY2VzGAMgAygLMhMudXJha2F0c3UudjEuRGV2aWNlEhAKCHBsYXRmb3JtGAQgASgJEhUKDXJ1bnRpbWVzX2pzb24YBSABKAkSLAoJcHJvdmlkZXJzGAYgAygLMhkudXJha2F0c3UudjEuUHJvdmlkZXJJbmZvEg4KBnN0YWdlcxgHIAMoCRISCgpzdG9yZV9yb290GAggASgJEhMKC3N0b3JlX2J5dGVzGAkgASgDEjUKBmxvYWRlZBgKIAMoCzIlLnVyYWthdHN1LnYxLkNhcGFiaWxpdGllcy5Mb2FkZWRFbnRyeRIoCglsYW5ndWFnZXMYCyADKAsyFS51cmFrYXRzdS52MS5MYW5ndWFnZRotCgtMb2FkZWRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiUKCExhbmd1YWdlEgsKA3RhZxgBIAEoCRIMCgRuYW1lGAIgASgJImoKDk1vZGVsU2VsZWN0aW9uEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhQKDHF1YW50aXphdGlvbhgDIAEoCRIOCgZ2aXNpb24YBCABKAgSEQoJcmVhc29uaW5nGAUgASgIIvEFCgZDb25maWcSDgoGZGV2aWNlGAEgASgJEhEKCWRldGVjdGlvbhgCIAEoCRILCgNvY3IYAyABKAkSEgoKaW5wYWludGluZxgEIAEoCRIwCgt0cmFuc2xhdGlvbhgFIAEoCzIbLnVyYWthdHN1LnYxLk1vZGVsU2VsZWN0aW9uEhcKD2dlbmVyYXRpb25fanNvbhgGIAEoCRIXCg90YXJnZXRfbGFuZ3VhZ2UYByABKAkSFAoMaW5zdHJ1Y3Rpb25zGAggASgJEj4KDnByb2Nlc3Nvcl9qc29uGAkgAygLMiYudXJha2F0c3UudjEuQ29uZmlnLlByb2Nlc3Nvckpzb25FbnRyeRI+Cg5wcm92aWRlcnNfanNvbhgKIAMoCzImLnVyYWthdHN1LnYxLkNvbmZpZy5Qcm92aWRlcnNKc29uRW50cnkSMwoIcnVudGltZXMYCyADKAsyIS51cmFrYXRzdS52MS5Db25maWcuUnVudGltZXNFbnRyeRIVCg1mb250X2ZhbWlsaWVzGAwgAygJEgwKBGZpbGwYDSABKAkSFgoObG9zc2xlc3NfcGFnZXMYDiABKAgSFQoNc291bmRfZWZmZWN0cxgPIAEoCRIbChNzb3VuZF9lZmZlY3RzX21vZGVsGBAgASgJEiAKE2lkbGVfdW5sb2FkX21pbnV0ZXMYESABKAVIAIgBARISCgp3YXRlcm1hcmtzGBIgASgJEhgKEHdhdGVybWFya3NfbW9kZWwYEyABKAkaNAoSUHJvY2Vzc29ySnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaNAoSUHJvdmlkZXJzSnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaLwoNUnVudGltZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBQhYKFF9pZGxlX3VubG9hZF9taW51dGVzIq0BChBUcmFuc2xhdGlvbk1vZGVsEhAKCHByb3ZpZGVyGAEgASgJEhUKDXByb3ZpZGVyX25hbWUYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEbmFtZRgEIAEoCRIwCg1xdWFudGl6YXRpb25zGAUgAygLMhkudXJha2F0c3UudjEuUXVhbnRpemF0aW9uEg4KBnZpc2lvbhgGIAEoCBIRCglyZWFzb25pbmcYByABKAgiPAoMUXVhbnRpemF0aW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoKZG93bmxvYWRlZBgDIAEoCCJFChRUcmFuc2xhdGlvbk1vZGVsTGlzdBItCgZtb2RlbHMYASADKAsyHS51cmFrYXRzdS52MS5UcmFuc2xhdGlvbk1vZGVsIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASI6CgNCb3gSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASItCgxHcmFkaWVudFN0b3ASDgoGb2Zmc2V0GAEgASgBEg0KBWNvbG9yGAIgASgJIlEKCEdyYWRpZW50EgwKBGtpbmQYASABKAkSDQoFYW5nbGUYAiABKAESKAoFc3RvcHMYAyADKAsyGS51cmFrYXRzdS52MS5HcmFkaWVudFN0b3AinwMKClR5cG9ncmFwaHkSFgoOcHJlZmVycmVkX2ZvbnQYASABKAkSGAoLZm9udF93ZWlnaHQYAiABKAVIAIgBARISCgpmb250X3N0eWxlGAMgASgJEhEKBHNpemUYBCABKAFIAYgBARIQCghhdXRvX2ZpdBgFIAEoCBISCgVjb2xvchgGIAEoCUgCiAEBEhkKDHN0cm9rZV9jb2xvchgHIAEoCUgDiAEBEhkKDHN0cm9rZV93aWR0aBgIIAEoAUgEiAEBEhEKCWFsaWdubWVudBgJIAEoCRIUCgx3cml0aW5nX21vZGUYCiABKAkSEAoIYXV0aG9yZWQYCyABKAgSLAoNZmlsbF9ncmFkaWVudBgMIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Ei4KD3N0cm9rZV9ncmFkaWVudBgNIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Qg4KDF9mb250X3dlaWdodEIHCgVfc2l6ZUIICgZfY29sb3JCDwoNX3N0cm9rZV9jb2xvckIPCg1fc3Ryb2tlX3dpZHRoIuIBCglUZXh0U3R5bGUSDQoFc3RhcnQYASABKAUSCwoDZW5kGAIgASgFEgwKBGJvbGQYAyABKAgSDgoGaXRhbGljGAQgASgIEhEKCXVuZGVybGluZRgFIAEoCBIVCg1zdHJpa2V0aHJvdWdoGAYgASgIEhIKBWNvbG9yGAcgASgJSACIAQESDAoEZm9udBgIIAEoCRISCgVzY2FsZRgJIAEoAUgBiAEBEicKCGdyYWRpZW50GAogASgLMhUudXJha2F0c3UudjEuR3JhZGllbnRCCAoGX2NvbG9yQggKBl9zY2FsZSL9AwoJVGV4dEJsb2NrEhAKCGxheWVyX2lkGAEgASgJEhIKCmNvbnRlbnRfaWQYAiABKAkSEQoJcmVnaW9uX2lkGAMgASgJEhIKCmJhbGxvb25faWQYBCABKAkSEwoLbGF5b3V0X2tpbmQYBSABKAkSIQoFZnJhbWUYBiADKAsyEi51cmFrYXRzdS52MS5Qb2ludBIgCgZib3VuZHMYByABKAsyEC51cmFrYXRzdS52MS5Cb3gSDQoFYW5nbGUYCCABKAESEwoLc291cmNlX3RleHQYCSABKAkSFQoNc291cmNlX29yaWdpbhgKIAEoCRIXCg9zb3VyY2VfbGFuZ3VhZ2UYCyABKAkSEwoLdHJhbnNsYXRpb24YDCABKAkSGgoSdHJhbnNsYXRpb25fb3JpZ2luGA0gASgJEhwKFHRyYW5zbGF0aW9uX2xhbmd1YWdlGA4gASgJEhUKDW9jcl9kaXJlY3Rpb24YDyABKAkSKwoKdHlwb2dyYXBoeRgQIAEoCzIXLnVyYWthdHN1LnYxLlR5cG9ncmFwaHkSDwoHdmlzaWJsZRgRIAEoCBIMCgRyb2xlGBIgASgJEg8KB29wYWNpdHkYEyABKAESMgoSdHJhbnNsYXRpb25fc3R5bGVzGBQgAygLMhYudXJha2F0c3UudjEuVGV4dFN0eWxlIowBCgZSZWdpb24SCgoCaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIjCgdwb2x5Z29uGAQgAygLMhIudXJha2F0c3UudjEuUG9pbnQSIAoGYm91bmRzGAUgASgLMhAudXJha2F0c3UudjEuQm94EhIKCmNvbmZpZGVuY2UYBiABKAEiVwoLUmFzdGVyTGF5ZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgRraW5kGAMgASgJEg8KB3Zpc2libGUYBCABKAgSDwoHb3BhY2l0eRgFIAEoASKUAQoWTGF5ZXJWaXNpYmlsaXR5UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSEQoJbGF5ZXJfaWRzGAMgAygJEhQKB3Zpc2libGUYBCABKAhIAIgBARIUCgdvcGFjaXR5GAUgASgBSAGIAQFCCgoIX3Zpc2libGVCCgoIX29wYWNpdHkiYgoVQWRkUmFzdGVyTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEhYKDmFib3ZlX2xheWVyX2lkGAQgASgJIlgKEE1vdmVMYXllclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhAKCGxheWVyX2lkGAMgASgJEg0KBWRlbHRhGAQgASgFIo4BChVTZXRSYXN0ZXJMYXllclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEgwKBGtpbmQYAyABKAkSEAoIbGF5ZXJfaWQYBCABKAkSCwoDcG5nGAUgASgMEg0KBXBhdGNoGAYgASgIEgkKAXgYByABKAUSCQoBeRgIIAEoBSI5CgtTdGFnZVN0YXR1cxINCgVzdGFnZRgBIAEoCRIMCgRkb25lGAIgASgIEg0KBW1vZGVsGAMgASgJIv4CCgRQYWdlEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDQoFd2lkdGgYAyABKAUSDgoGaGVpZ2h0GAQgASgFEiYKBmJsb2NrcxgFIAMoCzIWLnVyYWthdHN1LnYxLlRleHRCbG9jaxIkCgdyZWdpb25zGAYgAygLMhMudXJha2F0c3UudjEuUmVnaW9uEi8KDXJhc3Rlcl9sYXllcnMYByADKAsyGC51cmFrYXRzdS52MS5SYXN0ZXJMYXllchIOCgZhc3NldHMYCCADKAkSKAoGc3RhZ2VzGAkgAygLMhgudXJha2F0c3UudjEuU3RhZ2VTdGF0dXMSEAoIcmV2aXNpb24YCiABKAMSPAoOYXNzZXRfdmVyc2lvbnMYCyADKAsyJC51cmFrYXRzdS52MS5QYWdlLkFzc2V0VmVyc2lvbnNFbnRyeRo0ChJBc3NldFZlcnNpb25zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASLLAQoHUHJvamVjdBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhIKCmNyZWF0ZWRfYXQYAyABKAESEgoKdXBkYXRlZF9hdBgEIAEoARIQCghyZXZpc2lvbhgFIAEoAxIgCgVwYWdlcxgGIAMoCzIRLnVyYWthdHN1LnYxLlBhZ2USEAoIY2FuX3VuZG8YByABKAgSEAoIY2FuX3JlZG8YCCABKAgSJgoIY2hhcHRlcnMYCSADKAsyFC51cmFrYXRzdS52MS5DaGFwdGVyIjUKB0NoYXB0ZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghwYWdlX2lkcxgDIAMoCSJzCg5Qcm9qZWN0U3VtbWFyeRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBXBhZ2VzGAMgASgFEhIKCmNyZWF0ZWRfYXQYBCABKAESEgoKdXBkYXRlZF9hdBgFIAEoARIQCghjaGFwdGVycxgGIAEoBSI8CgtQcm9qZWN0TGlzdBItCghwcm9qZWN0cxgBIAMoCzIbLnVyYWthdHN1LnYxLlByb2plY3RTdW1tYXJ5IiQKFENyZWF0ZVByb2plY3RSZXF1ZXN0EgwKBG5hbWUYASABKAkiOAoUUmVuYW1lUHJvamVjdFJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJIiAKClByb2plY3RSZWYSEgoKcHJvamVjdF9pZBgBIAEoCSIuCgdQYWdlUmVmEhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCSJWChRDcmVhdGVDaGFwdGVyUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoFaW5kZXgYAyABKAVIAIgBAUIICgZfaW5kZXgiTAoUUmVuYW1lQ2hhcHRlclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRISCgpjaGFwdGVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkiNAoKQ2hhcHRlclJlZhISCgpwcm9qZWN0X2lkGAEgASgJEhIKCmNoYXB0ZXJfaWQYAiABKAkiNQoNQ2hhcHRlckxheW91dBISCgpjaGFwdGVyX2lkGAEgASgJEhAKCHBhZ2VfaWRzGAIgAygJIlkKFUFycmFuZ2VQcm9qZWN0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCGNoYXB0ZXJzGAIgAygLMhoudXJha2F0c3UudjEuQ2hhcHRlckxheW91dCJFCgxUZXh0QmxvY2tSZWYSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhAKCGxheWVyX2lkGAMgASgJInIKDkFkZFBhZ2VSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgRkYXRhGAMgASgMEhIKBWluZGV4GAQgASgFSACIAQESEgoKY2hhcHRlcl9pZBgFIAEoCUIICgZfaW5kZXgiQQoMQXNzZXRSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIMCgRraW5kGAMgASgJIlkKBUFzc2V0EgwKBGRhdGEYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEg0KBXdpZHRoGAMgASgFEg4KBmhlaWdodBgEIAEoBRINCgVmb3VuZBgFIAEoCCLZAgoWVXBkYXRlVGV4dEJsb2NrUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSEAoIbGF5ZXJfaWQYAyABKAkSGAoLc291cmNlX3RleHQYBCABKAlIAIgBARIYCgt0cmFuc2xhdGlvbhgFIAEoCUgBiAEBEisKCnR5cG9ncmFwaHkYBiABKAsyFy51cmFrYXRzdS52MS5UeXBvZ3JhcGh5EiEKBWZyYW1lGAcgAygLMhIudXJha2F0c3UudjEuUG9pbnQSFAoHdmlzaWJsZRgIIAEoCEgCiAEBEg4KBmZpZWxkcxgJIAMoCRIyChJ0cmFuc2xhdGlvbl9zdHlsZXMYCiADKAsyFi51cmFrYXRzdS52MS5UZXh0U3R5bGVCDgoMX3NvdXJjZV90ZXh0Qg4KDF90cmFuc2xhdGlvbkIKCghfdmlzaWJsZSJfChZDcmVhdGVUZXh0QmxvY2tSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIgCgZib3VuZHMYAyABKAsyEC51cmFrYXRzdS52MS5Cb3giOAoJT3BlcmF0aW9uEgwKBGtpbmQYASABKAkSDQoFc3RhZ2UYAiABKAkSDgoGc3RhZ2VzGAMgAygJIuYBCgpSdW5SZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSEAoIcGFnZV9pZHMYAiADKAkSKQoJb3BlcmF0aW9uGAMgASgLMhYudXJha2F0c3UudjEuT3BlcmF0aW9uEiUKBnJlZ2lvbhgEIAEoCzIQLnVyYWthdHN1LnYxLkJveEgAiAEBEhIKCmVudGl0eV9pZHMYBSADKAkSFwoPaW5wYWludGluZ19tYXNrGAYgASgMEhgKC2ZpbGxfcHJvbXB0GAcgASgJSAGIAQFCCQoHX3JlZ2lvbkIOCgxfZmlsbF9wcm9tcHQiuAIKDVByb2dyZXNzRXZlbnQSDgoGam9iX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDwoHcGFnZV9pZBgDIAEoCRINCgVzdGFnZRgEIAEoCRINCgVtb2RlbBgFIAEoCRISCgplbGFwc2VkX21zGAYgASgBEg8KB21lc3NhZ2UYByABKAkSEQoJY29tcGxldGVkGAggASgFEg0KBXRvdGFsGAkgASgFEg0KBXBhZ2VzGAogAygJEg4KBnN0YWdlcxgLIAMoCRIfCgRwYWdlGAwgASgLMhEudXJha2F0c3UudjEuUGFnZRIMCgRzdGVwGA0gASgFEg0KBXN0ZXBzGA4gASgFEg8KB3ByZXZpZXcYDyABKAwSJQoLcHJldmlld19ib3gYECABKAsyEC51cmFrYXRzdS52MS5Cb3giGAoGSm9iUmVmEg4KBmpvYl9pZBgBIAEoCSJ6CgNKb2ISCgoCaWQYASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJY29tcGxldGVkGAQgASgFEg0KBXRvdGFsGAUgASgFEhIKCnN0YXJ0ZWRfYXQYBiABKAESDQoFZXJyb3IYByABKAkiKQoHSm9iTGlzdBIeCgRqb2JzGAEgAygLMhAudXJha2F0c3UudjEuSm9iIikKCkZvbnRGYW1pbHkSDAoEbmFtZRgBIAEoCRINCgVmYWNlcxgCIAMoCSI1CghGb250TGlzdBIpCghmYW1pbGllcxgBIAMoCzIXLnVyYWthdHN1LnYxLkZvbnRGYW1pbHky2A8KCFVyYWthdHN1EkAKD0dldENhcGFiaWxpdGllcxISLnVyYWthdHN1LnYxLkVtcHR5GhkudXJha2F0c3UudjEuQ2FwYWJpbGl0aWVzEjQKCUdldENvbmZpZxISLnVyYWthdHN1LnYxLkVtcHR5GhMudXJha2F0c3UudjEuQ29uZmlnEjUKCVNldENvbmZpZxITLnVyYWthdHN1LnYxLkNvbmZpZxoTLnVyYWthdHN1LnYxLkNvbmZpZxJOChVMaXN0VHJhbnNsYXRpb25Nb2RlbHMSEi51cmFrYXRzdS52MS5FbXB0eRohLnVyYWthdHN1LnYxLlRyYW5zbGF0aW9uTW9kZWxMaXN0EjwKDExpc3RQcm9qZWN0cxISLnVyYWthdHN1LnYxLkVtcHR5GhgudXJha2F0c3UudjEuUHJvamVjdExpc3QSSAoNQ3JlYXRlUHJvamVjdBIhLnVyYWthdHN1LnYxLkNyZWF0ZVByb2plY3RSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI7CgpHZXRQcm9qZWN0EhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSSAoNUmVuYW1lUHJvamVjdBIhLnVyYWthdHN1LnYxLlJlbmFtZVByb2plY3RSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI8Cg1EZWxldGVQcm9qZWN0EhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoSLnVyYWthdHN1LnYxLkVtcHR5EjUKBFVuZG8SFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhQudXJha2F0c3UudjEuUHJvamVjdBI1CgRSZWRvEhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSSAoNQ3JlYXRlQ2hhcHRlchIhLnVyYWthdHN1LnYxLkNyZWF0ZUNoYXB0ZXJSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBJICg1SZW5hbWVDaGFwdGVyEiEudXJha2F0c3UudjEuUmVuYW1lQ2hhcHRlclJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0Ej4KDURlbGV0ZUNoYXB0ZXISFy51cmFrYXRzdS52MS5DaGFwdGVyUmVmGhQudXJha2F0c3UudjEuUHJvamVjdBJKCg5BcnJhbmdlUHJvamVjdBIiLnVyYWthdHN1LnYxLkFycmFuZ2VQcm9qZWN0UmVxdWVzdBoULnVyYWthdHN1LnYxLlByb2plY3QSOQoHQWRkUGFnZRIbLnVyYWthdHN1LnYxLkFkZFBhZ2VSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI4CgpSZW1vdmVQYWdlEhQudXJha2F0c3UudjEuUGFnZVJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSMgoHR2V0UGFnZRIULnVyYWthdHN1LnYxLlBhZ2VSZWYaES51cmFrYXRzdS52MS5QYWdlEjkKCEdldEFzc2V0EhkudXJha2F0c3UudjEuQXNzZXRSZXF1ZXN0GhIudXJha2F0c3UudjEuQXNzZXQSSQoPVXBkYXRlVGV4dEJsb2NrEiMudXJha2F0c3UudjEuVXBkYXRlVGV4dEJsb2NrUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USSQoPQ3JlYXRlVGV4dEJsb2NrEiMudXJha2F0c3UudjEuQ3JlYXRlVGV4dEJsb2NrUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USPwoPRGVsZXRlVGV4dEJsb2NrEhkudXJha2F0c3UudjEuVGV4dEJsb2NrUmVmGhEudXJha2F0c3UudjEuUGFnZRJMChJTZXRMYXllclZpc2liaWxpdHkSIy51cmFrYXRzdS52MS5MYXllclZpc2liaWxpdHlSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI9CglNb3ZlTGF5ZXISHS51cmFrYXRzdS52MS5Nb3ZlTGF5ZXJSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRJHCg5TZXRSYXN0ZXJMYXllchIiLnVyYWthdHN1LnYxLlNldFJhc3RlckxheWVyUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USRwoOQWRkUmFzdGVyTGF5ZXISIi51cmFrYXRzdS52MS5BZGRSYXN0ZXJMYXllclJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEjsKC0RlbGV0ZUxheWVyEhkudXJha2F0c3UudjEuVGV4dEJsb2NrUmVmGhEudXJha2F0c3UudjEuUGFnZRI8CgNSdW4SFy51cmFrYXRzdS52MS5SdW5SZXF1ZXN0GhoudXJha2F0c3UudjEuUHJvZ3Jlc3NFdmVudDABEi8KBFN0b3ASEy51cmFrYXRzdS52MS5Kb2JSZWYaEi51cmFrYXRzdS52MS5FbXB0eRI0CghMaXN0Sm9icxISLnVyYWthdHN1LnYxLkVtcHR5GhQudXJha2F0c3UudjEuSm9iTGlzdBI2CglMaXN0Rm9udHMSEi51cmFrYXRzdS52MS5FbXB0eRoVLnVyYWthdHN1LnYxLkZvbnRMaXN0YgZwcm90bzM");
+  fileDesc("Chp1cmFrYXRzdS92MS91cmFrYXRzdS5wcm90bxILdXJha2F0c3UudjEiBwoFRW1wdHkiiwEKBkRldmljZRINCgVpbmRleBgBIAEoBRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg8KB2JhY2tlbmQYBCABKAkSEwoLZGV2aWNlX3R5cGUYBSABKAkSFAoMbWVtb3J5X3RvdGFsGAYgASgDEhMKC21lbW9yeV9mcmVlGAcgASgDIkAKDVJ1bnRpbWVPcHRpb24SDAoEbmFtZRgBIAEoCRIRCglhdmFpbGFibGUYAiABKAgSDgoGcmVhc29uGAMgASgJIq4CCgxQcm92aWRlckluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVzdGFnZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIsCghydW50aW1lcxgFIAMoCzIaLnVyYWthdHN1LnYxLlJ1bnRpbWVPcHRpb24SFwoPZGVmYXVsdF9ydW50aW1lGAYgASgJEhEKCWF2YWlsYWJsZRgHIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCCABKAkSDwoHd2VpZ2h0cxgJIAMoCRIcChRzZXR0aW5nc19zY2hlbWFfanNvbhgKIAEoCRIVCg1kZWZhdWx0c19qc29uGAsgASgJEhAKCHByb21wdGVkGAwgASgIEhIKCmluc3RydWN0ZWQYDSABKAgiigMKDENhcGFiaWxpdGllcxIPCgd2ZXJzaW9uGAEgASgJEiMKBmRldmljZRgCIAEoCzITLnVyYWthdHN1LnYxLkRldmljZRIkCgdkZXZpY2VzGAMgAygLMhMudXJha2F0c3UudjEuRGV2aWNlEhAKCHBsYXRmb3JtGAQgASgJEhUKDXJ1bnRpbWVzX2pzb24YBSABKAkSLAoJcHJvdmlkZXJzGAYgAygLMhkudXJha2F0c3UudjEuUHJvdmlkZXJJbmZvEg4KBnN0YWdlcxgHIAMoCRISCgpzdG9yZV9yb290GAggASgJEhMKC3N0b3JlX2J5dGVzGAkgASgDEjUKBmxvYWRlZBgKIAMoCzIlLnVyYWthdHN1LnYxLkNhcGFiaWxpdGllcy5Mb2FkZWRFbnRyeRIoCglsYW5ndWFnZXMYCyADKAsyFS51cmFrYXRzdS52MS5MYW5ndWFnZRotCgtMb2FkZWRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiUKCExhbmd1YWdlEgsKA3RhZxgBIAEoCRIMCgRuYW1lGAIgASgJImoKDk1vZGVsU2VsZWN0aW9uEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhQKDHF1YW50aXphdGlvbhgDIAEoCRIOCgZ2aXNpb24YBCABKAgSEQoJcmVhc29uaW5nGAUgASgIIvEFCgZDb25maWcSDgoGZGV2aWNlGAEgASgJEhEKCWRldGVjdGlvbhgCIAEoCRILCgNvY3IYAyABKAkSEgoKaW5wYWludGluZxgEIAEoCRIwCgt0cmFuc2xhdGlvbhgFIAEoCzIbLnVyYWthdHN1LnYxLk1vZGVsU2VsZWN0aW9uEhcKD2dlbmVyYXRpb25fanNvbhgGIAEoCRIXCg90YXJnZXRfbGFuZ3VhZ2UYByABKAkSFAoMaW5zdHJ1Y3Rpb25zGAggASgJEj4KDnByb2Nlc3Nvcl9qc29uGAkgAygLMiYudXJha2F0c3UudjEuQ29uZmlnLlByb2Nlc3Nvckpzb25FbnRyeRI+Cg5wcm92aWRlcnNfanNvbhgKIAMoCzImLnVyYWthdHN1LnYxLkNvbmZpZy5Qcm92aWRlcnNKc29uRW50cnkSMwoIcnVudGltZXMYCyADKAsyIS51cmFrYXRzdS52MS5Db25maWcuUnVudGltZXNFbnRyeRIVCg1mb250X2ZhbWlsaWVzGAwgAygJEgwKBGZpbGwYDSABKAkSFgoObG9zc2xlc3NfcGFnZXMYDiABKAgSFQoNc291bmRfZWZmZWN0cxgPIAEoCRIbChNzb3VuZF9lZmZlY3RzX21vZGVsGBAgASgJEiAKE2lkbGVfdW5sb2FkX21pbnV0ZXMYESABKAVIAIgBARISCgp3YXRlcm1hcmtzGBIgASgJEhgKEHdhdGVybWFya3NfbW9kZWwYEyABKAkaNAoSUHJvY2Vzc29ySnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaNAoSUHJvdmlkZXJzSnNvbkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaLwoNUnVudGltZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBQhYKFF9pZGxlX3VubG9hZF9taW51dGVzIq0BChBUcmFuc2xhdGlvbk1vZGVsEhAKCHByb3ZpZGVyGAEgASgJEhUKDXByb3ZpZGVyX25hbWUYAiABKAkSDQoFbW9kZWwYAyABKAkSDAoEbmFtZRgEIAEoCRIwCg1xdWFudGl6YXRpb25zGAUgAygLMhkudXJha2F0c3UudjEuUXVhbnRpemF0aW9uEg4KBnZpc2lvbhgGIAEoCBIRCglyZWFzb25pbmcYByABKAgiPAoMUXVhbnRpemF0aW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoKZG93bmxvYWRlZBgDIAEoCCJFChRUcmFuc2xhdGlvbk1vZGVsTGlzdBItCgZtb2RlbHMYASADKAsyHS51cmFrYXRzdS52MS5UcmFuc2xhdGlvbk1vZGVsIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASI6CgNCb3gSCQoBeBgBIAEoARIJCgF5GAIgASgBEg0KBXdpZHRoGAMgASgBEg4KBmhlaWdodBgEIAEoASItCgxHcmFkaWVudFN0b3ASDgoGb2Zmc2V0GAEgASgBEg0KBWNvbG9yGAIgASgJIlEKCEdyYWRpZW50EgwKBGtpbmQYASABKAkSDQoFYW5nbGUYAiABKAESKAoFc3RvcHMYAyADKAsyGS51cmFrYXRzdS52MS5HcmFkaWVudFN0b3AinwMKClR5cG9ncmFwaHkSFgoOcHJlZmVycmVkX2ZvbnQYASABKAkSGAoLZm9udF93ZWlnaHQYAiABKAVIAIgBARISCgpmb250X3N0eWxlGAMgASgJEhEKBHNpemUYBCABKAFIAYgBARIQCghhdXRvX2ZpdBgFIAEoCBISCgVjb2xvchgGIAEoCUgCiAEBEhkKDHN0cm9rZV9jb2xvchgHIAEoCUgDiAEBEhkKDHN0cm9rZV93aWR0aBgIIAEoAUgEiAEBEhEKCWFsaWdubWVudBgJIAEoCRIUCgx3cml0aW5nX21vZGUYCiABKAkSEAoIYXV0aG9yZWQYCyABKAgSLAoNZmlsbF9ncmFkaWVudBgMIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Ei4KD3N0cm9rZV9ncmFkaWVudBgNIAEoCzIVLnVyYWthdHN1LnYxLkdyYWRpZW50Qg4KDF9mb250X3dlaWdodEIHCgVfc2l6ZUIICgZfY29sb3JCDwoNX3N0cm9rZV9jb2xvckIPCg1fc3Ryb2tlX3dpZHRoIuIBCglUZXh0U3R5bGUSDQoFc3RhcnQYASABKAUSCwoDZW5kGAIgASgFEgwKBGJvbGQYAyABKAgSDgoGaXRhbGljGAQgASgIEhEKCXVuZGVybGluZRgFIAEoCBIVCg1zdHJpa2V0aHJvdWdoGAYgASgIEhIKBWNvbG9yGAcgASgJSACIAQESDAoEZm9udBgIIAEoCRISCgVzY2FsZRgJIAEoAUgBiAEBEicKCGdyYWRpZW50GAogASgLMhUudXJha2F0c3UudjEuR3JhZGllbnRCCAoGX2NvbG9yQggKBl9zY2FsZSL9AwoJVGV4dEJsb2NrEhAKCGxheWVyX2lkGAEgASgJEhIKCmNvbnRlbnRfaWQYAiABKAkSEQoJcmVnaW9uX2lkGAMgASgJEhIKCmJhbGxvb25faWQYBCABKAkSEwoLbGF5b3V0X2tpbmQYBSABKAkSIQoFZnJhbWUYBiADKAsyEi51cmFrYXRzdS52MS5Qb2ludBIgCgZib3VuZHMYByABKAsyEC51cmFrYXRzdS52MS5Cb3gSDQoFYW5nbGUYCCABKAESEwoLc291cmNlX3RleHQYCSABKAkSFQoNc291cmNlX29yaWdpbhgKIAEoCRIXCg9zb3VyY2VfbGFuZ3VhZ2UYCyABKAkSEwoLdHJhbnNsYXRpb24YDCABKAkSGgoSdHJhbnNsYXRpb25fb3JpZ2luGA0gASgJEhwKFHRyYW5zbGF0aW9uX2xhbmd1YWdlGA4gASgJEhUKDW9jcl9kaXJlY3Rpb24YDyABKAkSKwoKdHlwb2dyYXBoeRgQIAEoCzIXLnVyYWthdHN1LnYxLlR5cG9ncmFwaHkSDwoHdmlzaWJsZRgRIAEoCBIMCgRyb2xlGBIgASgJEg8KB29wYWNpdHkYEyABKAESMgoSdHJhbnNsYXRpb25fc3R5bGVzGBQgAygLMhYudXJha2F0c3UudjEuVGV4dFN0eWxlIowBCgZSZWdpb24SCgoCaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIjCgdwb2x5Z29uGAQgAygLMhIudXJha2F0c3UudjEuUG9pbnQSIAoGYm91bmRzGAUgASgLMhAudXJha2F0c3UudjEuQm94EhIKCmNvbmZpZGVuY2UYBiABKAEiVwoLUmFzdGVyTGF5ZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgRraW5kGAMgASgJEg8KB3Zpc2libGUYBCABKAgSDwoHb3BhY2l0eRgFIAEoASKUAQoWTGF5ZXJWaXNpYmlsaXR5UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSEQoJbGF5ZXJfaWRzGAMgAygJEhQKB3Zpc2libGUYBCABKAhIAIgBARIUCgdvcGFjaXR5GAUgASgBSAGIAQFCCgoIX3Zpc2libGVCCgoIX29wYWNpdHkiYgoVQWRkUmFzdGVyTGF5ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEhYKDmFib3ZlX2xheWVyX2lkGAQgASgJIlgKEE1vdmVMYXllclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEhAKCGxheWVyX2lkGAMgASgJEg0KBWRlbHRhGAQgASgFIo4BChVTZXRSYXN0ZXJMYXllclJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEgwKBGtpbmQYAyABKAkSEAoIbGF5ZXJfaWQYBCABKAkSCwoDcG5nGAUgASgMEg0KBXBhdGNoGAYgASgIEgkKAXgYByABKAUSCQoBeRgIIAEoBSI5CgtTdGFnZVN0YXR1cxINCgVzdGFnZRgBIAEoCRIMCgRkb25lGAIgASgIEg0KBW1vZGVsGAMgASgJIv4CCgRQYWdlEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDQoFd2lkdGgYAyABKAUSDgoGaGVpZ2h0GAQgASgFEiYKBmJsb2NrcxgFIAMoCzIWLnVyYWthdHN1LnYxLlRleHRCbG9jaxIkCgdyZWdpb25zGAYgAygLMhMudXJha2F0c3UudjEuUmVnaW9uEi8KDXJhc3Rlcl9sYXllcnMYByADKAsyGC51cmFrYXRzdS52MS5SYXN0ZXJMYXllchIOCgZhc3NldHMYCCADKAkSKAoGc3RhZ2VzGAkgAygLMhgudXJha2F0c3UudjEuU3RhZ2VTdGF0dXMSEAoIcmV2aXNpb24YCiABKAMSPAoOYXNzZXRfdmVyc2lvbnMYCyADKAsyJC51cmFrYXRzdS52MS5QYWdlLkFzc2V0VmVyc2lvbnNFbnRyeRo0ChJBc3NldFZlcnNpb25zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASL3AQoHUHJvamVjdBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhIKCmNyZWF0ZWRfYXQYAyABKAESEgoKdXBkYXRlZF9hdBgEIAEoARIQCghyZXZpc2lvbhgFIAEoAxIgCgVwYWdlcxgGIAMoCzIRLnVyYWthdHN1LnYxLlBhZ2USEAoIY2FuX3VuZG8YByABKAgSEAoIY2FuX3JlZG8YCCABKAgSJgoIY2hhcHRlcnMYCSADKAsyFC51cmFrYXRzdS52MS5DaGFwdGVyEioKBmZvcm1hdBgKIAEoCzIaLnVyYWthdHN1LnYxLlByb2plY3RGb3JtYXQiaAoOU3RpdGNoU2V0dGluZ3MSDgoGaGVpZ2h0GAEgASgFEhMKC3NlbnNpdGl2aXR5GAIgASgFEhEKCXNjYW5fc3RlcBgDIAEoBRIOCgZtYXJnaW4YBCABKAUSDgoGZGV0ZWN0GAUgASgIIkoKDVByb2plY3RGb3JtYXQSDAoEa2luZBgBIAEoCRIrCgZzdGl0Y2gYAiABKAsyGy51cmFrYXRzdS52MS5TdGl0Y2hTZXR0aW5ncyJZChdTZXRQcm9qZWN0Rm9ybWF0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEioKBmZvcm1hdBgCIAEoCzIaLnVyYWthdHN1LnYxLlByb2plY3RGb3JtYXQiNQoHQ2hhcHRlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHBhZ2VfaWRzGAMgAygJInMKDlByb2plY3RTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDQoFcGFnZXMYAyABKAUSEgoKY3JlYXRlZF9hdBgEIAEoARISCgp1cGRhdGVkX2F0GAUgASgBEhAKCGNoYXB0ZXJzGAYgASgFIjwKC1Byb2plY3RMaXN0Ei0KCHByb2plY3RzGAEgAygLMhsudXJha2F0c3UudjEuUHJvamVjdFN1bW1hcnkiJAoUQ3JlYXRlUHJvamVjdFJlcXVlc3QSDAoEbmFtZRgBIAEoCSI4ChRSZW5hbWVQcm9qZWN0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkiIAoKUHJvamVjdFJlZhISCgpwcm9qZWN0X2lkGAEgASgJIi4KB1BhZ2VSZWYSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJIlYKFENyZWF0ZUNoYXB0ZXJSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRISCgVpbmRleBgDIAEoBUgAiAEBQggKBl9pbmRleCJMChRSZW5hbWVDaGFwdGVyUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEhIKCmNoYXB0ZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCSI0CgpDaGFwdGVyUmVmEhIKCnByb2plY3RfaWQYASABKAkSEgoKY2hhcHRlcl9pZBgCIAEoCSI1Cg1DaGFwdGVyTGF5b3V0EhIKCmNoYXB0ZXJfaWQYASABKAkSEAoIcGFnZV9pZHMYAiADKAkiWQoVQXJyYW5nZVByb2plY3RSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoIY2hhcHRlcnMYAiADKAsyGi51cmFrYXRzdS52MS5DaGFwdGVyTGF5b3V0IkUKDFRleHRCbG9ja1JlZhISCgpwcm9qZWN0X2lkGAEgASgJEg8KB3BhZ2VfaWQYAiABKAkSEAoIbGF5ZXJfaWQYAyABKAkicgoOQWRkUGFnZVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGRhdGEYAyABKAwSEgoFaW5kZXgYBCABKAVIAIgBARISCgpjaGFwdGVyX2lkGAUgASgJQggKBl9pbmRleCJBCgxBc3NldFJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEgwKBGtpbmQYAyABKAkiWQoFQXNzZXQSDAoEZGF0YRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkSDQoFd2lkdGgYAyABKAUSDgoGaGVpZ2h0GAQgASgFEg0KBWZvdW5kGAUgASgIItkCChZVcGRhdGVUZXh0QmxvY2tSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDwoHcGFnZV9pZBgCIAEoCRIQCghsYXllcl9pZBgDIAEoCRIYCgtzb3VyY2VfdGV4dBgEIAEoCUgAiAEBEhgKC3RyYW5zbGF0aW9uGAUgASgJSAGIAQESKwoKdHlwb2dyYXBoeRgGIAEoCzIXLnVyYWthdHN1LnYxLlR5cG9ncmFwaHkSIQoFZnJhbWUYByADKAsyEi51cmFrYXRzdS52MS5Qb2ludBIUCgd2aXNpYmxlGAggASgISAKIAQESDgoGZmllbGRzGAkgAygJEjIKEnRyYW5zbGF0aW9uX3N0eWxlcxgKIAMoCzIWLnVyYWthdHN1LnYxLlRleHRTdHlsZUIOCgxfc291cmNlX3RleHRCDgoMX3RyYW5zbGF0aW9uQgoKCF92aXNpYmxlIl8KFkNyZWF0ZVRleHRCbG9ja1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIPCgdwYWdlX2lkGAIgASgJEiAKBmJvdW5kcxgDIAEoCzIQLnVyYWthdHN1LnYxLkJveCI4CglPcGVyYXRpb24SDAoEa2luZBgBIAEoCRINCgVzdGFnZRgCIAEoCRIOCgZzdGFnZXMYAyADKAki9QEKClJ1blJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIQCghwYWdlX2lkcxgCIAMoCRIpCglvcGVyYXRpb24YAyABKAsyFi51cmFrYXRzdS52MS5PcGVyYXRpb24SJQoGcmVnaW9uGAQgASgLMhAudXJha2F0c3UudjEuQm94SACIAQESEgoKZW50aXR5X2lkcxgFIAMoCRIXCg9pbnBhaW50aW5nX21hc2sYBiABKAwSGAoLZmlsbF9wcm9tcHQYByABKAlIAYgBARINCgVmb3JjZRgIIAEoCEIJCgdfcmVnaW9uQg4KDF9maWxsX3Byb21wdCK4AgoNUHJvZ3Jlc3NFdmVudBIOCgZqb2JfaWQYASABKAkSDAoEa2luZBgCIAEoCRIPCgdwYWdlX2lkGAMgASgJEg0KBXN0YWdlGAQgASgJEg0KBW1vZGVsGAUgASgJEhIKCmVsYXBzZWRfbXMYBiABKAESDwoHbWVzc2FnZRgHIAEoCRIRCgljb21wbGV0ZWQYCCABKAUSDQoFdG90YWwYCSABKAUSDQoFcGFnZXMYCiADKAkSDgoGc3RhZ2VzGAsgAygJEh8KBHBhZ2UYDCABKAsyES51cmFrYXRzdS52MS5QYWdlEgwKBHN0ZXAYDSABKAUSDQoFc3RlcHMYDiABKAUSDwoHcHJldmlldxgPIAEoDBIlCgtwcmV2aWV3X2JveBgQIAEoCzIQLnVyYWthdHN1LnYxLkJveCIYCgZKb2JSZWYSDgoGam9iX2lkGAEgASgJInoKA0pvYhIKCgJpZBgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEg4KBnN0YXR1cxgDIAEoCRIRCgljb21wbGV0ZWQYBCABKAUSDQoFdG90YWwYBSABKAUSEgoKc3RhcnRlZF9hdBgGIAEoARINCgVlcnJvchgHIAEoCSIpCgdKb2JMaXN0Eh4KBGpvYnMYASADKAsyEC51cmFrYXRzdS52MS5Kb2IiKQoKRm9udEZhbWlseRIMCgRuYW1lGAEgASgJEg0KBWZhY2VzGAIgAygJIjUKCEZvbnRMaXN0EikKCGZhbWlsaWVzGAEgAygLMhcudXJha2F0c3UudjEuRm9udEZhbWlseTLqEAoIVXJha2F0c3USQAoPR2V0Q2FwYWJpbGl0aWVzEhIudXJha2F0c3UudjEuRW1wdHkaGS51cmFrYXRzdS52MS5DYXBhYmlsaXRpZXMSNAoJR2V0Q29uZmlnEhIudXJha2F0c3UudjEuRW1wdHkaEy51cmFrYXRzdS52MS5Db25maWcSNQoJU2V0Q29uZmlnEhMudXJha2F0c3UudjEuQ29uZmlnGhMudXJha2F0c3UudjEuQ29uZmlnEk4KFUxpc3RUcmFuc2xhdGlvbk1vZGVscxISLnVyYWthdHN1LnYxLkVtcHR5GiEudXJha2F0c3UudjEuVHJhbnNsYXRpb25Nb2RlbExpc3QSPAoMTGlzdFByb2plY3RzEhIudXJha2F0c3UudjEuRW1wdHkaGC51cmFrYXRzdS52MS5Qcm9qZWN0TGlzdBJICg1DcmVhdGVQcm9qZWN0EiEudXJha2F0c3UudjEuQ3JlYXRlUHJvamVjdFJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjsKCkdldFByb2plY3QSFy51cmFrYXRzdS52MS5Qcm9qZWN0UmVmGhQudXJha2F0c3UudjEuUHJvamVjdBJICg1SZW5hbWVQcm9qZWN0EiEudXJha2F0c3UudjEuUmVuYW1lUHJvamVjdFJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0Ek4KEFNldFByb2plY3RGb3JtYXQSJC51cmFrYXRzdS52MS5TZXRQcm9qZWN0Rm9ybWF0UmVxdWVzdBoULnVyYWthdHN1LnYxLlByb2plY3QSPAoNRGVsZXRlUHJvamVjdBIXLnVyYWthdHN1LnYxLlByb2plY3RSZWYaEi51cmFrYXRzdS52MS5FbXB0eRI1CgRVbmRvEhcudXJha2F0c3UudjEuUHJvamVjdFJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSNQoEUmVkbxIXLnVyYWthdHN1LnYxLlByb2plY3RSZWYaFC51cmFrYXRzdS52MS5Qcm9qZWN0EkgKDUNyZWF0ZUNoYXB0ZXISIS51cmFrYXRzdS52MS5DcmVhdGVDaGFwdGVyUmVxdWVzdBoULnVyYWthdHN1LnYxLlByb2plY3QSSAoNUmVuYW1lQ2hhcHRlchIhLnVyYWthdHN1LnYxLlJlbmFtZUNoYXB0ZXJSZXF1ZXN0GhQudXJha2F0c3UudjEuUHJvamVjdBI+Cg1EZWxldGVDaGFwdGVyEhcudXJha2F0c3UudjEuQ2hhcHRlclJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSQAoPUmVzdGl0Y2hDaGFwdGVyEhcudXJha2F0c3UudjEuQ2hhcHRlclJlZhoULnVyYWthdHN1LnYxLlByb2plY3QSSgoOQXJyYW5nZVByb2plY3QSIi51cmFrYXRzdS52MS5BcnJhbmdlUHJvamVjdFJlcXVlc3QaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjkKB0FkZFBhZ2USGy51cmFrYXRzdS52MS5BZGRQYWdlUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USOAoKUmVtb3ZlUGFnZRIULnVyYWthdHN1LnYxLlBhZ2VSZWYaFC51cmFrYXRzdS52MS5Qcm9qZWN0EjIKB0dldFBhZ2USFC51cmFrYXRzdS52MS5QYWdlUmVmGhEudXJha2F0c3UudjEuUGFnZRI5CghHZXRBc3NldBIZLnVyYWthdHN1LnYxLkFzc2V0UmVxdWVzdBoSLnVyYWthdHN1LnYxLkFzc2V0EkkKD1VwZGF0ZVRleHRCbG9jaxIjLnVyYWthdHN1LnYxLlVwZGF0ZVRleHRCbG9ja1JlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEkkKD0NyZWF0ZVRleHRCbG9jaxIjLnVyYWthdHN1LnYxLkNyZWF0ZVRleHRCbG9ja1JlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEj8KD0RlbGV0ZVRleHRCbG9jaxIZLnVyYWthdHN1LnYxLlRleHRCbG9ja1JlZhoRLnVyYWthdHN1LnYxLlBhZ2USTAoSU2V0TGF5ZXJWaXNpYmlsaXR5EiMudXJha2F0c3UudjEuTGF5ZXJWaXNpYmlsaXR5UmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USPQoJTW92ZUxheWVyEh0udXJha2F0c3UudjEuTW92ZUxheWVyUmVxdWVzdBoRLnVyYWthdHN1LnYxLlBhZ2USRwoOU2V0UmFzdGVyTGF5ZXISIi51cmFrYXRzdS52MS5TZXRSYXN0ZXJMYXllclJlcXVlc3QaES51cmFrYXRzdS52MS5QYWdlEkcKDkFkZFJhc3RlckxheWVyEiIudXJha2F0c3UudjEuQWRkUmFzdGVyTGF5ZXJSZXF1ZXN0GhEudXJha2F0c3UudjEuUGFnZRI7CgtEZWxldGVMYXllchIZLnVyYWthdHN1LnYxLlRleHRCbG9ja1JlZhoRLnVyYWthdHN1LnYxLlBhZ2USPAoDUnVuEhcudXJha2F0c3UudjEuUnVuUmVxdWVzdBoaLnVyYWthdHN1LnYxLlByb2dyZXNzRXZlbnQwARIvCgRTdG9wEhMudXJha2F0c3UudjEuSm9iUmVmGhIudXJha2F0c3UudjEuRW1wdHkSNAoITGlzdEpvYnMSEi51cmFrYXRzdS52MS5FbXB0eRoULnVyYWthdHN1LnYxLkpvYkxpc3QSNgoJTGlzdEZvbnRzEhIudXJha2F0c3UudjEuRW1wdHkaFS51cmFrYXRzdS52MS5Gb250TGlzdGIGcHJvdG8z");
 
 /**
  * @generated from message urakatsu.v1.Empty
@@ -1336,6 +1336,11 @@ export type Project = Message<"urakatsu.v1.Project"> & {
    * @generated from field: repeated urakatsu.v1.Chapter chapters = 9;
    */
   chapters: Chapter[];
+
+  /**
+   * @generated from field: urakatsu.v1.ProjectFormat format = 10;
+   */
+  format?: ProjectFormat | undefined;
 };
 
 /**
@@ -1344,6 +1349,99 @@ export type Project = Message<"urakatsu.v1.Project"> & {
  */
 export const ProjectSchema: GenMessage<Project> = /*@__PURE__*/
   messageDesc(file_urakatsu_v1_urakatsu, 26);
+
+/**
+ * How a webtoon chapter is cut into pages (pipeline/stitch.py); SmartStitch's settings.
+ *
+ * @generated from message urakatsu.v1.StitchSettings
+ */
+export type StitchSettings = Message<"urakatsu.v1.StitchSettings"> & {
+  /**
+   * target page height in pixels; 0 = 1.5x the strip width
+   *
+   * @generated from field: int32 height = 1;
+   */
+  height: number;
+
+  /**
+   * 0-100; 100 cuts only perfectly flat rows
+   *
+   * @generated from field: int32 sensitivity = 2;
+   */
+  sensitivity: number;
+
+  /**
+   * @generated from field: int32 scan_step = 3;
+   */
+  scanStep: number;
+
+  /**
+   * columns ignored at each side
+   *
+   * @generated from field: int32 margin = 4;
+   */
+  margin: number;
+
+  /**
+   * never cut through text the detection model finds
+   *
+   * @generated from field: bool detect = 5;
+   */
+  detect: boolean;
+};
+
+/**
+ * Describes the message urakatsu.v1.StitchSettings.
+ * Use `create(StitchSettingsSchema)` to create a new message.
+ */
+export const StitchSettingsSchema: GenMessage<StitchSettings> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 27);
+
+/**
+ * @generated from message urakatsu.v1.ProjectFormat
+ */
+export type ProjectFormat = Message<"urakatsu.v1.ProjectFormat"> & {
+  /**
+   * "manga" or "webtoon" (also manhwa and manhua)
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: urakatsu.v1.StitchSettings stitch = 2;
+   */
+  stitch?: StitchSettings | undefined;
+};
+
+/**
+ * Describes the message urakatsu.v1.ProjectFormat.
+ * Use `create(ProjectFormatSchema)` to create a new message.
+ */
+export const ProjectFormatSchema: GenMessage<ProjectFormat> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 28);
+
+/**
+ * @generated from message urakatsu.v1.SetProjectFormatRequest
+ */
+export type SetProjectFormatRequest = Message<"urakatsu.v1.SetProjectFormatRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: urakatsu.v1.ProjectFormat format = 2;
+   */
+  format?: ProjectFormat | undefined;
+};
+
+/**
+ * Describes the message urakatsu.v1.SetProjectFormatRequest.
+ * Use `create(SetProjectFormatRequestSchema)` to create a new message.
+ */
+export const SetProjectFormatRequestSchema: GenMessage<SetProjectFormatRequest> = /*@__PURE__*/
+  messageDesc(file_urakatsu_v1_urakatsu, 29);
 
 /**
  * @generated from message urakatsu.v1.Chapter
@@ -1370,7 +1468,7 @@ export type Chapter = Message<"urakatsu.v1.Chapter"> & {
  * Use `create(ChapterSchema)` to create a new message.
  */
 export const ChapterSchema: GenMessage<Chapter> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 27);
+  messageDesc(file_urakatsu_v1_urakatsu, 30);
 
 /**
  * @generated from message urakatsu.v1.ProjectSummary
@@ -1412,7 +1510,7 @@ export type ProjectSummary = Message<"urakatsu.v1.ProjectSummary"> & {
  * Use `create(ProjectSummarySchema)` to create a new message.
  */
 export const ProjectSummarySchema: GenMessage<ProjectSummary> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 28);
+  messageDesc(file_urakatsu_v1_urakatsu, 31);
 
 /**
  * @generated from message urakatsu.v1.ProjectList
@@ -1429,7 +1527,7 @@ export type ProjectList = Message<"urakatsu.v1.ProjectList"> & {
  * Use `create(ProjectListSchema)` to create a new message.
  */
 export const ProjectListSchema: GenMessage<ProjectList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 29);
+  messageDesc(file_urakatsu_v1_urakatsu, 32);
 
 /**
  * @generated from message urakatsu.v1.CreateProjectRequest
@@ -1446,7 +1544,7 @@ export type CreateProjectRequest = Message<"urakatsu.v1.CreateProjectRequest"> &
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 30);
+  messageDesc(file_urakatsu_v1_urakatsu, 33);
 
 /**
  * @generated from message urakatsu.v1.RenameProjectRequest
@@ -1468,7 +1566,7 @@ export type RenameProjectRequest = Message<"urakatsu.v1.RenameProjectRequest"> &
  * Use `create(RenameProjectRequestSchema)` to create a new message.
  */
 export const RenameProjectRequestSchema: GenMessage<RenameProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 31);
+  messageDesc(file_urakatsu_v1_urakatsu, 34);
 
 /**
  * @generated from message urakatsu.v1.ProjectRef
@@ -1485,7 +1583,7 @@ export type ProjectRef = Message<"urakatsu.v1.ProjectRef"> & {
  * Use `create(ProjectRefSchema)` to create a new message.
  */
 export const ProjectRefSchema: GenMessage<ProjectRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 32);
+  messageDesc(file_urakatsu_v1_urakatsu, 35);
 
 /**
  * @generated from message urakatsu.v1.PageRef
@@ -1507,7 +1605,7 @@ export type PageRef = Message<"urakatsu.v1.PageRef"> & {
  * Use `create(PageRefSchema)` to create a new message.
  */
 export const PageRefSchema: GenMessage<PageRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 33);
+  messageDesc(file_urakatsu_v1_urakatsu, 36);
 
 /**
  * @generated from message urakatsu.v1.CreateChapterRequest
@@ -1534,7 +1632,7 @@ export type CreateChapterRequest = Message<"urakatsu.v1.CreateChapterRequest"> &
  * Use `create(CreateChapterRequestSchema)` to create a new message.
  */
 export const CreateChapterRequestSchema: GenMessage<CreateChapterRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 34);
+  messageDesc(file_urakatsu_v1_urakatsu, 37);
 
 /**
  * @generated from message urakatsu.v1.RenameChapterRequest
@@ -1561,7 +1659,7 @@ export type RenameChapterRequest = Message<"urakatsu.v1.RenameChapterRequest"> &
  * Use `create(RenameChapterRequestSchema)` to create a new message.
  */
 export const RenameChapterRequestSchema: GenMessage<RenameChapterRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 35);
+  messageDesc(file_urakatsu_v1_urakatsu, 38);
 
 /**
  * @generated from message urakatsu.v1.ChapterRef
@@ -1583,7 +1681,7 @@ export type ChapterRef = Message<"urakatsu.v1.ChapterRef"> & {
  * Use `create(ChapterRefSchema)` to create a new message.
  */
 export const ChapterRefSchema: GenMessage<ChapterRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 36);
+  messageDesc(file_urakatsu_v1_urakatsu, 39);
 
 /**
  * @generated from message urakatsu.v1.ChapterLayout
@@ -1605,7 +1703,7 @@ export type ChapterLayout = Message<"urakatsu.v1.ChapterLayout"> & {
  * Use `create(ChapterLayoutSchema)` to create a new message.
  */
 export const ChapterLayoutSchema: GenMessage<ChapterLayout> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 37);
+  messageDesc(file_urakatsu_v1_urakatsu, 40);
 
 /**
  * The whole new structure: every chapter exactly once, every page exactly once.
@@ -1629,7 +1727,7 @@ export type ArrangeProjectRequest = Message<"urakatsu.v1.ArrangeProjectRequest">
  * Use `create(ArrangeProjectRequestSchema)` to create a new message.
  */
 export const ArrangeProjectRequestSchema: GenMessage<ArrangeProjectRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 38);
+  messageDesc(file_urakatsu_v1_urakatsu, 41);
 
 /**
  * @generated from message urakatsu.v1.TextBlockRef
@@ -1656,7 +1754,7 @@ export type TextBlockRef = Message<"urakatsu.v1.TextBlockRef"> & {
  * Use `create(TextBlockRefSchema)` to create a new message.
  */
 export const TextBlockRefSchema: GenMessage<TextBlockRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 39);
+  messageDesc(file_urakatsu_v1_urakatsu, 42);
 
 /**
  * @generated from message urakatsu.v1.AddPageRequest
@@ -1697,7 +1795,7 @@ export type AddPageRequest = Message<"urakatsu.v1.AddPageRequest"> & {
  * Use `create(AddPageRequestSchema)` to create a new message.
  */
 export const AddPageRequestSchema: GenMessage<AddPageRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 40);
+  messageDesc(file_urakatsu_v1_urakatsu, 43);
 
 /**
  * @generated from message urakatsu.v1.AssetRequest
@@ -1726,7 +1824,7 @@ export type AssetRequest = Message<"urakatsu.v1.AssetRequest"> & {
  * Use `create(AssetRequestSchema)` to create a new message.
  */
 export const AssetRequestSchema: GenMessage<AssetRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 41);
+  messageDesc(file_urakatsu_v1_urakatsu, 44);
 
 /**
  * @generated from message urakatsu.v1.Asset
@@ -1763,7 +1861,7 @@ export type Asset = Message<"urakatsu.v1.Asset"> & {
  * Use `create(AssetSchema)` to create a new message.
  */
 export const AssetSchema: GenMessage<Asset> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 42);
+  messageDesc(file_urakatsu_v1_urakatsu, 45);
 
 /**
  * @generated from message urakatsu.v1.UpdateTextBlockRequest
@@ -1833,7 +1931,7 @@ export type UpdateTextBlockRequest = Message<"urakatsu.v1.UpdateTextBlockRequest
  * Use `create(UpdateTextBlockRequestSchema)` to create a new message.
  */
 export const UpdateTextBlockRequestSchema: GenMessage<UpdateTextBlockRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 43);
+  messageDesc(file_urakatsu_v1_urakatsu, 46);
 
 /**
  * @generated from message urakatsu.v1.CreateTextBlockRequest
@@ -1860,7 +1958,7 @@ export type CreateTextBlockRequest = Message<"urakatsu.v1.CreateTextBlockRequest
  * Use `create(CreateTextBlockRequestSchema)` to create a new message.
  */
 export const CreateTextBlockRequestSchema: GenMessage<CreateTextBlockRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 44);
+  messageDesc(file_urakatsu_v1_urakatsu, 47);
 
 /**
  * @generated from message urakatsu.v1.Operation
@@ -1889,7 +1987,7 @@ export type Operation = Message<"urakatsu.v1.Operation"> & {
  * Use `create(OperationSchema)` to create a new message.
  */
 export const OperationSchema: GenMessage<Operation> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 45);
+  messageDesc(file_urakatsu_v1_urakatsu, 48);
 
 /**
  * @generated from message urakatsu.v1.RunRequest
@@ -1939,6 +2037,13 @@ export type RunRequest = Message<"urakatsu.v1.RunRequest"> & {
    * @generated from field: optional string fill_prompt = 7;
    */
   fillPrompt?: string | undefined;
+
+  /**
+   * Redo: stages run on pages they already did, keeping user edits
+   *
+   * @generated from field: bool force = 8;
+   */
+  force: boolean;
 };
 
 /**
@@ -1946,7 +2051,7 @@ export type RunRequest = Message<"urakatsu.v1.RunRequest"> & {
  * Use `create(RunRequestSchema)` to create a new message.
  */
 export const RunRequestSchema: GenMessage<RunRequest> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 46);
+  messageDesc(file_urakatsu_v1_urakatsu, 49);
 
 /**
  * @generated from message urakatsu.v1.ProgressEvent
@@ -1965,6 +2070,8 @@ export type ProgressEvent = Message<"urakatsu.v1.ProgressEvent"> & {
   kind: string;
 
   /**
+   * a skipped stage's message: "done" (already done), "kept" (a forced run kept user edits)
+   *
    * @generated from field: string page_id = 3;
    */
   pageId: string;
@@ -2045,7 +2152,7 @@ export type ProgressEvent = Message<"urakatsu.v1.ProgressEvent"> & {
  * Use `create(ProgressEventSchema)` to create a new message.
  */
 export const ProgressEventSchema: GenMessage<ProgressEvent> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 47);
+  messageDesc(file_urakatsu_v1_urakatsu, 50);
 
 /**
  * @generated from message urakatsu.v1.JobRef
@@ -2062,7 +2169,7 @@ export type JobRef = Message<"urakatsu.v1.JobRef"> & {
  * Use `create(JobRefSchema)` to create a new message.
  */
 export const JobRefSchema: GenMessage<JobRef> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 48);
+  messageDesc(file_urakatsu_v1_urakatsu, 51);
 
 /**
  * @generated from message urakatsu.v1.Job
@@ -2109,7 +2216,7 @@ export type Job = Message<"urakatsu.v1.Job"> & {
  * Use `create(JobSchema)` to create a new message.
  */
 export const JobSchema: GenMessage<Job> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 49);
+  messageDesc(file_urakatsu_v1_urakatsu, 52);
 
 /**
  * @generated from message urakatsu.v1.JobList
@@ -2126,7 +2233,7 @@ export type JobList = Message<"urakatsu.v1.JobList"> & {
  * Use `create(JobListSchema)` to create a new message.
  */
 export const JobListSchema: GenMessage<JobList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 50);
+  messageDesc(file_urakatsu_v1_urakatsu, 53);
 
 /**
  * @generated from message urakatsu.v1.FontFamily
@@ -2148,7 +2255,7 @@ export type FontFamily = Message<"urakatsu.v1.FontFamily"> & {
  * Use `create(FontFamilySchema)` to create a new message.
  */
 export const FontFamilySchema: GenMessage<FontFamily> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 51);
+  messageDesc(file_urakatsu_v1_urakatsu, 54);
 
 /**
  * @generated from message urakatsu.v1.FontList
@@ -2165,7 +2272,7 @@ export type FontList = Message<"urakatsu.v1.FontList"> & {
  * Use `create(FontListSchema)` to create a new message.
  */
 export const FontListSchema: GenMessage<FontList> = /*@__PURE__*/
-  messageDesc(file_urakatsu_v1_urakatsu, 52);
+  messageDesc(file_urakatsu_v1_urakatsu, 55);
 
 /**
  * Urakatsu service: one contract for native gRPC, gRPC-web (browser) and the JSON mirror.
@@ -2239,6 +2346,14 @@ export const Urakatsu: GenService<{
     output: typeof ProjectSchema;
   },
   /**
+   * @generated from rpc urakatsu.v1.Urakatsu.SetProjectFormat
+   */
+  setProjectFormat: {
+    methodKind: "unary";
+    input: typeof SetProjectFormatRequestSchema;
+    output: typeof ProjectSchema;
+  },
+  /**
    * @generated from rpc urakatsu.v1.Urakatsu.DeleteProject
    */
   deleteProject: {
@@ -2284,6 +2399,16 @@ export const Urakatsu: GenService<{
    * @generated from rpc urakatsu.v1.Urakatsu.DeleteChapter
    */
   deleteChapter: {
+    methodKind: "unary";
+    input: typeof ChapterRefSchema;
+    output: typeof ProjectSchema;
+  },
+  /**
+   * Webtoon: joins the chapter's images and cuts them again away from text and art.
+   *
+   * @generated from rpc urakatsu.v1.Urakatsu.RestitchChapter
+   */
+  restitchChapter: {
     methodKind: "unary";
     input: typeof ChapterRefSchema;
     output: typeof ProjectSchema;

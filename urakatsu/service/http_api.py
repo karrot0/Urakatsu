@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from urakatsu.core.config import PipelineConfig, home
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.pipeline.scope import Bounds
+from urakatsu.pipeline.stitch import ProjectFormat
 
 from .servicer import message_for, status_for
 from .workspace import Workspace
@@ -44,6 +45,8 @@ class RunBody(BaseModel):
     page_ids: list[str] = Field(default_factory=list)
     region: Optional[BoxBody] = None
     entity_ids: list[str] = Field(default_factory=list)
+    # Redo: stages run on pages they already did, keeping what the user edited.
+    force: bool = False
 
 
 class TextBlockPatch(BaseModel):
@@ -168,6 +171,10 @@ def api_router(ws: Workspace) -> APIRouter:
     def rename_project(project_id: str, body: dict[str, Any]):
         return guard(ws.rename_project, project_id, str(body.get("name", "Untitled")))
 
+    @router.put("/projects/{project_id}/format")
+    def set_project_format(project_id: str, body: ProjectFormat):
+        return guard(ws.set_project_format, project_id, body)
+
     @router.delete("/projects/{project_id}", status_code=204)
     def delete_project(project_id: str):
         ws.delete_project(project_id)
@@ -194,10 +201,17 @@ def api_router(ws: Workspace) -> APIRouter:
     @router.get("/projects/{project_id}/chapters/{chapter_id}/export")
     def export_chapter(project_id: str, chapter_id: str, format: str = "cbz"):
         data, filename = guard(ws.export_chapter, project_id, chapter_id, format)
-        media = "application/vnd.comicbook+zip" if format == "cbz" else "application/zip"
+        media = {"cbz": "application/vnd.comicbook+zip", "strip": "image/png"}.get(format, "application/zip")
         ascii_name = filename.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
         disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
         return Response(content=data, media_type=media, headers={"content-disposition": disposition})
+
+    @router.post("/projects/{project_id}/chapters/{chapter_id}/restitch")
+    async def restitch_chapter(project_id: str, chapter_id: str):
+        try:
+            return await ws.restitch_chapter(project_id, chapter_id)
+        except Exception as error:
+            raise http_error(error)
 
     @router.delete("/projects/{project_id}/chapters/{chapter_id}")
     def delete_chapter(project_id: str, chapter_id: str):
@@ -289,7 +303,7 @@ def api_router(ws: Workspace) -> APIRouter:
         try:
             region = Bounds(**body.region.model_dump()) if body.region else None
             job = await ws.start_run(
-                project_id, operation(body), page_ids=body.page_ids or None, region=region, entities=body.entity_ids or None
+                project_id, operation(body), page_ids=body.page_ids or None, region=region, entities=body.entity_ids or None, force=body.force
             )
         except Exception as error:
             raise http_error(error)

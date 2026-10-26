@@ -244,6 +244,17 @@ class Snapshot:
     def has(self, entity: str, cls: type[c.Component]) -> bool:
         return cls.KIND in self._state.entity(entity).components
 
+    def user_authored(self, entity: str) -> bool:
+        """Whether the user set anything on ``entity`` or below it: a component, or an authored
+        value inside one (a translation they typed)."""
+        for each in (entity, *self.descendants(entity)):
+            for value in self._state.entity(each).components.values():
+                if c.is_user(getattr(value, "origin", None)):
+                    return True
+                if any(isinstance(field, c.Authored) and c.is_user(field.origin) for field in vars(value).values()):
+                    return True
+        return False
+
     def project_component(self, cls: type[C]) -> Optional[C]:
         value = self._state.project.get(cls.KIND)
         return value.model_copy(deep=True) if value is not None else None  # type: ignore[return-value]

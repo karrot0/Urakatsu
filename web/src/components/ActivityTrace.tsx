@@ -1,14 +1,18 @@
 // Activity tab: a run as a trace. The "started" event names every page and stage the run will
 // do, so the trace shows the whole plan up front; each page folds its stages' lifecycle
 // (loading, running, then finished, skipped or failed) into one row per stage.
+//
+// A stage skipped because the page already had its results ("done") can be redone: Redo on the
+// page, or Redo on the run for every such page, runs the same stages again forced. Stages replace
+// their own results there and keep what the user edited.
 
-import { ChevronRight, CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle, RotateCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "cn";
 
 import { STAGE_LABEL } from "../api/catalog";
 import type { ProgressEvent } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, useWorkspace, type JobState } from "../state/workspace";
+import { STAGES, useWorkspace, type JobState, type StageName } from "../state/workspace";
 import { Badge } from "./ui";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +22,8 @@ type Trace = { pages: string[]; stages: string[]; steps: Map<string, Step>; elap
 
 const STEP_STATES = new Set<string>(["loading", "running", "finished", "skipped", "failed"]);
 const key = (page: string, stage: string) => `${page}\u0000${stage}`;
+/** Skipped because the page already had the stage's results, which Redo replaces. */
+const doneBefore = (step: Step) => step.state === "skipped" && step.message === "done";
 
 function buildTrace(events: ProgressEvent[]): Trace {
   const started = events.find((e) => e.kind === "started");
@@ -62,6 +68,9 @@ export function ActivityPanel() {
   const pageName = (id: string) => ws.project?.pages.find((p) => p.id === id)?.name ?? id.slice(0, 8);
   const share = job.total ? Math.min(100, (job.completed / job.total) * 100) : 0;
   const running = job.status === "running";
+  const redoable = running ? [] : trace.pages.filter((page) => trace.stages.some((stage) => doneBefore(trace.steps.get(key(page, stage)) ?? { state: "queued" })));
+  /** The run's stages again on ``pages``, forced. */
+  const redo = (pages: string[]) => void ws.run({ kind: "stages", stages: trace.stages as StageName[], scope: "page", pageIds: pages, force: true });
 
   return (
     <div className="flex flex-col gap-3">
@@ -79,6 +88,16 @@ export function ActivityPanel() {
               Stop
             </Button>
           )}
+          {redoable.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              title="Run the stages again on the pages that already had them. What you edited is kept."
+              onClick={() => redo(redoable)}
+            >
+              <RotateCw size={14} /> Redo {redoable.length} page{redoable.length === 1 ? "" : "s"}
+            </Button>
+          )}
         </div>
         <div className="relative h-1 overflow-hidden rounded-full bg-surface-fill" role="progressbar" aria-valuemin={0} aria-valuemax={job.total} aria-valuenow={job.completed} aria-label="Run progress">
           <span
@@ -93,7 +112,14 @@ export function ActivityPanel() {
       {trace.pages.length > 0 && (
         <ol className="flex flex-col" aria-label="Pages in this run">
           {trace.pages.map((page) => (
-            <PageTrace key={page} name={pageName(page)} stages={trace.stages} steps={trace.stages.map((stage) => trace.steps.get(key(page, stage)) ?? { state: "queued" })} job={job} />
+            <PageTrace
+              key={page}
+              name={pageName(page)}
+              stages={trace.stages}
+              steps={trace.stages.map((stage) => trace.steps.get(key(page, stage)) ?? { state: "queued" })}
+              job={job}
+              onRedo={redoable.includes(page) ? () => redo([page]) : undefined}
+            />
           ))}
         </ol>
       )}
@@ -102,7 +128,7 @@ export function ActivityPanel() {
 }
 
 /** One page: a summary line (stage dots, count, time) that opens to its stages. Open by default while it is active or has failed. */
-function PageTrace({ name, stages, steps, job }: { name: string; stages: string[]; steps: Step[]; job: JobState }) {
+function PageTrace({ name, stages, steps, job, onRedo }: { name: string; stages: string[]; steps: Step[]; job: JobState; onRedo?: () => void }) {
   const active = steps.some((s) => s.state === "loading" || s.state === "running");
   const failed = steps.some((s) => s.state === "failed");
   const [open, setOpen] = useState<boolean>();
@@ -110,9 +136,10 @@ function PageTrace({ name, stages, steps, job }: { name: string; stages: string[
   const done = steps.filter((s) => s.state === "finished" || s.state === "skipped").length;
   const ms = steps.reduce((sum, s) => sum + (s.ms ?? 0), 0);
   return (
-    <li className="shadow-[inset_0_-1px_0_var(--border-soft)] last:shadow-none">
+    <li className="group shadow-[inset_0_-1px_0_var(--border-soft)] last:shadow-none">
+      <div className="flex items-center">
       <button
-        className="flex w-full cursor-pointer items-center gap-2 rounded-control px-1 py-1.5 text-left transition-colors duration-[20ms] ease-in hover:bg-hover"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control px-1 py-1.5 text-left transition-colors duration-[20ms] ease-in hover:bg-hover"
         aria-expanded={expanded}
         onClick={() => setOpen(!expanded)}
       >
@@ -125,6 +152,19 @@ function PageTrace({ name, stages, steps, job }: { name: string; stages: string[
         </span>
         <span className="w-14 flex-none text-right text-xs leading-4 text-fg-3 tabular-nums">{ms ? formatDuration(ms) : `${done}/${steps.length}`}</span>
       </button>
+      {onRedo && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="ml-0.5 flex-none"
+          title={`Redo ${name}: run its stages again; what you edited is kept`}
+          aria-label={`Redo ${name}`}
+          onClick={onRedo}
+        >
+          <RotateCw size={14} />
+        </Button>
+      )}
+      </div>
       {expanded && (
         <ol className="mb-1.5 ml-[22px] flex flex-col border-l border-line-soft pl-2">
           {stages.map((stage, i) => (
@@ -153,7 +193,11 @@ function StepRow({ stage, step, runOver }: { stage: string; step: Step; runOver:
         ? formatDuration(step.ms)
         : "Done"
       : step.state === "skipped"
-        ? "Skipped"
+        ? step.message === "done"
+          ? "Done before"
+          : step.message === "kept"
+            ? "Kept your edits"
+            : "Nothing to do"
         : step.state === "failed"
           ? "Failed"
           : step.state === "loading"

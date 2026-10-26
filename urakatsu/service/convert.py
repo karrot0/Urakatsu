@@ -184,7 +184,25 @@ def project_to_proto(view) -> pb.Project:
         can_undo=view.can_undo,
         can_redo=view.can_redo,
         chapters=[pb.Chapter(id=ch.id, name=ch.name, page_ids=ch.page_ids) for ch in view.chapters],
+        format=format_to_proto(view.format),
     )
+
+
+def format_to_proto(value) -> pb.ProjectFormat:
+    return pb.ProjectFormat(kind=value.kind, stitch=pb.StitchSettings(**value.stitch.model_dump()))
+
+
+def format_from_proto(message: pb.ProjectFormat):
+    from urakatsu.pipeline.stitch import ProjectFormat, StitchSettings
+
+    # Settings sent are taken whole: 0 and false are real values (sensitivity 0 cuts anywhere).
+    fields = message.stitch
+    stitch = (
+        StitchSettings(height=fields.height, sensitivity=fields.sensitivity, scan_step=fields.scan_step, margin=fields.margin, detect=fields.detect)
+        if message.HasField("stitch")
+        else StitchSettings()
+    )
+    return ProjectFormat(kind=message.kind or "manga", stitch=stitch)
 
 
 def summary_to_proto(summary) -> pb.ProjectSummary:

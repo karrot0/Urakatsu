@@ -25,6 +25,7 @@ class BookInfo:
     web: Optional[str] = None  # the series page on the site it came from
     language: Optional[str] = None  # the pages' language (the translation's), a BCP 47 tag
     right_to_left: bool = False
+    webtoon: bool = False  # a vertical strip (webtoon project), read top to bottom
 
 
 def _number(value: float) -> str:
@@ -48,7 +49,8 @@ def comic_info(book: BookInfo, pages: int) -> bytes:
     add("Web", book.web)
     add("PageCount", str(pages))
     add("LanguageISO", book.language.split("-")[0].lower() if book.language else None)
-    add("Manga", "YesAndRightToLeft" if book.right_to_left else "Yes")
+    add("Format", "Webtoon" if book.webtoon else None)
+    add("Manga", "YesAndRightToLeft" if book.right_to_left and not book.webtoon else "Yes")
     ElementTree.indent(root)
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 

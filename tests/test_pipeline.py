@@ -65,6 +65,14 @@ async def test_full_run_commits_each_stage(project):
     report = await make_pipeline().execute(session, Request(operation=Operation.through(Stage.INPAINTING), progress=events.append))
     assert report.status is RunStatus.COMPLETED
     assert {e.kind for e in events if e.page} == {ProgressKind.SKIPPED} | {ProgressKind.LOADING} - {ProgressKind.LOADING}
+    # ...and say so, so the UI can offer to redo them.
+    assert {e.message for e in events if e.kind is ProgressKind.SKIPPED} == {"done"}
+
+    # Redo: a forced run does them again.
+    events.clear()
+    report = await make_pipeline().execute(session, Request(operation=Operation.through(Stage.INPAINTING), progress=events.append, force=True))
+    assert report.status is RunStatus.COMPLETED
+    assert sum(e.kind is ProgressKind.FINISHED for e in events) == 4
 
 
 @pytest.mark.asyncio

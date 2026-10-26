@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from urakatsu import __version__
 from urakatsu.core import files
 from urakatsu.core.config import PipelineConfig, load_config, save_config
-from urakatsu.core.errors import ProjectBusy
+from urakatsu.core.errors import ProcessingError, ProjectBusy
 from urakatsu.core.progress import Progress, ProgressKind
 from urakatsu.core.registry import registry
 from urakatsu.core.stage import Operation, Stage
@@ -40,8 +40,10 @@ from urakatsu.pipeline import (
     RegionScope,
     Request,
 )
+from urakatsu.core.results import LayoutDetections
 from urakatsu.pipeline.projects import chapters_of
 from urakatsu.pipeline.scope import Bounds
+from urakatsu.pipeline.stitch import ProjectFormat, stitch
 from urakatsu.pipeline.stages import InpaintingMask
 from urakatsu.remote import OFFLOADED
 from urakatsu.runtimes.manager import RuntimeManager, RuntimeReport
@@ -78,6 +80,7 @@ class ProjectView(BaseModel):
     can_undo: bool
     can_redo: bool
     chapters: list[ChapterView] = []
+    format: ProjectFormat = ProjectFormat()
 
 
 class JobInfo(BaseModel):
@@ -143,7 +146,22 @@ class Workspace:
         # Assets are served from worker threads; the renderer draws one page at a time.
         self._draw_lock = threading.Lock()
         self._renderer = None
+        # The service's event loop (``bind``): restitching runs detection from worker threads.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._restitching: set[str] = set()
         registry.discover()
+
+    def bind(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Lets worker threads (source downloads) run models on ``loop``, the service's."""
+        self._loop = loop
+        self.store.detector = self._detect_tiles
+
+    def _detect_tiles(self, tiles: list[Image.Image]) -> list[LayoutDetections]:
+        """Detection for webtoon restitching, from a worker thread (never the loop's own)."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            raise ProcessingError("the detection model cannot run outside the service")
+        return asyncio.run_coroutine_threadsafe(self.pipeline.detect_layout(tiles), loop).result()
 
     # -- capabilities / configuration ------------------------------------------------------------
 
@@ -244,6 +262,7 @@ class Workspace:
             can_undo=session.can_undo,
             can_redo=session.can_redo,
             chapters=[ChapterView(id=ch.id, name=ch.name, page_ids=ch.pages) for ch in chapters_of(snapshot)],
+            format=ProjectFormat.model_validate(meta.get("format") or {}),
         )
 
     def create_project(self, name: str) -> ProjectView:
@@ -251,6 +270,12 @@ class Workspace:
 
     def rename_project(self, project_id: str, name: str) -> ProjectView:
         self.store.rename(project_id, name)
+        return self.project_view(project_id)
+
+    def set_project_format(self, project_id: str, value: ProjectFormat) -> ProjectView:
+        """Manga or webtoon, and how webtoon chapters are cut. Applies to chapters imported from
+        now on; existing chapters change only when restitched."""
+        self.store.set_format(project_id, value)
         return self.project_view(project_id)
 
     def delete_project(self, project_id: str) -> None:
@@ -281,6 +306,23 @@ class Workspace:
             if job.project_id == project_id and job.status == "running":
                 raise ProjectBusy("stop the running job before restructuring the project")
 
+    async def restitch_chapter(self, project_id: str, chapter_id: str) -> ProjectView:
+        """Cuts a chapter's strip again (``ProjectStore.restitch_chapter``). Waits for the
+        detection model when the pipeline is using it."""
+        self._idle(project_id)
+        if self.automations.busy:
+            raise ProjectBusy("an automation is running; stop it before restitching")
+        if project_id in self._restitching:
+            raise ProjectBusy("this project is already being restitched")
+        if self._loop is None:
+            self.bind(asyncio.get_running_loop())
+        self._restitching.add(project_id)
+        try:
+            await asyncio.to_thread(self.store.restitch_chapter, project_id, chapter_id)
+        finally:
+            self._restitching.discard(project_id)
+        return self.project_view(project_id)
+
     def create_chapter(self, project_id: str, name: str, index: int | None = None) -> ProjectView:
         self.store.create_chapter(project_id, name, index)
         return self.project_view(project_id)
@@ -291,14 +333,19 @@ class Workspace:
 
     def export_chapter(self, project_id: str, chapter_id: str, format: str) -> tuple[bytes, str]:
         """A chapter's pages as rendered (translation typeset), in chapter order, packed as a
-        comic book archive (``cbz``) or a plain ``zip``; returns the archive and its file name.
+        comic book archive (``cbz``), a plain ``zip``, or stitched into one long ``strip`` PNG
+        (webtoon readers); returns the file and its name.
 
         CBZ export: the :meth:`chapter_pages` entries, stored uncompressed
         since PNG is already compressed.
         """
-        if format not in ("cbz", "zip"):
-            raise ValueError("format must be cbz or zip")
+        if format not in ("cbz", "zip", "strip"):
+            raise ValueError("format must be cbz, zip or strip")
         chapter, pages = self.chapter_pages(project_id, chapter_id)
+        if format == "strip":
+            strip = stitch([Image.open(io.BytesIO(data)) for _, data in pages])
+            name = files.safe_stem(f"{self.store.name(project_id)} - {chapter.name}") or "chapter"
+            return _png(strip), f"{name}.png"
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
             for name, data in pages:
@@ -529,6 +576,11 @@ class Workspace:
         edit.remove_entity(layer_id, RemovePolicy.CASCADE)
         still_presented = [r for r in snapshot.relations_to(content, c.Relations.PRESENTS) if r.source != layer_id]
         if not still_presented:
+            # The text region it was read from goes with it, so a page whose text is all deleted
+            # is detected again on the next run (DetectionStage.skip).
+            for relation in snapshot.relations_from(content, c.Relations.RECOGNIZED_FROM):
+                if not [r for r in snapshot.relations_to(relation.target, c.Relations.RECOGNIZED_FROM) if r.source != content]:
+                    edit.remove_entity(relation.target, RemovePolicy.CASCADE)
             edit.remove_entity(content, RemovePolicy.CASCADE)
         session.commit(edit.finish())
         self.store.touch(project_id)
@@ -739,11 +791,15 @@ class Workspace:
         entities: list[str] | None = None,
         inpainting_mask: Optional[bytes] = None,
         fill_prompt: Optional[str] = None,
+        force: bool = False,
     ) -> Job:
-        """Starts a pipeline run. ``fill_prompt`` (with ``inpainting_mask``) makes it a generative fill."""
+        """Starts a pipeline run. ``fill_prompt`` (with ``inpainting_mask``) makes it a generative fill;
+        ``force`` redoes stages on pages that already have their results (Redo), keeping user edits."""
         session = self.session(project_id)
         if self.automations.busy:
             raise ProjectBusy("an automation is running; stop it to run the pipeline by hand")
+        if project_id in self._restitching:
+            raise ProjectBusy("wait for the chapter to finish restitching")
         if entities:
             scope = EntitiesScope(tuple(entities))
         elif region is not None:
@@ -762,7 +818,7 @@ class Workspace:
                 raise ValueError("an inpainting mask requires exactly one page")
             mask = InpaintingMask(page=page_ids[0], png=inpainting_mask, prompt=fill_prompt.strip() if fill_prompt else None, generative=fill_prompt is not None)
         job = Job(id=f"job_{int(time.time() * 1000):x}{len(self.jobs)}", project_id=project_id, stop=StopToken())
-        request = Request(operation=operation, scope=scope, stop=job.stop, progress=job.publish, inpainting_mask=mask)
+        request = Request(operation=operation, scope=scope, stop=job.stop, progress=job.publish, inpainting_mask=mask, force=force)
         self.jobs[job.id] = job
         job.publish(Progress(kind=ProgressKind.QUEUED))
 

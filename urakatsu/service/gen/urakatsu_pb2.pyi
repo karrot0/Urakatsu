@@ -488,7 +488,7 @@ class Page(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., width: _Optional[int] = ..., height: _Optional[int] = ..., blocks: _Optional[_Iterable[_Union[TextBlock, _Mapping]]] = ..., regions: _Optional[_Iterable[_Union[Region, _Mapping]]] = ..., raster_layers: _Optional[_Iterable[_Union[RasterLayer, _Mapping]]] = ..., assets: _Optional[_Iterable[str]] = ..., stages: _Optional[_Iterable[_Union[StageStatus, _Mapping]]] = ..., revision: _Optional[int] = ..., asset_versions: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class Project(_message.Message):
-    __slots__ = ("id", "name", "created_at", "updated_at", "revision", "pages", "can_undo", "can_redo", "chapters")
+    __slots__ = ("id", "name", "created_at", "updated_at", "revision", "pages", "can_undo", "can_redo", "chapters", "format")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -498,6 +498,7 @@ class Project(_message.Message):
     CAN_UNDO_FIELD_NUMBER: _ClassVar[int]
     CAN_REDO_FIELD_NUMBER: _ClassVar[int]
     CHAPTERS_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     created_at: float
@@ -507,7 +508,38 @@ class Project(_message.Message):
     can_undo: bool
     can_redo: bool
     chapters: _containers.RepeatedCompositeFieldContainer[Chapter]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., created_at: _Optional[float] = ..., updated_at: _Optional[float] = ..., revision: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[Page, _Mapping]]] = ..., can_undo: _Optional[bool] = ..., can_redo: _Optional[bool] = ..., chapters: _Optional[_Iterable[_Union[Chapter, _Mapping]]] = ...) -> None: ...
+    format: ProjectFormat
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., created_at: _Optional[float] = ..., updated_at: _Optional[float] = ..., revision: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[Page, _Mapping]]] = ..., can_undo: _Optional[bool] = ..., can_redo: _Optional[bool] = ..., chapters: _Optional[_Iterable[_Union[Chapter, _Mapping]]] = ..., format: _Optional[_Union[ProjectFormat, _Mapping]] = ...) -> None: ...
+
+class StitchSettings(_message.Message):
+    __slots__ = ("height", "sensitivity", "scan_step", "margin", "detect")
+    HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    SENSITIVITY_FIELD_NUMBER: _ClassVar[int]
+    SCAN_STEP_FIELD_NUMBER: _ClassVar[int]
+    MARGIN_FIELD_NUMBER: _ClassVar[int]
+    DETECT_FIELD_NUMBER: _ClassVar[int]
+    height: int
+    sensitivity: int
+    scan_step: int
+    margin: int
+    detect: bool
+    def __init__(self, height: _Optional[int] = ..., sensitivity: _Optional[int] = ..., scan_step: _Optional[int] = ..., margin: _Optional[int] = ..., detect: _Optional[bool] = ...) -> None: ...
+
+class ProjectFormat(_message.Message):
+    __slots__ = ("kind", "stitch")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    STITCH_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    stitch: StitchSettings
+    def __init__(self, kind: _Optional[str] = ..., stitch: _Optional[_Union[StitchSettings, _Mapping]] = ...) -> None: ...
+
+class SetProjectFormatRequest(_message.Message):
+    __slots__ = ("project_id", "format")
+    PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    project_id: str
+    format: ProjectFormat
+    def __init__(self, project_id: _Optional[str] = ..., format: _Optional[_Union[ProjectFormat, _Mapping]] = ...) -> None: ...
 
 class Chapter(_message.Message):
     __slots__ = ("id", "name", "page_ids")
@@ -706,7 +738,7 @@ class Operation(_message.Message):
     def __init__(self, kind: _Optional[str] = ..., stage: _Optional[str] = ..., stages: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RunRequest(_message.Message):
-    __slots__ = ("project_id", "page_ids", "operation", "region", "entity_ids", "inpainting_mask", "fill_prompt")
+    __slots__ = ("project_id", "page_ids", "operation", "region", "entity_ids", "inpainting_mask", "fill_prompt", "force")
     PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
     PAGE_IDS_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
@@ -714,6 +746,7 @@ class RunRequest(_message.Message):
     ENTITY_IDS_FIELD_NUMBER: _ClassVar[int]
     INPAINTING_MASK_FIELD_NUMBER: _ClassVar[int]
     FILL_PROMPT_FIELD_NUMBER: _ClassVar[int]
+    FORCE_FIELD_NUMBER: _ClassVar[int]
     project_id: str
     page_ids: _containers.RepeatedScalarFieldContainer[str]
     operation: Operation
@@ -721,7 +754,8 @@ class RunRequest(_message.Message):
     entity_ids: _containers.RepeatedScalarFieldContainer[str]
     inpainting_mask: bytes
     fill_prompt: str
-    def __init__(self, project_id: _Optional[str] = ..., page_ids: _Optional[_Iterable[str]] = ..., operation: _Optional[_Union[Operation, _Mapping]] = ..., region: _Optional[_Union[Box, _Mapping]] = ..., entity_ids: _Optional[_Iterable[str]] = ..., inpainting_mask: _Optional[bytes] = ..., fill_prompt: _Optional[str] = ...) -> None: ...
+    force: bool
+    def __init__(self, project_id: _Optional[str] = ..., page_ids: _Optional[_Iterable[str]] = ..., operation: _Optional[_Union[Operation, _Mapping]] = ..., region: _Optional[_Union[Box, _Mapping]] = ..., entity_ids: _Optional[_Iterable[str]] = ..., inpainting_mask: _Optional[bytes] = ..., fill_prompt: _Optional[str] = ..., force: _Optional[bool] = ...) -> None: ...
 
 class ProgressEvent(_message.Message):
     __slots__ = ("job_id", "kind", "page_id", "stage", "model", "elapsed_ms", "message", "completed", "total", "pages", "stages", "page", "step", "steps", "preview", "preview_box")

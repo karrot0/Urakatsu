@@ -8,6 +8,10 @@ project's scene state (the ``Chapters`` project component), so arranging them is
 an ordinary undoable commit, and the scene page order is always the chapters'
 pages flattened in order. A project that never stored chapters has one implicit
 "Chapter 1" holding every page.
+
+A project's format (``project.json``) says whether it holds manga pages or webtoon strips
+(webtoon, manhwa, manhua). Webtoon chapters are restitched (``pipeline/stitch.py``): imported
+chapters on arrival, others on request.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import atexit
 import io
 import json
+import logging
 import shutil
 import threading
 import time
@@ -29,7 +34,13 @@ from PIL import Image
 
 from urakatsu.core import files
 from urakatsu.core.config import home
-from urakatsu.scene import At, AssetInput, AssetMetadata, Chapter, Chapters, Edit, Page, RemovePolicy, Session, Snapshot
+from urakatsu.core.errors import ProjectBusy
+from urakatsu.core.results import LayoutDetections
+from urakatsu.pipeline.stitch import Detector, ProjectFormat, restitch
+from urakatsu.scene import At, AssetInput, AssetMetadata, Chapter, Chapters, Edit, Geometry, Page, Region, RemovePolicy, Session, Snapshot
+from urakatsu.scene.components import RegionKinds
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CHAPTER_ID = "default"
 
@@ -90,6 +101,8 @@ class ProjectStore:
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
         self.lossless_pages = False  # StorageConfig.lossless_pages, set by the workspace
+        # Runs the detection model while restitching webtoon chapters; set by the workspace.
+        self.detector: Optional[Detector] = None
         # Update times not yet written, and the timers that will write them.
         self._touched: dict[str, float] = {}
         self._touch_timers: dict[str, threading.Timer] = {}
@@ -126,6 +139,14 @@ class ProjectStore:
     def rename(self, project_id: str, name: str) -> None:
         meta = self._read_meta(project_id)
         meta.update(name=name, updated_at=time.time())
+        self._write_meta(project_id, meta)
+
+    def format(self, project_id: str) -> ProjectFormat:
+        return ProjectFormat.model_validate(self._read_meta(project_id).get("format") or {})
+
+    def set_format(self, project_id: str, value: ProjectFormat) -> None:
+        meta = self._read_meta(project_id)
+        meta.update(format=value.model_dump(mode="json"), updated_at=time.time())
         self._write_meta(project_id, meta)
 
     def touch(self, project_id: str) -> None:
@@ -251,6 +272,37 @@ class ProjectStore:
         session.commit(edit.finish())
         self.touch(project_id)
 
+    def restitch_chapter(self, project_id: str, chapter_id: str) -> None:
+        """Joins the chapter's source images and cuts them again where no text or art is cut,
+        replacing its pages in one undoable commit. Page work (text, cleanup) is discarded:
+        it belonged to the old cuts. Text the pages already had detected is never cut."""
+        session = self.session(project_id)
+        snapshot = session.snapshot()
+        chapter = _find(chapters_of(snapshot), chapter_id)
+        if not chapter.pages:
+            raise ValueError(f"{chapter.name} has no pages to restitch")
+        images = [_source_image(snapshot, page) for page in chapter.pages]
+        avoid = [_text_bands(snapshot, page) for page in chapter.pages]
+        lossless = all(snapshot.asset(page, "source").media_type == "image/png" for page in chapter.pages)
+        slices = restitch(images, self.format(project_id).stitch, avoid, self.detector)
+        encoded = _encode_slices(slices, lossless, self.lossless_pages)
+
+        snapshot = session.snapshot()
+        chapters = chapters_of(snapshot)
+        target = _find(chapters, chapter_id)
+        if target.pages != chapter.pages:
+            raise ProjectBusy(f"{chapter.name} changed while it was restitched; try again")
+        edit = snapshot.edit()
+        for page in target.pages:
+            edit.remove_entity(page, RemovePolicy.CASCADE)
+        width = len(str(len(encoded)))
+        target.pages = [
+            _add_page(edit, f"{number:0{width}d}", data, media_type, w, h) for number, (data, media_type, w, h) in enumerate(encoded, start=1)
+        ]
+        write_chapters(edit, chapters)
+        session.commit(edit.finish())
+        self.touch(project_id)
+
     def remove_page(self, project_id: str, page_id: str) -> None:
         session = self.session(project_id)
         snapshot = session.snapshot()
@@ -304,7 +356,15 @@ class ProjectStore:
 
         ``place`` picks the chapter position from the current chapters (default: the end).
         A project that never stored chapters loses its empty implicit "Chapter 1".
+        In a webtoon project the pages are restitched first.
         """
+        format = self.format(project_id)
+        if format.kind == "webtoon" and pages:
+            images = [Image.open(io.BytesIO(data)) for _, data in pages]
+            lossless = all(image.format == "PNG" for image in images)
+            slices = restitch([_upright(image) for image in images], format.stitch, detect=_lenient(self.detector))
+            width = len(str(len(slices)))
+            pages = [(f"{number:0{width}d}", data) for number, (data, *_) in enumerate(_encode_slices(slices, lossless), start=1)]
         # Pages that need converting do so in parallel: Pillow releases the GIL while encoding.
         with ThreadPoolExecutor(min(8, max(1, len(pages)))) as pool:
             decoded = [(label, *found) for (label, _), found in zip(pages, pool.map(partial(_normalize, lossless=self.lossless_pages), [data for _, data in pages]), strict=True)]
@@ -356,6 +416,68 @@ def _normalize(data: bytes, lossless: bool = False) -> tuple[bytes, str, int, in
         if len(webp) < len(stored[0]):
             stored = (webp, "image/webp")
     return stored[0], stored[1], image.width, image.height
+
+
+# Restitched pages from lossy sources: one more lossy encode at this quality is invisible.
+SLICE_WEBP = {"format": "WEBP", "quality": 95, "method": 4}
+
+
+def _lenient(detect: Optional[Detector]) -> Optional[Detector]:
+    """``detect`` for chapters restitched on import: when the detection model cannot run, the
+    chapter still arrives, cut by pixel comparison alone (Restitch can try again later)."""
+    if detect is None:
+        return None
+
+    def run(tiles: list[Image.Image]):
+        try:
+            return detect(tiles)
+        except Exception as error:  # noqa: BLE001 - a download must not fail on detection
+            log.warning("restitching an imported chapter without text detection: %s", error)
+            return [LayoutDetections(tile.width, tile.height) for tile in tiles]
+
+    return run
+
+
+def _upright(image: Image.Image) -> Image.Image:
+    """``image`` decoded with its EXIF rotation applied, as the pages store it."""
+    from PIL import ImageOps
+
+    return ImageOps.exif_transpose(image) or image
+
+
+def _source_image(snapshot: Snapshot, page: str) -> Image.Image:
+    asset = snapshot.asset(page, "source")
+    if asset is None:
+        raise ValueError(f"page {page} has no source image")
+    image = Image.open(io.BytesIO(snapshot.blobs.read(asset.blob)))
+    image.load()
+    return image
+
+
+def _text_bands(snapshot: Snapshot, page: str) -> list[tuple[float, float]]:
+    """Rows of ``page`` covered by text or bubbles it already has (detected or drawn)."""
+    bands = []
+    for entity in snapshot.descendants(page):
+        region = snapshot.component(entity, Region)
+        geometry = snapshot.component(entity, Geometry)
+        if region is None or geometry is None or not geometry.points or region.kind not in (RegionKinds.TEXT, RegionKinds.BUBBLE):
+            continue
+        ys = [point.y for point in geometry.points]
+        bands.append((min(ys), max(ys)))
+    return bands
+
+
+def _encode_slices(slices: list[Image.Image], lossless: bool, lossless_pages: bool = False) -> list[tuple[bytes, str, int, int]]:
+    """Restitched pages as stored: PNG (through :func:`_normalize`, so ``lossless_pages`` applies)
+    when every source was lossless, else WebP at SLICE_WEBP; encoded in parallel."""
+
+    def encode(image: Image.Image) -> tuple[bytes, str, int, int]:
+        if lossless or max(image.size) > WEBP_MAX_SIDE:
+            return _normalize(_encode(image, format="PNG", compress_level=3), lossless_pages)
+        return _encode(image, **SLICE_WEBP), "image/webp", image.width, image.height
+
+    with ThreadPoolExecutor(min(8, max(1, len(slices)))) as pool:
+        return list(pool.map(encode, slices))
 
 
 def _encode(image: Image.Image, **options) -> bytes:

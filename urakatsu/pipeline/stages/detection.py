@@ -42,7 +42,7 @@ from PIL import Image
 
 from urakatsu.core.errors import ProcessingError
 from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
-from urakatsu.pipeline.scope import Bounds
+from urakatsu.pipeline.scope import Bounds, geometry_extents
 from urakatsu.scene import At, AssetInput, AssetMetadata, Edit, Patch, RemovePolicy, Snapshot
 from urakatsu.scene import components as c
 
@@ -94,9 +94,19 @@ class DetectionStage(StageProcessor):
     model = MODEL_NAME
 
     def skip(self, input: StageInput, provider=None) -> bool:
-        # Processor::skip: a page that already has a text region is not re-detected.
+        # Processor::skip: a page that already has a text region is not re-detected, unless the run
+        # is forced (Redo, an Urakatsu addition).
+        return not input.force and self.done(input)
+
+    def done(self, input: StageInput) -> bool:
+        # Urakatsu counts only regions that still have their text: once the user deletes every text
+        # block, the page is detected again (a page that keeps some keeps its deletions).
         for entity in input.scene.descendants(input.page):
-            if input.contains_entity(entity) and _region_kind_of(input.scene, entity) == c.RegionKinds.TEXT:
+            if (
+                input.contains_entity(entity)
+                and _region_kind_of(input.scene, entity) == c.RegionKinds.TEXT
+                and input.scene.relations_to(entity, c.Relations.RECOGNIZED_FROM)
+            ):
                 return True
         return False
 
@@ -124,27 +134,52 @@ def build_patch(input: StageInput, image: Image.Image, output: LayoutDetections,
     page = input.page
     edit = input.scene.edit_as(gen)
     edit.observe_subtree(page)
-    remove_previous_regions(input, edit, gen)
-    write_page(input, edit, page, image, output, gen)
+    kept = remove_previous_regions(input, edit, gen)
+    write_page(input, edit, page, image, output, gen, kept)
     return finish(edit)
 
 
-def remove_previous_regions(input: StageInput, edit: Edit, gen: c.Generation) -> None:
-    """``remove_previous_regions``: drop regions this producer generated earlier on the page."""
-    remove = []
-    for entity in input.scene.descendants(input.page):
-        if not input.contains_entity(entity):
+def _owned(scene: Snapshot, entity: str, gen: c.Generation) -> bool:
+    origin = scene.component(entity, c.EntityOrigin)
+    return origin is not None and isinstance(origin.origin, c.GeneratedOrigin) and origin.origin.generation.producer == gen.producer
+
+
+def remove_previous_regions(input: StageInput, edit: Edit, gen: c.Generation) -> list[tuple[float, float, float, float]]:
+    """``remove_previous_regions``: drop regions this producer generated earlier on the page.
+
+    Urakatsu: the text blocks detection made go with them (a forced run detects a page that has
+    text), except a block the user edited (its text, translation, style or frame): it stays with
+    its region, whose extents are returned so a new detection over it is not written twice.
+    """
+    scene = input.scene
+    kept_regions: set[str] = set()
+    removed_contents: set[str] = set()
+    for layer in scene.text_layers(input.page):
+        presents = scene.relation_from(layer, c.Relations.PRESENTS)
+        content = presents.target if presents is not None else None
+        if not input.contains_entity(layer) or content is None or content in removed_contents or not _owned(scene, content, gen):
             continue
-        origin = input.scene.component(entity, c.EntityOrigin)
-        owned = (
-            origin is not None
-            and isinstance(origin.origin, c.GeneratedOrigin)
-            and origin.origin.generation.producer == gen.producer
-        )
-        if owned and input.scene.component(entity, c.Region) is not None:
+        layers = [relation.source for relation in scene.relations_to(content, c.Relations.PRESENTS)]
+        if scene.user_authored(content) or any(scene.user_authored(each) for each in layers):
+            kept_regions.update(relation.target for relation in scene.relations_from(content, c.Relations.RECOGNIZED_FROM))
+            continue
+        for each in layers:
+            edit.remove_entity(each, RemovePolicy.CASCADE)
+        edit.remove_entity(content, RemovePolicy.CASCADE)
+        removed_contents.add(content)
+    remove = []
+    for entity in scene.descendants(input.page):
+        if input.contains_entity(entity) and entity not in kept_regions and _owned(scene, entity, gen) and scene.component(entity, c.Region) is not None:
             remove.append(entity)
     for entity in remove:
         edit.remove_entity(entity, RemovePolicy.CASCADE)
+    kept = []
+    for entity in kept_regions:
+        geometry = scene.component(entity, c.Geometry)
+        extents = geometry_extents(geometry) if geometry is not None else None
+        if extents is not None:
+            kept.append(extents)
+    return kept
 
 
 # ---- write_page ----------------------------------------------------------------------------------
@@ -179,12 +214,19 @@ def write_page(
     image: Image.Image,
     output: LayoutDetections,
     gen: c.Generation,
+    kept: list[tuple[float, float, float, float]] = (),
 ) -> None:
-    """``write_page``: region scope filter, NMS, layout order, regions, dialogue links, masks."""
+    """``write_page``: region scope filter, NMS, layout order, regions, dialogue links, masks.
+
+    ``kept`` are text regions the user's edited blocks keep (``remove_previous_regions``): text
+    found again over one is not written a second time."""
     detections = list(output.detections)
     if input.region is not None:
         detections = [d for d in detections if _intersects(d.bbox, input.region)]
+    if kept:
+        detections = [d for d in detections if d.label != "text" or not any(_same_text(d.bbox, box) for box in kept)]
     non_maximum_suppression(detections, NON_MAXIMUM_SUPPRESSION_THRESHOLD)
+    suppress_nested_text(detections)
     sort_by_layout(detections)
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
@@ -199,6 +241,16 @@ def write_page(
     write_masks(input, edit, page, detections, (output.image_width, output.image_height))
     if input.sound_effects != "off":
         write_sound_effect_mask(input, edit, page, detections, (output.image_width, output.image_height))
+
+
+# A new text detection is the same text as a kept region when this much of it lies inside it.
+KEPT_OVERLAP = 0.5
+
+
+def _same_text(bbox, box) -> bool:
+    """Whether a new detection is text a kept block already holds: it lies mostly in the kept
+    box, or the kept box (a line the user edited) lies in it (its paragraph)."""
+    return containment(box, bbox) >= np.float32(KEPT_OVERLAP) or containment(bbox, box) >= NESTED_TEXT_CONTAINMENT
 
 
 def _intersects(bbox, region: Bounds) -> bool:
@@ -1402,6 +1454,41 @@ def non_maximum_suppression(detections: list, threshold: np.float32) -> None:
         if not suppressed:
             kept.append(candidate)
     detections[:] = kept
+
+
+# A text box this much inside a larger one is part of it (a line of its paragraph; a line's box
+# can stick out of a paragraph box the detector drew narrower than the text).
+NESTED_TEXT_CONTAINMENT = np.float32(0.75)
+
+
+def suppress_nested_text(detections: list) -> None:
+    """Not in Koharu: the layout model can find a paragraph and also its lines, and IoU
+    suppression keeps all of them (a line is a small part of its paragraph), so the text would be
+    read, translated and typeset twice. Lines inside a paragraph box are dropped. When the boxes
+    inside a large one sit in different bubbles, the large box is the mistake and is dropped."""
+    texts = [d for d in detections if d.label == "text"]
+    bubbles = [d for d in detections if d.label == "bubble"]
+
+    def home(text) -> Optional[int]:
+        held = [i for i, bubble in enumerate(bubbles) if containment(bubble.bbox, text.bbox) >= np.float32(0.5)]
+        return min(held, key=lambda i: _area32(bubbles[i].bbox)) if held else None
+
+    dropped: set[int] = set()
+    for outer in sorted(texts, key=lambda d: -_area32(d.bbox)):
+        if id(outer) in dropped:
+            continue
+        inner = [
+            text
+            for text in texts
+            if text is not outer and id(text) not in dropped and _area32(text.bbox) < _area32(outer.bbox) and containment(outer.bbox, text.bbox) >= NESTED_TEXT_CONTAINMENT
+        ]
+        if not inner:
+            continue
+        if len({home(text) for text in inner}) > 1:
+            dropped.add(id(outer))
+        else:
+            dropped.update(id(text) for text in inner)
+    detections[:] = [d for d in detections if id(d) not in dropped]
 
 
 def sort_by_layout(detections: list) -> None:

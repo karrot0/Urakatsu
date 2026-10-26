@@ -515,3 +515,41 @@ def test_settings_accept_the_remote_runtime(workspace):
     config.runtimes = {"fake-detector": "warp-drive"}
     with pytest.raises(ValueError, match="cannot run on 'warp-drive'"):
         workspace.set_config(config)
+
+
+def _detect_text(workspace, project, page, boxes):
+    """Text regions written as the real detection stage writes them: region, text and layer."""
+    import numpy as np
+
+    from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
+    from urakatsu.pipeline.images import ImageCache
+    from urakatsu.pipeline.stages import detection as det
+    from urakatsu.pipeline.stages.base import StageInput
+
+    session = workspace.session(project)
+    stage_input = StageInput(session.snapshot(), page, None, None, ImageCache())
+    image = stage_input.images.get(stage_input.scene, page, "source")
+    found = [LayoutDetection(0, "text", 0.9, box, 0, LayoutMask(0, 0, 1, 1, np.zeros((1, 1), dtype=np.uint8))) for box in boxes]
+    session.commit(det.build_patch(stage_input, image, LayoutDetections(image.width, image.height, found), det.generation(det.PRODUCER, det.MODEL_ID)))
+
+
+def test_deleting_every_text_block_lets_detection_run_again(workspace):
+    from urakatsu.pipeline.images import ImageCache
+    from urakatsu.pipeline.stages.base import StageInput
+    from urakatsu.pipeline.stages.detection import DetectionStage
+
+    project = workspace.create_project("delete").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    _detect_text(workspace, project, page, [(10.0, 10.0, 120.0, 40.0), (10.0, 150.0, 120.0, 180.0)])
+    first, second = [block.layer_id for block in workspace.page(project, page).blocks]
+
+    def detected() -> bool:
+        return DetectionStage().skip(StageInput(workspace.session(project).snapshot(), page, None, None, ImageCache()), None)
+
+    assert detected()
+    # A deleted false positive stays deleted: the page keeps its other text, so it is not detected again.
+    workspace.delete_text_block(project, page, first)
+    assert detected() and len(workspace.page(project, page).regions) == 1
+    # With every block deleted, its region goes too and the next run detects the page again.
+    workspace.delete_layer(project, page, second)
+    assert not detected() and not workspace.page(project, page).regions

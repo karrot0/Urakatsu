@@ -19,6 +19,7 @@ from urakatsu.pipeline.stages.inpainting import (
     TILE_SIZE,
     crop_tile_mask,
     fill_region,
+    flat_fill_regions,
 )
 from urakatsu.providers.inpainting.aot_inpainting import AotInpaintingProvider
 from urakatsu.providers.inpainting.common import symmetric_index
@@ -27,7 +28,7 @@ from urakatsu.providers.inpainting.lama import LamaProvider, boxes_from_mask, cr
 from urakatsu.providers.inpainting.rorem_mixed import DEFAULT_NEGATIVE_PROMPT, DEFAULT_PROMPT, RoremMixedProvider, composite, resize_mask
 from urakatsu.runtimes.manager import RuntimeManager
 from urakatsu.runtimes.store import ModelStore
-from urakatsu.scene import AssetInput, AssetMetadata, Page, RasterLayer, RasterLayerKind, Session, user
+from urakatsu.scene import At, AssetInput, AssetMetadata, Geometry, Page, RasterLayer, RasterLayerKind, RegionKinds, Relations, Session, user
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings
 
 
@@ -190,6 +191,24 @@ def test_oversized_component_tiles_mask_their_continuation_context():
         owned = int((labels[ct:cb, cl:cr] == label).sum())
         masked = int((crop_tile_mask(mask, tile) >= 127).sum())
         assert masked > owned
+
+
+def test_split_tiles_where_the_component_is_a_thin_band_composite_in_their_crop():
+    # An L: in the cell right of the corner the component is only the bar's 20 rows, so that
+    # tile's crop (the band with its context) is shorter than the cell. Compositing must use the
+    # band, not the whole cell (it raised "boolean index did not match" with comic-text-bubble-detector).
+    mask = np.zeros((1000, 1000), dtype=np.uint8)
+    mask[0:20, 0:1000] = 255
+    mask[0:1000, 0:20] = 255
+    image = Image.new("RGB", (1000, 1000), (20, 40, 60))
+
+    def inference(crop, crop_mask):
+        return Image.new("RGB", crop.size, (1, 2, 3))
+
+    output = np.asarray(inpaint_tiled(image, mask, mask, [], inference))
+
+    assert (output[mask >= 127] == (1, 2, 3)).all()
+    assert (output[mask < 127] == (20, 40, 60)).all()
 
 
 def test_textured_mask_regions_are_inferred_as_bounded_tiles():
@@ -475,3 +494,72 @@ def test_fill_model_takes_the_inpainting_slot_only_while_used():
     assert pipeline.provider(Stage.INPAINTING).id == "lama"
     config.fill.model = ""
     assert config.fill_provider() == "lama"
+
+
+def _free_text_session(tmp_path, background, inside_bubble=False):
+    """A page of one colour with a text region (no bubble unless asked) over a masked patch."""
+    session = Session(tmp_path)
+    edit = session.snapshot().edit()
+    page = edit.add_page(Page(label="page", width=96.0, height=96.0))
+    image = Image.fromarray(background)
+    edit.set_asset(page, "source", AssetInput(data=encode_png(image), media_type="image/png", metadata=AssetMetadata(width=96, height=96)))
+    text = edit.add_analysis_region(page, At.END, RegionKinds.TEXT, Geometry.rectangle(30, 40, 36, 16))
+    if inside_bubble:
+        bubble = edit.add_analysis_region(page, At.END, RegionKinds.BUBBLE, Geometry.rectangle(0, 0, 96, 96))
+        edit.relate(Relations.INSIDE, text, bubble)
+    snapshot = session.commit(edit.finish())
+    return snapshot, page
+
+
+def test_free_text_on_a_flat_background_is_filled_without_inference(tmp_path):
+    # White lettering on a black caption box: the model would paint a scene into it.
+    background = np.zeros((96, 96, 3), dtype=np.uint8)
+    background[42:54, 32:64] = 255
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    mask[42:54, 32:64] = 255
+    snapshot, page = _free_text_session(tmp_path, background)
+    regions = flat_fill_regions(snapshot, page, 96, 96)
+    calls = []
+
+    output = np.asarray(inpaint_tiled(Image.fromarray(background), mask, mask, regions, noop_inference(calls)))
+
+    assert calls == [] and tuple(output[48, 48]) == (0, 0, 0)
+
+
+def test_free_text_over_artwork_still_goes_to_the_model(tmp_path):
+    background = np.random.default_rng(1).integers(0, 255, (96, 96, 3), dtype=np.uint8)
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    mask[42:54, 32:64] = 255
+    snapshot, page = _free_text_session(tmp_path, background)
+    calls = []
+
+    inpaint_tiled(Image.fromarray(background), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+
+    assert len(calls) == 1
+
+
+def test_text_in_a_bubble_is_filled_as_the_bubble_not_on_its_own(tmp_path):
+    background = np.zeros((96, 96, 3), dtype=np.uint8)
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    assert len(flat_fill_regions(snapshot, page, 96, 96)) == 1
+
+
+def test_a_forced_run_paints_a_generated_cleanup_again_but_not_the_users(tmp_path):
+    from urakatsu.pipeline.stages.base import generation
+
+    stage = InpaintingStage()
+    (tmp_path / "user").mkdir()
+    session, page = make_page_session(tmp_path / "user", cleanup=True)  # the user's remove-tool cleanup
+    snapshot = session.snapshot()
+    assert stage.done(make_input(snapshot, page))
+    assert stage.skip(StageInput(snapshot, page, None, None, ImageCache(), force=True), None)
+
+    (tmp_path / "generated").mkdir()
+    session, page = make_page_session(tmp_path / "generated", cleanup=False)
+    edit = session.snapshot().edit_as(generation("dev.koharu.pipeline.inpainting", "test"))
+    entity = edit.add_entity(page)
+    edit.set(entity, RasterLayer(origin=user(), name="Cleanup", kind=RasterLayerKind.CLEANUP))
+    edit.set_asset(entity, "source", AssetInput(data=encode_png(Image.new("RGBA", (8, 8))), media_type="image/png", metadata=AssetMetadata(width=8, height=8)))
+    snapshot = session.commit(edit.finish())
+    assert stage.skip(make_input(snapshot, page), None)
+    assert not stage.skip(StageInput(snapshot, page, None, None, ImageCache(), force=True), None)

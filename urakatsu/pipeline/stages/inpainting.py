@@ -7,6 +7,11 @@ raster layer. The provider is any ``InpaintingProvider``: LaMa and AOT run on th
 torch runtime, FLUX.2 Klein and RORem on the diffusion runtime; all four go through
 the same tiling here.
 
+Urakatsu also flat-fills text that is in no bubble when the background around it is uniform
+(captions: white lettering on a black box, as webtoons and manhua use). Koharu sends those to
+the model, and a generative model with a crop of almost nothing but lettering on one colour
+paints a scene into it.
+
 Generative fill is a user mask with ``generative`` set, run by the fill
 model. A model that follows prompts gets the whole selection as one crop with its
 surroundings (``fill_region``), so a sound effect is painted as one piece rather than in
@@ -44,6 +49,7 @@ from urakatsu.scene import (
     RasterLayerKind,
     Region,
     RegionKinds,
+    Relations,
     Snapshot,
     user,
 )
@@ -61,6 +67,8 @@ TILE_SIZE = 512
 TILE_CONTEXT = 128
 UNIFORM_BACKGROUND_MIN_PIXELS = 16
 FLAT_FILL_EDGE_MARGIN = 3.0
+# Pixels around a free text region's box sampled for its background, beyond the edge margin.
+TEXT_FLAT_FILL_PAD = 8
 # Context around a generative fill selection, as a share of its longer side (at least TILE_CONTEXT).
 FILL_CONTEXT = 0.5
 # The same for a model that edits the whole crop it sees from an instruction (Qwen Image, FLUX.2
@@ -100,11 +108,20 @@ class InpaintingStage(StageProcessor):
     def skip(self, input: StageInput, provider: Provider) -> bool:
         if input.inpainting_mask is not None:
             return False
+        cleanup = self._cleanup(input)
+        # A forced run (Redo) paints the page again, but never over a cleanup the user painted.
+        return cleanup is not None and (not input.force or input.scene.user_authored(cleanup))
+
+    def done(self, input: StageInput) -> bool:
+        return input.inpainting_mask is None and self._cleanup(input) is not None
+
+    @staticmethod
+    def _cleanup(input: StageInput) -> Optional[str]:
         for entity in input.scene.children(input.page):
             layer = input.scene.component(entity, RasterLayer)
             if layer is not None and layer.kind is RasterLayerKind.CLEANUP and input.scene.asset(entity, SOURCE) is not None:
-                return True
-        return False
+                return entity
+        return None
 
     async def process(self, input: StageInput, provider: Provider) -> Patch:
         prepared = prepare(input)
@@ -206,16 +223,24 @@ def _clear_outside(mask: np.ndarray, text_mask: np.ndarray, bounds: Bounds) -> N
 
 
 def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> list[FlatFillRegion]:
+    """Bubbles, then text in no bubble (its box widened by TEXT_FLAT_FILL_PAD): each is filled
+    flat when the unmasked pixels in it share one colour (``fill_uniform_regions``)."""
     regions: list[FlatFillRegion] = []
+    free_text: list[np.ndarray] = []
     for entity in scene.descendants(page):
         region = scene.component(entity, Region)
-        if region is None or region.kind != RegionKinds.BUBBLE:
+        if region is None or region.kind not in (RegionKinds.BUBBLE, RegionKinds.TEXT):
             continue
         geometry = scene.component(entity, Geometry)
         if geometry is None:
             continue
         polygon = np.array([(point.x, point.y) for point in geometry.points], dtype=np.float32).reshape(-1, 2)
         if len(polygon) < 3:
+            continue
+        if region.kind == RegionKinds.TEXT:
+            if not scene.relations_from(entity, Relations.INSIDE):
+                (left, top), (right, bottom) = polygon.min(axis=0) - TEXT_FLAT_FILL_PAD, polygon.max(axis=0) + TEXT_FLAT_FILL_PAD
+                free_text.append(np.array([(left, top), (right, top), (right, bottom), (left, bottom)], dtype=np.float32))
             continue
         left, top = polygon.min(axis=0)
         right, bottom = polygon.max(axis=0)
@@ -224,6 +249,15 @@ def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> li
             int(np.clip(np.floor(top), 0, height)),
             int(np.clip(np.ceil(right), 0, width)),
             int(np.clip(np.ceil(bottom), 0, height)),
+        )
+        if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
+    for polygon in free_text:
+        bounds = (
+            int(np.clip(np.floor(polygon[0, 0]), 0, width)),
+            int(np.clip(np.floor(polygon[0, 1]), 0, height)),
+            int(np.clip(np.ceil(polygon[2, 0]), 0, width)),
+            int(np.clip(np.ceil(polygon[2, 1]), 0, height)),
         )
         if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
             regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
@@ -424,7 +458,10 @@ def inpaint_tiles(mask: np.ndarray) -> tuple[np.ndarray, list[_Tile]]:
                 core = (core_left, core_top, core_right, core_bottom)
                 owned = component_bounds_in(labels, label, core)
                 if owned is not None:
-                    split.append(_Tile([label], core, expand_bounds(owned, width, height)))
+                    # The core is the component's part of the cell, not the whole cell: the crop is
+                    # built around that part, and a cell the component only crosses in a thin band
+                    # would otherwise be taller or wider than its crop when composited.
+                    split.append(_Tile([label], owned, expand_bounds(owned, width, height)))
                 core_left = core_right
             core_top = core_bottom
 

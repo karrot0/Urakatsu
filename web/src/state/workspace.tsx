@@ -1,5 +1,6 @@
 // Workspace state: one React context owning projects, selection, jobs, and config.
 
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { client, describeError, forgetAssets } from "../api/client";
@@ -15,6 +16,7 @@ import type {
   Page,
   ProgressEvent,
   Project,
+  ProjectFormatSchema,
   ProjectSummary,
   RasterLayer,
   TextBlock,
@@ -22,6 +24,8 @@ import type {
   Typography,
 } from "../gen/urakatsu/v1/urakatsu_pb";
 
+/** A project's format (manga or webtoon) and webtoon stitch settings, as sent to the server. */
+export type ProjectFormatInit = MessageInitShape<typeof ProjectFormatSchema>;
 export type Theme = "light" | "dark" | "system";
 export type ViewMode = "source" | "cleanup" | "render";
 // Canvas tools, in tool-belt order, plus generative fill (Urakatsu's own).
@@ -119,6 +123,10 @@ export interface RunOptions {
   mask?: Uint8Array;
   /** Generative fill of `mask` by the fill model; empty removes what is selected. */
   fillPrompt?: string;
+  /** These pages instead of the scope's (Redo from the Activity tab). */
+  pageIds?: string[];
+  /** Redo: stages run on pages that already have their results; what the user edited is kept. */
+  force?: boolean;
 }
 
 export interface BlockPatch {
@@ -200,6 +208,9 @@ interface Actions {
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
   deleteChapter(chapterId: string): Promise<void>;
+  /** Webtoon: joins the chapter's pages and cuts them again where no text is cut. */
+  restitchChapter(chapterId: string): Promise<void>;
+  setProjectFormat(format: ProjectFormatInit): Promise<void>;
   arrange(layout: ChapterLayout[]): Promise<void>;
   selectPage(pageId: string, mode?: SelectMode): void;
   selectBlock(blockId?: string): void;
@@ -489,6 +500,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!project) return;
       const list = Array.from(files).filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(f.name));
       list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      // Images dropped into an empty chapter of a webtoon project are one strip: restitch them.
+      const target = chapterId ? project.chapters.find((c) => c.id === chapterId) : project.chapters[project.chapters.length - 1];
+      const stitchAfter = project.format?.kind === "webtoon" && list.length > 1 && (!target || target.pageIds.length === 0);
       try {
         let first: string | undefined;
         for (const file of list) {
@@ -499,6 +513,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             chapterId: chapterId ?? "",
           });
           first ??= page.id;
+        }
+        if (stitchAfter && first) {
+          const fresh = await client.getProject({ projectId: project.id });
+          const chapter = fresh.chapters.find((c) => c.pageIds.includes(first!));
+          if (chapter) {
+            const next = await client.restitchChapter({ projectId: project.id, chapterId: chapter.id });
+            for (const pageId of chapter.pageIds) forgetAssets(project.id, pageId);
+            setState((s) => ({ ...s, project: next, pageId: next.chapters.find((c) => c.id === chapter.id)?.pageIds[0] ?? s.pageId }));
+            return;
+          }
         }
         await reloadProject(project.id);
         setState((s) => ({ ...s, pageId: s.pageId ?? first }));
@@ -567,6 +591,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.project, restructure],
   );
 
+  const restitchChapter = useCallback(
+    async (chapterId: string) => {
+      const project = state.project;
+      const old = project?.chapters.find((c) => c.id === chapterId)?.pageIds ?? [];
+      const viewing = !!state.pageId && old.includes(state.pageId);
+      await restructure((projectId) => client.restitchChapter({ projectId, chapterId }));
+      if (project) for (const pageId of old) forgetAssets(project.id, pageId);
+      // The page being viewed is gone: show the chapter's first new page.
+      if (viewing) setState((s) => ({ ...s, pageId: s.project?.chapters.find((c) => c.id === chapterId)?.pageIds[0] ?? s.pageId, blockId: undefined }));
+    },
+    [state.project, state.pageId, restructure],
+  );
+
+  const setProjectFormat = useCallback(
+    (format: ProjectFormatInit) => restructure((projectId) => client.setProjectFormat({ projectId, format })),
+    [restructure],
+  );
+
   const arrange = useCallback(
     async (layout: ChapterLayout[]) => {
       // Optimistic: the sidebar already shows the new order, so apply it locally first.
@@ -591,7 +633,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!project || jobRef.current?.status === "running") return;
       const chapterPages = project.chapters.find((c) => c.pageIds.includes(state.pageId ?? ""))?.pageIds ?? [];
       const pageIds =
-        options.scope === "selection" ? selectedPages(state) : options.scope === "page" && state.pageId ? [state.pageId] : options.scope === "chapter" ? chapterPages : [];
+        options.pageIds ??
+        (options.scope === "selection" ? selectedPages(state) : options.scope === "page" && state.pageId ? [state.pageId] : options.scope === "chapter" ? chapterPages : []);
       if ((options.scope === "chapter" || options.scope === "selection") && pageIds.length === 0) return;
       const job: JobState = { id: "", status: "running", events: [], completed: 0, total: 0 };
       jobRef.current = job;
@@ -603,6 +646,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           operation: { kind: options.kind, stage: options.stage ?? "", stages: options.stages ?? [] },
           inpaintingMask: options.mask,
           fillPrompt: options.fillPrompt,
+          force: options.force ?? false,
         });
         for await (const event of stream) {
           job.id = event.jobId;
@@ -887,6 +931,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createChapter,
       renameChapter,
       deleteChapter,
+      restitchChapter,
+      setProjectFormat,
       arrange,
       selectPage: (pageId, mode = "replace") => setState((s) => ({ ...s, ...nextSelection(s, pageId, mode), blockId: undefined, rasterId: undefined })),
       selectBlock: (blockId) => setState((s) => ({ ...s, blockId, rasterId: blockId ? undefined : s.rasterId })),
@@ -968,6 +1014,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createChapter,
       renameChapter,
       deleteChapter,
+      restitchChapter,
+      setProjectFormat,
       arrange,
       run,
       stop,
