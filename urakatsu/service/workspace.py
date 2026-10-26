@@ -7,8 +7,10 @@ transport-specific state so both can run in one service.
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import logging
+import math
 import threading
 import time
 import zipfile
@@ -56,6 +58,8 @@ from .views import PageView, page_view, parse_rgba
 log = logging.getLogger(__name__)
 
 RENDER_CACHE = 16
+# Frames are much bigger than their PNGs: keep the last few, for lifting blocks off a page just rendered.
+FRAME_CACHE = 2
 
 
 class ChapterView(BaseModel):
@@ -133,6 +137,7 @@ class Workspace:
         self._renders: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         # The same renders' text layout per block (font size, line starts), for the on-canvas text editor.
         self._text_layouts: dict[tuple[str, str, int], dict[str, dict[str, Any]]] = {}
+        self._frames: OrderedDict[tuple[str, str, int], Any] = OrderedDict()
         self._thumbnails: dict[str, bytes] = {}
         self._render_lock = threading.Lock()
         # Assets are served from worker threads; the renderer draws one page at a time.
@@ -374,6 +379,7 @@ class Workspace:
         with self._render_lock:
             self._renders[key] = data
             self._text_layouts[key] = layouts
+            self._keep_frame(key, frame)
             while len(self._renders) > RENDER_CACHE:
                 evicted, _ = self._renders.popitem(last=False)
                 self._text_layouts.pop(evicted, None)
@@ -390,6 +396,40 @@ class Workspace:
         self.render(project_id, page_id, snapshot)
         with self._render_lock:
             return self._text_layouts.get(key, {})
+
+    def lift(self, project_id: str, page_id: str, layer_id: str) -> dict[str, Any]:
+        """A text block lifted off its page as rendered, so the canvas can move it without a render per
+        move: the block's own pixels and the page under them (the render without the block), both
+        cropped to the block, as PNG data URLs, and where on the page the crop is."""
+        snapshot = self.session(project_id).snapshot()
+        key = (project_id, page_id, snapshot.revision)
+        self.render(project_id, page_id, snapshot)
+        with self._render_lock:
+            frame = self._frames.get(key)
+        if frame is None:
+            with self._draw_lock:
+                frame = self.renderer().render(snapshot, page_id)
+            with self._render_lock:
+                self._keep_frame(key, frame)
+        layer = frame.layer(layer_id)
+        if layer is None or not layer.is_text():
+            raise KeyError(f"text block {layer_id} is not drawn on page {page_id}")
+        bounds = layer.bounds
+        left, top = max(math.floor(bounds.x), 0), max(math.floor(bounds.y), 0)
+        right, bottom = min(math.ceil(bounds.x + bounds.width), frame.width), min(math.ceil(bounds.y + bounds.height), frame.height)
+        if right <= left or bottom <= top:
+            raise KeyError(f"text block {layer_id} is not drawn on page {page_id}")
+        box = (left, top, right, bottom)
+        text = replace(frame, layers=[layer]).composite(box)
+        under = replace(frame, layers=[other for other in frame.layers if other is not layer]).composite(box)
+        return {"x": left, "y": top, "width": right - left, "height": bottom - top, "text": _data_url(text), "under": _data_url(under)}
+
+    def _keep_frame(self, key: tuple[str, str, int], frame) -> None:
+        """Keeps a rendered frame for lifting its blocks (hold ``_render_lock``)."""
+        self._frames[key] = frame
+        self._frames.move_to_end(key)
+        while len(self._frames) > FRAME_CACHE:
+            self._frames.popitem(last=False)
 
     def asset(self, project_id: str, page_id: str, kind: str) -> Optional[tuple[bytes, str, int, int]]:
         snapshot = self.session(project_id).snapshot()
@@ -825,6 +865,10 @@ def _png(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", compress_level=3)
     return buffer.getvalue()
+
+
+def _data_url(image: Image.Image) -> str:
+    return "data:image/png;base64," + base64.b64encode(_png(image)).decode("ascii")
 
 
 def _gradient(data: Optional[dict[str, Any]]) -> Optional[c.Gradient]:

@@ -243,21 +243,25 @@ class Frame:
                 return layer
         return None
 
-    def composite(self) -> PILImage.Image:
-        """Flattens the page: source, then each visible layer in order (source-over)."""
-        canvas = PILImage.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+    def composite(self, box: Optional[tuple[int, int, int, int]] = None) -> PILImage.Image:
+        """Flattens the page: source, then each visible layer in order (source-over). ``box``
+        (left, top, right, bottom in page pixels) flattens only that part, skipping layers outside it."""
+        x0, y0, x1, y1 = box or (0, 0, self.width, self.height)
+        canvas = PILImage.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
         for layer in self.layers:
             if not layer.presentation.visible or layer.presentation.opacity <= 0.0:
+                continue
+            left, top, right, bottom = _rounded_out(layer.bounds)
+            if right <= x0 or left >= x1 or bottom <= y0 or top >= y1:
                 continue
             image = layer.image()
             if layer.presentation.opacity < 1.0:
                 alpha = np.asarray(image.getchannel("A"), dtype=np.float32) * layer.presentation.opacity
                 image = image.copy()
                 image.putalpha(PILImage.fromarray(np.clip(alpha, 0, 255).astype(np.uint8), mode="L"))
-            left, top, right, bottom = _rounded_out(layer.bounds)
             # Layer images are cropped to their own bounds, so paste at the same origin.
             overlay = PILImage.new("RGBA", canvas.size, (0, 0, 0, 0))
-            overlay.paste(image, (left, top))
+            overlay.paste(image, (left - x0, top - y0))
             canvas = PILImage.alpha_composite(canvas, overlay)
         return canvas
 

@@ -1,5 +1,6 @@
 """Service transports (native gRPC, gRPC-web bridge, JSON API) over one workspace, with fakes."""
 
+import base64
 import io
 import json
 
@@ -480,6 +481,28 @@ def test_text_layout_reports_the_rendered_size_and_line_starts(workspace):
     assert layout["font_size"] > 5 and len(starts) >= 3 and starts[0] == 0
     assert starts == sorted(starts) and starts[-1] < len(text)  # breaks may fall inside a hyphenated word
     assert workspace.text_layout(project, page) is workspace.text_layout(project, page)  # from the render's cache
+
+
+def test_a_lifted_block_over_the_page_under_it_is_the_render(workspace):
+    workspace._renderer = None  # the real renderer, not the fixture's stand-in
+    project = workspace.create_project("lift").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 20, "y": 20, "width": 120, "height": 80})
+    [block] = workspace.page(project, page).blocks
+    workspace.update_text_block(project, page, block.layer_id, {"translation": "Lift me"})
+    lift = workspace.lift(project, page, block.layer_id)
+
+    def image(url):
+        return Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).convert("RGBA")
+
+    text, under = image(lift["text"]), image(lift["under"])
+    assert text.size == under.size == (lift["width"], lift["height"])
+    assert text.getchannel("A").getextrema()[1] > 0  # the text is on its own
+    box = (lift["x"], lift["y"], lift["x"] + lift["width"], lift["y"] + lift["height"])
+    render = Image.open(io.BytesIO(workspace.render(project, page))).convert("RGBA").crop(box)
+    assert Image.alpha_composite(under, text).tobytes() == render.tobytes()
+    with pytest.raises(KeyError):
+        workspace.lift(project, page, "no-such-block")
 
 
 def test_settings_accept_the_remote_runtime(workspace):
