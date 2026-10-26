@@ -57,6 +57,7 @@ CUDA13_MIN_DRIVER = 580  # NVIDIA driver branch that supports CUDA 13
 class Variant:
     id: str
     assets: tuple[str, ...]  # one regex per required asset
+    repository: str = ""
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,9 @@ class Package:
 
     def variant(self, variant_id: str) -> Variant:
         return next(v for v in self.variants if v.id == variant_id)
+
+    def repository_of(self, variant_id: str) -> str:
+        return self.variant(variant_id).repository or self.repository
 
 
 LLAMA_CPP = Package(
@@ -110,6 +114,11 @@ STABLE_DIFFUSION_CPP = Package(
         Variant("win-rocm", (r"sd-.+-bin-win-rocm-[\d.]+-x64\.zip",)),
         Variant("win-vulkan", (r"sd-.+-bin-win-vulkan-x64\.zip",)),
         Variant("win-cpu", (r"sd-.+-bin-win-cpu-x64\.zip",)),
+        Variant(
+            "linux-cuda-13",
+            (r"sd-.+-bin-linux-x64-cuda-13\.tar\.gz", r"cudart-sd-.+-bin-linux-x64-cuda-13\.tar\.gz"),
+            repository="karrot0/urakatsu-diffusion",
+        ),
         Variant("linux-rocm", (r"sd-.+-bin-Linux-.+-x86_64-rocm-[\d.]+\.zip",)),
         Variant("linux-vulkan", (r"sd-.+-bin-Linux-.+-x86_64-vulkan\.zip",)),
         Variant("linux-cpu", (r"sd-.+-bin-Linux-Ubuntu-[\d.]+-x86_64\.zip",)),
@@ -320,24 +329,52 @@ class PackageManager:
 
     # -- releases --------------------------------------------------------------------------------
 
+    def _list_releases(self, client: httpx.Client, repository: str, limit: int = RELEASES_PER_PAGE) -> list[dict]:
+        """``repository``'s published releases, newest first."""
+        response = client.get(f"https://api.github.com/repos/{repository}/releases", params={"per_page": limit})
+        response.raise_for_status()
+        releases = [r for r in response.json() if not r.get("draft")]
+        releases.sort(key=lambda r: r.get("published_at") or "", reverse=True)
+        return releases
+
+    def _repositories(self, package: Package, variants: list[str]) -> list[str]:
+        """The project's repository, then any other repository a wanted build is released from."""
+        known = [v for v in variants if any(variant.id == v for variant in package.variants)]
+        return list(dict.fromkeys([package.repository, *(package.repository_of(v) for v in known)]))
+
     def releases(self, package: Package, variants: list[str], limit: int = RELEASES_PER_PAGE) -> list[dict]:
         """Recent releases, newest first, each with the best build this machine could install from it."""
+        listed: dict[str, list[dict]] = {}
         with self._client() as client:
-            response = client.get(f"https://api.github.com/repos/{package.repository}/releases", params={"per_page": limit})
-            response.raise_for_status()
-            releases = [r for r in response.json() if not r.get("draft")]
-        releases.sort(key=lambda r: r.get("published_at") or "", reverse=True)
+            for repository in self._repositories(package, variants):
+                try:
+                    listed[repository] = self._list_releases(client, repository, limit)
+                except httpx.HTTPError as error:
+                    if repository == package.repository:
+                        raise
+                    log.warning("cannot list %s releases: %s", repository, error)
+        by_tag = {repository: {r["tag_name"]: r for r in releases} for repository, releases in listed.items()}
         result = []
-        for release in releases:
-            best = _best_build(package, release, variants)
+        for release in listed[package.repository]:
+            best = _best_for_tag(package, release["tag_name"], variants, lambda repository, tag: by_tag.get(repository, {}).get(tag))
             result.append({"tag": release["tag_name"], "published": release.get("published_at") or "", "variant": best.variant if best else None})
         return result
 
     def release(self, package: Package, tag: str, variants: list[str]) -> Release:
+        fetched: dict[str, Optional[dict]] = {}
         with self._client() as client:
-            response = client.get(f"https://api.github.com/repos/{package.repository}/releases/tags/{tag}")
-            response.raise_for_status()
-        best = _best_build(package, response.json(), variants)
+
+            def lookup(repository: str, wanted: str) -> Optional[dict]:
+                if repository not in fetched:
+                    response = client.get(f"https://api.github.com/repos/{repository}/releases/tags/{wanted}")
+                    if response.status_code == 404 and repository != package.repository:
+                        fetched[repository] = None  # not built there (yet): the project's own builds
+                    else:
+                        response.raise_for_status()
+                        fetched[repository] = response.json()
+                return fetched[repository]
+
+            best = _best_for_tag(package, tag, variants, lookup)
         if best is None:
             raise RuntimeError(f"{package.name} {tag} has no build for {', '.join(variants) or 'this platform'}")
         return best
@@ -353,16 +390,20 @@ class PackageManager:
 
     def latest(self, package: Package, variants: list[str]) -> Release:
         """The best variant this machine can run, from the newest release that ships all of its assets."""
+        listed: dict[str, list[dict]] = {}
         with self._client() as client:
-            response = client.get(f"https://api.github.com/repos/{package.repository}/releases", params={"per_page": RELEASES_PER_PAGE})
-            response.raise_for_status()
-            releases = [r for r in response.json() if not r.get("draft")]
-        releases.sort(key=lambda r: r.get("published_at") or "", reverse=True)
+            for repository in self._repositories(package, variants):
+                try:
+                    listed[repository] = self._list_releases(client, repository)
+                except httpx.HTTPError as error:
+                    if repository == package.repository:
+                        raise
+                    log.warning("cannot list %s releases: %s", repository, error)
         known = [v for v in variants if any(variant.id == v for variant in package.variants)]
         # Best build for the hardware first, then the newest release that has all of its files:
         # a release whose assets are still uploading must not downgrade a GPU machine to CPU.
         for variant_id in known:
-            for release in releases:
+            for release in listed.get(package.repository_of(variant_id), []):
                 best = _best_build(package, release, [variant_id])
                 if best is not None:
                     return best
@@ -480,6 +521,18 @@ class PackageManager:
         for path in installs:
             if path not in survivors:
                 shutil.rmtree(path, ignore_errors=True)
+
+
+def _best_for_tag(package: Package, tag: str, variants: list[str], lookup: Callable[[str, str], Optional[dict]]) -> Optional[Release]:
+    """The best build of release ``tag``, each variant looked up where it is released."""
+    for variant_id in variants:
+        if not any(v.id == variant_id for v in package.variants):
+            continue
+        release = lookup(package.repository_of(variant_id), tag)
+        best = _best_build(package, release, [variant_id]) if release else None
+        if best is not None:
+            return best
+    return None
 
 
 def _best_build(package: Package, release: dict, variants: list[str]) -> Optional[Release]:

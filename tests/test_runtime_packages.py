@@ -170,3 +170,93 @@ def test_a_cpu_build_on_a_gpu_machine_is_rechecked_at_once(tmp_path, monkeypatch
     assert manager.ensure(LLAMA_CPP, [Device.cpu()]).variant == "win-cpu"
     monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: ["win-cuda-13", "win-cpu"])
     assert manager.ensure(LLAMA_CPP, CUDA).variant == "win-cuda-13"  # not force, checked seconds ago
+
+
+def build_tar(files: dict[str, bytes]) -> bytes:
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tf:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def github_repos(repos: dict[str, list[dict]], blobs: dict[str, bytes]) -> httpx.MockTransport:
+    """GitHub with several repositories' releases: /repos/<owner>/<repo>/releases[/tags/<tag>]."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        parts = request.url.path.strip("/").split("/")
+        if parts[0] == "repos":
+            releases = repos.get(f"{parts[1]}/{parts[2]}")
+            if releases is None:
+                return httpx.Response(404)
+            if parts[3:] == ["releases"]:
+                return httpx.Response(200, json=releases)
+            tag = parts[5]
+            found = next((r for r in releases if r["tag_name"] == tag), None)
+            return httpx.Response(200, json=found) if found else httpx.Response(404)
+        name = parts[-1]
+        return httpx.Response(200, content=blobs[name]) if name in blobs else httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+def sd_repos(build_repo: bool = True):
+    """Upstream's releases (Vulkan only on Linux) and the CUDA build repository's, which lags a release."""
+    server = "sd-server.exe" if os.name == "nt" else "sd-server"
+    blobs: dict[str, bytes] = {}
+
+    def make(tag: str, published: str, names: list[str]) -> dict:
+        assets = {}
+        for name in names:
+            blobs[name] = build_tar({server: b"binary"}) if name.startswith("sd-") else build_tar({"libcublas.so.13": b"lib"})
+            assets[name] = blobs[name]
+        return release(tag, published, assets)
+
+    upstream = [
+        make("master-12-bbb", "2026-10-25T12:00:00Z", ["sd-master-bbb-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip"]),
+        make("master-11-aaa", "2026-10-25T06:00:00Z", ["sd-master-aaa-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip"]),
+    ]
+    for r in upstream:  # zips, as upstream ships them
+        for a in r["assets"]:
+            blobs[a["name"]] = build_zip(server)
+            a["digest"] = "sha256:" + hashlib.sha256(blobs[a["name"]]).hexdigest()
+    repos = {"leejet/stable-diffusion.cpp": upstream}
+    if build_repo:
+        repos["karrot0/urakatsu-diffusion"] = [
+            make("master-11-aaa", "2026-10-25T08:00:00Z", ["sd-master-11-aaa-bin-linux-x64-cuda-13.tar.gz", "cudart-sd-master-11-aaa-bin-linux-x64-cuda-13.tar.gz"]),
+        ]
+    return github_repos(repos, blobs)
+
+
+LINUX_CUDA = ["linux-cuda-13", "linux-cuda-12", "linux-vulkan", "linux-cpu"]
+
+
+def test_linux_cuda_comes_from_the_build_repository(tmp_path, monkeypatch):
+    from urakatsu.runtimes.packages import STABLE_DIFFUSION_CPP
+
+    monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: LINUX_CUDA)
+    manager = PackageManager(root=tmp_path, offline=False, transport=sd_repos())
+    installed = manager.ensure(STABLE_DIFFUSION_CPP, CUDA)
+    # The newest release built with CUDA, over a newer one that only has Vulkan.
+    assert (installed.tag, installed.variant) == ("master-11-aaa", "linux-cuda-13")
+    assert (installed.path / "libcublas.so.13").exists()  # its CUDA libraries, next to sd-server
+    assert installed.executable.name.startswith("sd-server")
+
+    listed = {r["tag"]: r["variant"] for r in manager.releases(STABLE_DIFFUSION_CPP, LINUX_CUDA)}
+    assert listed == {"master-12-bbb": "linux-vulkan", "master-11-aaa": "linux-cuda-13"}
+    # A pinned release takes the CUDA build where there is one, else upstream's.
+    assert manager.release(STABLE_DIFFUSION_CPP, "master-11-aaa", LINUX_CUDA).variant == "linux-cuda-13"
+    assert manager.release(STABLE_DIFFUSION_CPP, "master-12-bbb", LINUX_CUDA).variant == "linux-vulkan"
+
+
+def test_without_the_build_repository_linux_keeps_upstreams_builds(tmp_path, monkeypatch):
+    from urakatsu.runtimes.packages import STABLE_DIFFUSION_CPP
+
+    monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: LINUX_CUDA)
+    manager = PackageManager(root=tmp_path, offline=False, transport=sd_repos(build_repo=False))
+    installed = manager.ensure(STABLE_DIFFUSION_CPP, CUDA)
+    assert (installed.tag, installed.variant) == ("master-12-bbb", "linux-vulkan")
