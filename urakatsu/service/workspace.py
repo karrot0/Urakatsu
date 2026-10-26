@@ -397,20 +397,27 @@ class Workspace:
         with self._render_lock:
             return self._text_layouts.get(key, {})
 
-    def lift(self, project_id: str, page_id: str, layer_id: str) -> dict[str, Any]:
+    def lift(self, project_id: str, page_id: str, layer_id: str, outline: Optional[list[dict[str, float]]] = None) -> dict[str, Any]:
         """A text block lifted off its page as rendered, so the canvas can move it without a render per
         move: the block's own pixels and the page under them (the render without the block), both
-        cropped to the block, as PNG data URLs, and where on the page the crop is."""
+        cropped to the block, as PNG data URLs, and where on the page the crop is. With ``outline``, as
+        the block would render with that frame (unsaved): a free-form block turns as its box."""
         snapshot = self.session(project_id).snapshot()
-        key = (project_id, page_id, snapshot.revision)
-        self.render(project_id, page_id, snapshot)
-        with self._render_lock:
-            frame = self._frames.get(key)
-        if frame is None:
+        if outline is not None:
+            edit = snapshot.edit()
+            _set_frame(edit, snapshot, layer_id, outline)
             with self._draw_lock:
-                frame = self.renderer().render(snapshot, page_id)
+                frame = self.renderer().render(edit.snapshot(), page_id)
+        else:
+            key = (project_id, page_id, snapshot.revision)
+            self.render(project_id, page_id, snapshot)
             with self._render_lock:
-                self._keep_frame(key, frame)
+                frame = self._frames.get(key)
+            if frame is None:
+                with self._draw_lock:
+                    frame = self.renderer().render(snapshot, page_id)
+                with self._render_lock:
+                    self._keep_frame(key, frame)
         layer = frame.layer(layer_id)
         if layer is None or not layer.is_text():
             raise KeyError(f"text block {layer_id} is not drawn on page {page_id}")
@@ -491,13 +498,7 @@ class Workspace:
         if "typography" in patch:
             edit.set(layer_id, _typography(patch["typography"], snapshot.component(layer_id, c.Typography)))
         if "frame" in patch:
-            points = [c.Point(x=float(p["x"]), y=float(p["y"])) for p in patch["frame"]]
-            if len(points) < 3:
-                raise ValueError("a frame needs at least three points")
-            edit.set(layer_id, c.Geometry(points=points))
-            layout = snapshot.component(layer_id, c.TextLayout)
-            if layout is not None:
-                edit.set(layer_id, layout.model_copy(update={"origin": c.user(), "angle_degrees": None}))
+            _set_frame(edit, snapshot, layer_id, patch["frame"])
         if "visible" in patch:
             visibility = snapshot.component(layer_id, c.Visibility) or c.Visibility()
             visibility.visible = bool(patch["visible"])
@@ -865,6 +866,17 @@ def _png(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", compress_level=3)
     return buffer.getvalue()
+
+
+def _set_frame(edit, snapshot: Snapshot, layer_id: str, frame: list[dict[str, float]]) -> None:
+    """Gives a text layer a new frame; its layout becomes the user's, its angle the frame's own."""
+    points = [c.Point(x=float(p["x"]), y=float(p["y"])) for p in frame]
+    if len(points) < 3:
+        raise ValueError("a frame needs at least three points")
+    edit.set(layer_id, c.Geometry(points=points))
+    layout = snapshot.component(layer_id, c.TextLayout)
+    if layout is not None:
+        edit.set(layer_id, layout.model_copy(update={"origin": c.user(), "angle_degrees": None}))
 
 
 def _data_url(image: Image.Image) -> str:

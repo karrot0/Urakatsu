@@ -504,6 +504,14 @@ def test_a_lifted_block_over_the_page_under_it_is_the_render(workspace):
     with pytest.raises(KeyError):
         workspace.lift(project, page, "no-such-block")
 
+    # Lifted with another frame, it is the block as it renders once that frame is saved.
+    turned = [{"x": 30.0, "y": 10.0}, {"x": 150.0, "y": 30.0}, {"x": 140.0, "y": 90.0}, {"x": 20.0, "y": 70.0}]
+    preview = workspace.lift(project, page, block.layer_id, turned)
+    assert [p.x for p in workspace.page(project, page).blocks[0].frame] != [p["x"] for p in turned]  # nothing saved
+    workspace.update_text_block(project, page, block.layer_id, {"frame": turned})
+    saved = workspace.lift(project, page, block.layer_id)
+    assert {k: preview[k] for k in ("x", "y", "width", "height", "text")} == {k: saved[k] for k in ("x", "y", "width", "height", "text")}
+
 
 def test_settings_accept_the_remote_runtime(workspace):
     config = workspace.get_config().model_copy(deep=True)
