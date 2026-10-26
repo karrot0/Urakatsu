@@ -40,6 +40,8 @@ BUILTIN_MODULES = (
     "urakatsu.providers.inpainting.nano_banana",
     # translation (local llama.cpp + hosted providers)
     "urakatsu.providers.translation",
+    # watermark detection (the watermarks stage; not in Koharu)
+    "urakatsu.providers.watermark.yolo_watermark",
 )
 
 # config.rs: the first entry of each list is the stage default.
@@ -48,6 +50,7 @@ DEFAULTS: dict[Stage, str] = {
     Stage.OCR: "paddleocr-vl-1.6",
     Stage.TRANSLATION: "local",
     Stage.INPAINTING: "lama",
+    Stage.WATERMARKS: "yolo26-watermark",
 }
 
 

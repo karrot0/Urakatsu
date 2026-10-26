@@ -41,6 +41,7 @@ from urakatsu.scene import components as c
 
 from .base import StageInput, StageProcessor, finish, generation
 from .inpainting import fill_region
+from .watermarks import page_image
 
 PRODUCER = "dev.urakatsu.pipeline.sound-effects"
 ROLE = "dev.urakatsu.text.sound-effect"
@@ -290,7 +291,7 @@ class SoundEffectsStage(StageProcessor):
                 f"{provider.name} only removes lettering, so it cannot redraw sound effects; "
                 "pick an image model that follows prompts in Settings, Pipeline, Sound effects"
             )
-        source = input.images.get(input.scene, input.page, "source")
+        source = page_image(input)
         if source is None:
             raise ValueError(f"page {input.page} has no source image")
         source = source.convert("RGB")

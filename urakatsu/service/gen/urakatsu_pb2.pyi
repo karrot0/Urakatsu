@@ -124,7 +124,7 @@ class ModelSelection(_message.Message):
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., quantization: _Optional[str] = ..., vision: _Optional[bool] = ..., reasoning: _Optional[bool] = ...) -> None: ...
 
 class Config(_message.Message):
-    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes")
+    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes", "watermarks", "watermarks_model")
     class ProcessorJsonEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -163,6 +163,8 @@ class Config(_message.Message):
     SOUND_EFFECTS_FIELD_NUMBER: _ClassVar[int]
     SOUND_EFFECTS_MODEL_FIELD_NUMBER: _ClassVar[int]
     IDLE_UNLOAD_MINUTES_FIELD_NUMBER: _ClassVar[int]
+    WATERMARKS_FIELD_NUMBER: _ClassVar[int]
+    WATERMARKS_MODEL_FIELD_NUMBER: _ClassVar[int]
     device: str
     detection: str
     ocr: str
@@ -180,7 +182,9 @@ class Config(_message.Message):
     sound_effects: str
     sound_effects_model: str
     idle_unload_minutes: int
-    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ...) -> None: ...
+    watermarks: str
+    watermarks_model: str
+    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ..., watermarks: _Optional[str] = ..., watermarks_model: _Optional[str] = ...) -> None: ...
 
 class TranslationModel(_message.Message):
     __slots__ = ("provider", "provider_name", "model", "name", "quantizations", "vision", "reasoning")

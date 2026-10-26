@@ -21,6 +21,7 @@ from urakatsu.scene import components as c
 from urakatsu.scene import Relations
 
 from .base import StageInput, StageProcessor, finish, generation
+from .watermarks import page_image
 
 PRODUCER = "dev.koharu.pipeline.ocr"
 DEFAULT_LANGUAGE = "ja-JP"
@@ -97,7 +98,7 @@ class OcrStage(StageProcessor):
     async def process(self, input: StageInput, provider: Provider):
         if not isinstance(provider, OcrProvider):
             raise TypeError(f"OCR stage cannot run provider {provider.id!r}")
-        source = input.images.get(input.scene, input.page, "source")
+        source = page_image(input)
         if source is None:
             raise ValueError(f"page {input.page} has no source image")
 

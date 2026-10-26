@@ -50,6 +50,7 @@ from urakatsu.scene import (
 from urakatsu.scene.components import is_user
 
 from .base import StageInput, StageProcessor, finish, generation
+from .watermarks import page_image, watermark_layer
 
 PRODUCER = "dev.koharu.pipeline.inpainting"
 SOURCE = "source"
@@ -131,7 +132,7 @@ class InpaintingStage(StageProcessor):
 
 def prepare(input: StageInput) -> _Prepared:
     page = input.page
-    original = input.images.get(input.scene, page, SOURCE)
+    original = page_image(input)
     if original is None:
         raise ValueError(f"page {page} has no source image")
     cleanup_entity = next(
@@ -265,7 +266,9 @@ def commit(input: StageInput, provider: Provider, prepared: _Prepared, image: Im
                 layer.origin = user()
                 edit.set(entity, layer)
     else:
-        entity = edit.add_entity(page, At.START)
+        # Over the Watermarks layer (not in Koharu), which sits right over the source.
+        below = watermark_layer(input.scene, page)
+        entity = edit.add_entity(page, At.after(below) if below is not None else At.START)
         edit.set(entity, RasterLayer(origin=user(), name="Cleanup", kind=RasterLayerKind.CLEANUP))
 
     buffer = io.BytesIO()

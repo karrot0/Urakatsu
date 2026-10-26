@@ -397,6 +397,23 @@ class InpaintingProvider(Provider):
         return self._inpaint(image, mask)
 
 
+class WatermarkBox(BaseModel):
+    box: tuple[int, int, int, int]  # left, top, right, bottom
+    score: float
+
+
+class WatermarkProvider(Provider):
+    """Proposes boxes that may hold a watermark; the watermarks stage decides what is removed."""
+
+    stage = Stage.WATERMARKS
+
+    async def detect_watermarks(self, image: Image.Image) -> list[WatermarkBox]:
+        return await asyncio.to_thread(self._detect_watermarks, image)
+
+    def _detect_watermarks(self, image: Image.Image) -> list[WatermarkBox]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
 class TranslationProvider(Provider):
     """Translates segments."""
 

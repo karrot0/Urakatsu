@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from PIL import Image
 
@@ -29,4 +29,15 @@ class ImageCache:
         image.load()
         with self._lock:
             self._decoded[asset.blob] = image
+        return image
+
+    def derived(self, key: str, make: Callable[[], Image.Image]) -> Image.Image:
+        """An image computed from cached ones (a composite), cached under ``key``."""
+        with self._lock:
+            cached = self._decoded.get(key)
+        if cached is not None:
+            return cached
+        image = make()
+        with self._lock:
+            self._decoded[key] = image
         return image

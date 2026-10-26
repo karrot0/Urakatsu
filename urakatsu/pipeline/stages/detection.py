@@ -48,6 +48,7 @@ from urakatsu.scene import components as c
 
 from .base import StageInput, StageProcessor, finish, generation
 from .sound_effects import LABEL as SOUND_EFFECT_LABEL, group_sound_effects, write_sound_effect_mask, write_sound_effects
+from .watermarks import page_image
 
 MODEL_ID = "mayocream/koharu-layout-rfdetr-seg-2xl-1152"
 MODEL_NAME = "koharu-layout-rfdetr-seg-2xl"
@@ -101,7 +102,7 @@ class DetectionStage(StageProcessor):
 
     async def process(self, input: StageInput, provider) -> Patch:
         page = input.page
-        image = input.images.get(input.scene, page, "source")
+        image = page_image(input)
         if image is None:
             raise ProcessingError(f"page {page} has no source image")
         output: LayoutDetections = await provider.detect(image)

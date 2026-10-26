@@ -346,7 +346,7 @@ function LayersInspector() {
           const visible = isText ? row.block.visible : row.layer.visible;
           const opacity = (isText ? row.block.opacity : row.layer.opacity) || 1;
           const name = isText ? (row.block.translation || row.block.sourceText || "").trim() || `Text ${row.index + 1}` : row.layer.name;
-          const detail = isText ? roleName(row.block) : row.layer.kind === "cleanup" ? "Cleanup" : row.layer.kind === "edit" ? "Image edit" : "Paint";
+          const detail = isText ? roleName(row.block) : row.layer.kind === "cleanup" ? "Cleanup" : row.layer.kind === "edit" ? "Image edit" : row.layer.kind === "watermark" ? "Watermark removal" : "Paint";
           const selected = isText ? ws.blockId === row.id : ws.rasterId === row.id;
           // Text layers display in stored order; raster layers are shown top-most first.
           const siblings = isText ? textCount : rasterCount;

@@ -130,6 +130,8 @@ message Config {
   string sound_effects = 15;                // SoundEffectsConfig.mode: off | typeset | redraw (empty keeps it)
   string sound_effects_model = 16;          // redraw model; empty uses the generative fill model
   optional int32 idle_unload_minutes = 17;  // unload models after this many idle minutes; 0 never (unset keeps it)
+  string watermarks = 18;                   // WatermarksConfig.mode: off | remove (empty keeps it)
+  string watermarks_model = 19;             // watermark detector; empty keeps it
 }
 
 message TranslationModel {

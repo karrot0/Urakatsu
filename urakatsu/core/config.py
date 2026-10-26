@@ -128,6 +128,21 @@ class SoundEffectsConfig(BaseModel):
     model: str = ""
 
 
+WATERMARK_MODES = ("off", "remove")
+
+
+class WatermarksConfig(BaseModel):
+    """Repeated watermarks (platform logos, scanlator marks). Not in Koharu.
+
+    ``off`` keeps Koharu's behaviour. ``remove`` runs the watermarks stage first: ``model`` (a
+    watermark detector) proposes marks, and the ones that repeat across a chapter are removed by
+    unblending them (``pipeline/stages/watermarks.py``).
+    """
+
+    mode: Literal["off", "remove"] = "off"
+    model: str = "yolo26-watermark"
+
+
 class PipelineConfig(BaseModel):
     device: str = "auto"  # auto | cpu | cuda | cuda:N | metal
     # Loaded models are unloaded after this many minutes without a run; 0 keeps them loaded.
@@ -143,12 +158,15 @@ class PipelineConfig(BaseModel):
     typesetting: TypesettingConfig = Field(default_factory=TypesettingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     sound_effects: SoundEffectsConfig = Field(default_factory=SoundEffectsConfig)
+    watermarks: WatermarksConfig = Field(default_factory=WatermarksConfig)
 
     def provider_for(self, stage: Stage) -> str:
         if stage is Stage.TRANSLATION:
             return self.translation.model.provider
         if stage is Stage.SOUND_EFFECTS:
             return self.redraw_provider()
+        if stage is Stage.WATERMARKS:
+            return self.watermarks.model
         return {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model
 
     def fill_provider(self) -> str:
@@ -162,6 +180,8 @@ class PipelineConfig(BaseModel):
     def set_provider(self, stage: Stage, provider: str) -> None:
         if stage is Stage.TRANSLATION:
             self.translation.model.provider = provider
+        elif stage is Stage.WATERMARKS:
+            self.watermarks.model = provider
         else:
             {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model = provider
 

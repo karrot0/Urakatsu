@@ -339,6 +339,15 @@ class _Execution:
                 stages = [stage for stage in stages if stage is not Stage.SOUND_EFFECTS]
                 if not stages:
                     raise ValueError("sound effects are not set to redraw (Settings, Pipeline, Sound effects)")
+            if pipeline.config.watermarks.mode != "remove":
+                # The watermarks stage only exists in a run while watermarks are removed.
+                if Stage.WATERMARKS in stages:
+                    stages = [stage for stage in stages if stage is not Stage.WATERMARKS]
+                    if not stages:
+                        raise ValueError("watermarks are not set to be removed (pipeline config, watermarks.mode)")
+            elif Stage.DETECTION in stages and Stage.WATERMARKS not in stages:
+                # Detection reads the page with its watermarks removed, so a run that detects removes them first.
+                stages = [Stage.WATERMARKS, *stages]
             self.scope = NormalizedScope(self.scene, request.scope, stages)
         except (ValueError, KeyError) as error:
             raise PipelineError(ErrorKind.INVALID_INPUT, None, str(error)) from error

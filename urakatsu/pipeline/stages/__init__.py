@@ -13,8 +13,10 @@ def processors() -> dict[Stage, StageProcessor]:
     from .ocr import OcrStage
     from .sound_effects import SoundEffectsStage
     from .translation import TranslationStage
+    from .watermarks import WatermarksStage
 
     return {
+        Stage.WATERMARKS: WatermarksStage(),
         Stage.DETECTION: DetectionStage(),
         Stage.OCR: OcrStage(),
         Stage.TRANSLATION: TranslationStage(),
