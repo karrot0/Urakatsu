@@ -78,17 +78,65 @@ def test_doc_download_bullets_become_companion_sources():
     assert sources["diffusion_model"][0].folder == "diffusion_models"
 
 
+KLEIN_4B = parse_recipe({"id": "flux2-klein-4b", "name": "FLUX.2 Klein 4B", "model_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B", "slots": [{"id": "diffusion_model", "required": True}, {"id": "llm", "required": True}, {"id": "vae", "required": False}], "required_any": [["vae", "tae"]], "defaults": {"steps": 4, "cfg_scale": 1}, "features": ["ref_images"]})
+KLEIN_9B = parse_recipe({"id": "flux2-klein-9b", "name": "FLUX.2 Klein 9B", "model_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B", "slots": [{"id": "diffusion_model", "required": True}, {"id": "llm", "required": True}, {"id": "vae", "required": False}], "required_any": [["vae", "tae"]], "defaults": {"steps": 4, "cfg_scale": 1}, "features": ["ref_images"]})
+FLUX2_DEV = parse_recipe({"id": "flux2-dev", "name": "FLUX.2 dev", "model_url": "https://huggingface.co/black-forest-labs/FLUX.2-dev", "slots": [{"id": "diffusion_model", "required": True}, {"id": "llm", "required": True}, {"id": "vae", "required": False}], "required_any": [["vae", "tae"]], "defaults": {"steps": 20, "cfg_scale": 1, "distilled_guidance": 4}, "features": ["ref_images"]})
+
+# stable-diffusion.cpp's docs/flux2.md: one "Download weights" section per model.
+FLUX2_DOC = """# How to Use
+
+## Flux.2-dev
+
+### Download weights
+
+- Download FLUX.2-dev
+    - gguf: https://huggingface.co/city96/FLUX.2-dev-gguf/tree/main
+- Download vae
+    - safetensors: https://huggingface.co/black-forest-labs/FLUX.2-dev/tree/main
+- Download Mistral-Small-3.2-24B-Instruct-2506-GGUF
+    - gguf: https://huggingface.co/unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF/tree/main
+
+### Examples
+
+## Flux.2 klein 9B / Flux.2 klein base 9B
+
+### Download weights
+
+- Download FLUX.2-klein-9B
+    - gguf: https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/tree/main
+- Download FLUX.2-klein-base-9B
+    - gguf: https://huggingface.co/leejet/FLUX.2-klein-base-9B-GGUF/tree/main
+- Download vae
+    - safetensors: https://huggingface.co/black-forest-labs/FLUX.2-dev/tree/main
+- Download Qwen3 8B
+    - gguf: https://huggingface.co/unsloth/Qwen3-8B-GGUF/tree/main
+
+### Examples
+"""
+
+
+def test_a_doc_covering_several_models_gives_each_recipe_its_own_companions():
+    nine = parse_sources(FLUX2_DOC, KLEIN_9B)
+    assert [s.repo for s in nine["llm"]] == ["unsloth/Qwen3-8B-GGUF"]  # not dev's Mistral, nor the base model
+    assert [s.repo for s in nine["diffusion_model"]] == ["leejet/FLUX.2-klein-9B-GGUF", "leejet/FLUX.2-klein-base-9B-GGUF"]
+    assert [s.repo for s in parse_sources(FLUX2_DOC, FLUX2_DEV)["llm"]] == ["unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF"]
+    assert [s.repo for s in parse_sources(FLUX2_DOC, KLEIN_4B)["llm"]] == ["unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF"]  # no section of its own: the first
+
+
 def test_companions_are_picked_sensibly():
     comfy = [
         ("text_encoders/qwen3vl_8b_bf16.safetensors", 17 * GB),
         ("text_encoders/qwen3vl_8b_int8_convrot.safetensors", 9 * GB),
         ("text_encoders/qwen3vl_8b_w4a8_gptq.safetensors", 5 * GB),  # a format sd.cpp does not read
+        ("text_encoders/qwen3vl_8b_fp4mixed.safetensors", 4 * GB),  # nor is this one (NVFP4)
         ("vae/flux2-vae.safetensors", 300 << 20),
         ("vae/flux2-vae_small.safetensors", 100 << 20),
         ("qwen-image-Q4_K_M.gguf", 4 * GB),
     ]
     assert pick("llm", slot_candidates("llm", "r", comfy)).path.endswith("int8_convrot.safetensors")
     assert pick("vae", slot_candidates("vae", "r", comfy)).path == "vae/flux2-vae.safetensors"
+    dev = [("ae.safetensors", 320 << 20), ("flux2-dev.safetensors", 64 * GB), ("vae/diffusion_pytorch_model.safetensors", 320 << 20)]
+    assert pick("vae", slot_candidates("vae", "b", dev, anywhere=True)).path == "ae.safetensors"  # not the model beside it
     gguf_repo = [("Qwen3VL-8B-Instruct-Q8_0.gguf", 8 * GB), ("Qwen3VL-8B-Instruct-Q4_K_M.gguf", 5 * GB), ("mmproj-Qwen3VL-8B-Instruct-F16.gguf", GB), ("mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf", GB // 2)]
     assert pick("llm", slot_candidates("llm", "q", gguf_repo, anywhere=True)).path == "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
     assert pick("llm_vision", slot_candidates("llm_vision", "q", gguf_repo)).path.startswith("mmproj-Qwen3VL-8B-Instruct-F16")
@@ -160,6 +208,57 @@ def test_a_gguf_only_repo_gets_its_companions_from_the_doc(catalog):
     assert roles["diffusion_model"].repo is None  # from the repo itself
     assert roles["vae"].repo == "Comfy-Org/Qwen-Image-2.1" and roles["vae"].revision == "sha-Comfy-Org/Qwen-Image-2.1"
     assert model.source(roles["vae"].path).repository == "Comfy-Org/Qwen-Image-2.1"
+
+
+def test_any_flux2_model_runs_on_flux2_klein_with_its_own_text_encoder(catalog, monkeypatch):
+    nine = repo("unsloth/FLUX.2-klein-9B-GGUF", [("flux-2-klein-9b-Q4_K_M.gguf", 6 * GB), ("flux-2-klein-9b-Q8_0.gguf", 10 * GB)], ["black-forest-labs/FLUX.2-klein-9B"])
+    qwen = repo("unsloth/Qwen3-8B-GGUF", [("Qwen3-8B-Q4_K_M.gguf", 5 * GB), ("Qwen3-8B-Q8_0.gguf", 9 * GB)])
+    vae = repo("black-forest-labs/FLUX.2-dev", [("ae.safetensors", GB // 3), ("flux2-dev.safetensors", 64 * GB)])
+    catalog.hub.repos.update({r.id: r for r in (nine, qwen, vae)})
+    support = RuntimeSupport("stable-diffusion.cpp", "master-1", families=(Family("FLUX.2-dev/FLUX.2-klein", "flux2", ("flux2dev", "flux2klein")),), recipes=(KLEIN_4B, KLEIN_9B, FLUX2_DEV))
+    monkeypatch.setattr(catalog, "_latest_support", lambda runtime: support)
+    monkeypatch.setattr(catalog.support, "doc", lambda package, tag, doc: FLUX2_DOC)
+    facts = catalog.facts("diffusion", nine)
+    assert facts.recipe is KLEIN_9B and [u["provider"] for u in catalog.usable_by(facts)] == ["flux2-klein", "diffusion-model"]
+    plan = catalog.components(nine, facts)
+    assert plan.files["llm"].repo == "unsloth/Qwen3-8B-GGUF" and plan.files["llm"].path == "Qwen3-8B-Q4_K_M.gguf"
+
+
+def test_flux2_klein_runs_its_defaults_or_an_installed_flux2_model(tmp_path, monkeypatch):
+    from urakatsu.catalog.installed import InstalledFile, InstalledModel, InstalledModels
+    from urakatsu.core.errors import ProviderUnavailable
+    from urakatsu.providers.inpainting.flux2_klein import DEFAULT_RECIPE, Flux2KleinProvider
+    from urakatsu.runtimes import models_folder
+    from urakatsu.runtimes.store import ModelStore
+
+    monkeypatch.setattr(models_folder, "_root", tmp_path / "models")  # resolved once per process
+
+    defaults = Flux2KleinProvider(None, None, "diffusion")._components()
+    assert defaults[1] == DEFAULT_RECIPE and [slot for slot, _ in defaults[2]] == ["diffusion_model", "llm", "vae"]
+    assert [source for _, source in defaults[2]] == list(Flux2KleinProvider.weight_sources())
+
+    models = InstalledModels(ModelStore())
+    files = [InstalledFile(path="flux-2-klein-9b-Q4_K_M.gguf", role="diffusion_model"), InstalledFile(path="Qwen3-8B-Q4_K_M.gguf", role="llm", repo="unsloth/Qwen3-8B-GGUF", revision="r")]
+    nine = InstalledModel(id="unsloth/FLUX.2-klein-9B-GGUF:Q4_K_M", repo="unsloth/FLUX.2-klein-9B-GGUF", revision="s", runtime="diffusion", family="flux2", recipe="flux2-klein-9b", files=files)
+    qwen = InstalledModel(id="leejet/Qwen-Image-2.1-GGUF:Q4_K", repo="leejet/Qwen-Image-2.1-GGUF", revision="s", runtime="diffusion", family="qwen_image", recipe="qwen-image-21", files=files[:1])
+    models.add(nine)
+    models.add(qwen)
+    name, recipe, components = Flux2KleinProvider({"model": nine.id}, None, "diffusion")._components()
+    assert (name, recipe) == (nine.id, "flux2-klein-9b")
+    assert [(slot, source.repository) for slot, source in components] == [("diffusion_model", nine.repo), ("llm", "unsloth/Qwen3-8B-GGUF")]
+    with pytest.raises(ProviderUnavailable, match="not a FLUX.2 model"):
+        Flux2KleinProvider({"model": qwen.id}, None, "diffusion")._components()
+
+
+def test_flux2_klein_takes_steps_and_guidance_from_the_recipe_unless_set():
+    from urakatsu.providers.inpainting.flux2_klein import Flux2KleinProvider
+
+    dev = Flux2KleinProvider(None, None, "diffusion")._processor_for(FakeServer(), FLUX2_DEV)
+    assert (dev.steps, dev.cfg_scale, dev.distilled_guidance) == (20, 1.0, 4.0)
+    chosen = Flux2KleinProvider({"steps": 6, "cfg_scale": 2}, None, "diffusion")._processor_for(FakeServer(), FLUX2_DEV)
+    assert (chosen.steps, chosen.cfg_scale) == (6, 2.0)
+    koharu = Flux2KleinProvider(None, None, "diffusion")._processor_for(FakeServer())  # an attached server: no recipe
+    assert (koharu.steps, koharu.cfg_scale, koharu.distilled_guidance) == (4, 1.0, 3.5)
 
 
 def test_a_text_encoder_named_after_an_image_model_is_not_installed_as_one(catalog, monkeypatch):

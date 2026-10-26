@@ -61,3 +61,11 @@ def resize_bilinear_nonaliased(array: np.ndarray, width: int, height: int) -> np
 
 def to_device_tensor(array: np.ndarray, device: torch.device) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(array)).to(device)
+
+
+def apply_overlay(mask: np.ndarray, init_image: np.ndarray, generated: np.ndarray) -> np.ndarray:
+    """``Flux2ImageProcessor::apply_overlay`` without a crop region: a soft blend by the (unbinarized) mask."""
+    amount = (mask.astype(np.float32) / np.float32(255.0))[..., None]
+    original = init_image.astype(np.float32)
+    blended = generated.astype(np.float32) * amount + original * (np.float32(1.0) - amount)
+    return np.floor(blended + np.float32(0.5)).clip(0.0, 255.0).astype(np.uint8)

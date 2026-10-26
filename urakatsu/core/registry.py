@@ -97,6 +97,11 @@ class Registry:
                 importlib.import_module(module)
             except Exception as error:  # a broken optional provider must not take the app down
                 log.warning("skipping provider module %s: %s", module, error)
+        # Display order is the module list's, whatever order imports registered them in (a
+        # provider built on another's class registers that one first).
+        order = {module: index for index, module in enumerate(BUILTIN_MODULES)}
+        for stage, providers in self._providers.items():
+            self._providers[stage] = dict(sorted(providers.items(), key=lambda item: order.get(item[1].__module__, len(order))))
         try:
             entry_points = importlib.metadata.entry_points(group="urakatsu.providers")
         except TypeError:  # pragma: no cover

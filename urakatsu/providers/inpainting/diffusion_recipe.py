@@ -26,15 +26,16 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
+from urakatsu.catalog.recipes import Recipe
 from urakatsu.core.errors import ProviderUnavailable
 from urakatsu.core.registry import register
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings
 from urakatsu.runtimes.device import Backend
 from urakatsu.runtimes.hardware import system_profile
 from urakatsu.runtimes.diffusion import SdServer, image_b64
+from urakatsu.runtimes.store import WeightSource
 
-from .common import LANCZOS3, resize_pil
-from .flux2_klein import apply_overlay
+from .common import LANCZOS3, apply_overlay, resize_pil
 
 log = logging.getLogger(__name__)
 
@@ -194,41 +195,61 @@ class DiffusionRecipeProvider(InpaintingProvider):
         super().__init__(settings, runtimes, runtime)
         self._processor: RecipeProcessor | None = None
 
-    def _load(self) -> None:
+    def _installed(self):
+        """The installed model chosen in settings."""
         from urakatsu.catalog.installed import InstalledModels
-        from urakatsu.catalog.support import SupportIndex
-        from urakatsu.runtimes.packages import STABLE_DIFFUSION_CPP, PackageManager
 
         model_id = self.settings.model
         if not model_id:
-            raise ProviderUnavailable("Diffusion model: pick an installed model in Settings, Pipeline (install one from the Models page)")
+            raise ProviderUnavailable(f"{self.name}: pick an installed model in Settings, Pipeline (install one from the Models page)")
         installed = InstalledModels(self.store()).get(model_id)
         if installed is None or not installed.recipe:
-            raise ProviderUnavailable(f"Diffusion model: {model_id} is not an installed stable-diffusion.cpp model")
+            raise ProviderUnavailable(f"{self.name}: {model_id} is not an installed stable-diffusion.cpp model")
         if _is_text_encoder(installed):
             raise ProviderUnavailable(
-                f"Diffusion model: {installed.repo} is a text encoder ({installed.architecture}), not an image model, so it cannot clean pages. "
+                f"{self.name}: {installed.repo} is a text encoder ({installed.architecture}), not an image model, so it cannot clean pages. "
                 "Remove it on the Models page and install a denoiser for its family instead."
             )
+        return installed
+
+    def _components(self) -> tuple[str, str, list[tuple[str, WeightSource]]]:
+        """The server's name, the recipe id and each component as (slot, weights)."""
+        installed = self._installed()
+        components = [(f.role, installed.source(f.path)) for f in installed.files if f.role not in ("shard", "file")]
+        return installed.id, installed.recipe, components
+
+    def _recipe(self, tag: str, recipe_id: str) -> Recipe:
+        from urakatsu.catalog.support import SupportIndex
+        from urakatsu.runtimes.packages import STABLE_DIFFUSION_CPP, PackageManager
+
+        support = SupportIndex(PackageManager()).for_tag(STABLE_DIFFUSION_CPP, tag)
+        recipe = support.recipe(recipe_id) if support else None
+        if recipe is None:
+            raise ProviderUnavailable(f"stable-diffusion.cpp {tag} has no recipe {recipe_id}; update it in Settings, Runtimes")
+        return recipe
+
+    def _server_args(self, device) -> list[str]:
+        """Flags beyond the components, placement and memory mapping."""
+        return ["--flash-attn", "on" if device.backend is Backend.CUDA else "off"]
+
+    def _processor_for(self, server: SdServer, recipe: Recipe):
+        return RecipeProcessor(server, recipe.edits, dict(recipe.defaults), self.settings)
+
+    def _load(self) -> None:
+        name, recipe_id, components = self._components()
         runtime = self.runtime_instance()
         package = runtime.package()  # installs or updates stable-diffusion.cpp first
-        support = SupportIndex(PackageManager()).for_tag(STABLE_DIFFUSION_CPP, package.tag)
-        recipe = support.recipe(installed.recipe) if support else None
-        if recipe is None:
-            raise ProviderUnavailable(f"stable-diffusion.cpp {package.tag} has no recipe for {installed.repo}; update it in Settings, Runtimes")
+        recipe = self._recipe(package.tag, recipe_id)
 
         flags = slot_flags(str(package.executable))
         args: list[str] = []
         total = 0
-        for file in installed.files:
-            if file.role in ("shard", "file"):
-                continue
-            path: Path = self.resolve(installed.source(file.path))
+        for slot, source in components:
+            path: Path = self.resolve(source)
             total += path.stat().st_size
-            args += [flag_for(file.role, flags), str(path)]
+            args += [flag_for(slot, flags), str(path)]
         device = runtime.device
-        use_cuda = device.backend is Backend.CUDA
-        args += ["--flash-attn", "on" if use_cuda else "off"]
+        args += self._server_args(device)
         # When the components do not fit the GPU together, keep them in RAM and move each one
         # in only while it runs (text encoder, then diffusion model, then VAE), as the model
         # docs do: the GPU is shared with the other stages' models and other programs, and
@@ -245,9 +266,9 @@ class DiffusionRecipeProvider(InpaintingProvider):
         if not offload or ram_available < 1.2 * total:
             args.append("--mmap")
         _release_torch_cache()
-        name = re.sub(r"[^A-Za-z0-9_.-]+", "-", installed.id)[:60]
-        self._processor = RecipeProcessor(runtime.launch(name, args), recipe.edits, dict(recipe.defaults), self.settings)
-        log.info("loaded %s (recipe %s) on %s", installed.id, recipe.id, runtime.device.label())
+        server = runtime.launch(re.sub(r"[^A-Za-z0-9_.-]+", "-", name)[:60], args)
+        self._processor = self._processor_for(server, recipe)
+        log.info("loaded %s (recipe %s) on %s", name, recipe.id, runtime.device.label())
 
     def _unload(self) -> None:
         if self._processor is not None:

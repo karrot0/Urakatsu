@@ -40,8 +40,10 @@ SLOT_FOLDERS: dict[str, tuple[str, ...]] = {
     "embeddings_connectors": ("text_encoders",),
 }
 WEIGHT_SUFFIXES = (".gguf", ".safetensors", ".sft", ".ckpt", ".pt", ".pth", ".bin")
-# Formats sd.cpp does not read (Apple MLX, GPTQ/AWQ packs) and files that are not whole models.
-UNSUPPORTED = re.compile(r"(?i)(mlx|gptq|awq|w4a8|nvfp4|lora|-of-\d{5}|\.index\.json$)")
+# Formats sd.cpp does not read (Apple MLX, GPTQ/AWQ packs, ComfyUI's FP4 safetensors such as
+# ``qwen_3_8b_fp4mixed``: of ComfyUI's quantizations it loads only ``int8_tensorwise`` and
+# scaled FP8) and files that are not whole models.
+UNSUPPORTED = re.compile(r"(?i)(mlx|gptq|awq|w4a8|nvfp4|fp4[\w.-]*\.safetensors$|lora|-of-\d{5}|\.index\.json$)")
 # For large companions (text encoders): smaller formats that keep quality come first.
 QUANT_PREFERENCE = ("q4_k_m", "q5_k_m", "q6_k", "q8_0", "int8", "fp8", "q4_k_s", "q4_0", "q5_0", "fp16", "f16", "bf16", "fp32", "f32")
 
@@ -180,14 +182,19 @@ _LINK = re.compile(r"https://huggingface\.co/([\w.-]+/[\w.-]+)(?:/(tree|blob|res
 def parse_sources(doc: str, recipe: Recipe) -> dict[str, list[Source]]:
     """Slot -> companion sources from the doc's "Download weights" bullets.
 
-    The first bullet is the model itself; a bullet naming a slot (``vae``, ``clip_l``,
-    ``t5xxl``, ``tokenizer``, ``tae``) is that slot; the remaining one is the text encoder
-    (``llm``) when the recipe has one. A projector mentioned with a text encoder's GGUF
-    repository is taken from that repository."""
-    section = re.split(r"(?im)^#+\s*download", doc, maxsplit=1)
-    if len(section) < 2:
+    A doc covering several models (``flux2.md``: FLUX.2-dev, Klein 4B, Klein 9B) has a
+    "Download weights" section under each model's heading; the recipe's own section is read,
+    else the first. The first bullet is the model itself, as is any bullet naming a model of
+    the section's heading ("Klein 9B / Klein base 9B"); a bullet naming a slot (``vae``,
+    ``clip_l``, ``t5xxl``, ``tokenizer``, ``tae``) is that slot; the remaining one is the text
+    encoder (``llm``) when the recipe has one. A projector mentioned with a text encoder's
+    GGUF repository is taken from that repository."""
+    sections = _download_sections(doc)
+    if not sections:
         return {}
-    body = re.split(r"(?m)^#+\s", section[1], maxsplit=1)[0]
+    names = {normalize(recipe.name), normalize(recipe.id)}
+    heading, body = next((s for s in sections if any(n and n in normalize(s[0]) for n in names)), sections[0])
+    models = [m for m in (normalize(part) for part in re.split(r"\s*/\s*", heading)) if len(m) >= 4]
     bullets = re.split(r"(?m)^- ", body)[1:]
     slots = {s.id for s in recipe.slots}
     found: dict[str, list[Source]] = {}
@@ -196,10 +203,25 @@ def parse_sources(doc: str, recipe: Recipe) -> dict[str, list[Source]]:
         sources = [Source(repo, file=path) if kind in ("blob", "resolve") else Source(repo, folder=path or "") for repo, kind, path in _LINK.findall(bullet)]
         if not sources:
             continue
-        slot = _slot_for(title, index, slots)
+        slot = _slot_for(title, 0 if any(m in normalize(title) for m in models) else index, slots)
         if slot:
             found.setdefault(slot, []).extend(sources)
     return found
+
+
+def _download_sections(doc: str) -> list[tuple[str, str]]:
+    """(the heading a "Download weights" section belongs to, the section's text), in doc order."""
+    headings = list(re.finditer(r"(?m)^#+\s*(.*)$", doc))
+    sections = []
+    owner = ""
+    for index, heading in enumerate(headings):
+        title = heading.group(1).strip()
+        if not re.match(r"(?i)download", title):
+            owner = title
+            continue
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(doc)
+        sections.append((owner, doc[heading.end() : end]))
+    return sections
 
 
 def _slot_for(title: str, index: int, slots: set[str]) -> Optional[str]:
@@ -266,8 +288,12 @@ def pick(slot: str, candidates: list[Candidate]) -> Optional[Candidate]:
     if not candidates:
         return None
     if slot == "vae":
-        full = [c for c in candidates if not re.search(r"(?i)small|tiny|tae|preview", c.path)]
-        return max(full or candidates, key=lambda c: c.size)
+        # A repo linked for its VAE may hold the model too (FLUX.2-dev: ``ae.safetensors`` beside
+        # the 64 GB ``flux2-dev.safetensors``): a file named as an autoencoder comes first, a
+        # single-file checkpoint before a diffusers folder.
+        full = [c for c in candidates if not re.search(r"(?i)small|tiny|tae|preview", c.path)] or candidates
+        named = [c for c in full if re.search(r"(?i)vae|(?:^|[/_.-])ae[_.-]", c.path)] or full
+        return max(named, key=lambda c: ("diffusion_pytorch_model" not in c.path, c.size))
     if slot == "llm_vision":
         for wanted in ("f16", "bf16", "q8_0", "f32"):
             hit = next((c for c in candidates if re.search(rf"(?i)[-_.]{wanted}\.gguf$", c.path)), None)

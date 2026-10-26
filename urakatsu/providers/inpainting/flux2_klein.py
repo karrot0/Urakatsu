@@ -1,17 +1,22 @@
-"""FLUX.2 Klein inpainting provider.
+"""FLUX.2 inpainting provider: FLUX.2 Klein 4B by default, or any FLUX.2 model from the catalog.
 
-Runs on the ``diffusion`` runtime (the newest stable-diffusion.cpp release as ``sd-server``), with the GGUF weights
-and component layout from ``flux2_klein/mod.rs`` and ``model.rs``. The preprocessing,
-strength and overlay logic follow ``processor.rs`` and diffusers' FLUX.2 inpaint
-pipeline (https://github.com/huggingface/diffusers/blob/a37f6f8394ac2a7ee8360c3abea811efe54512b1/src/diffusers/pipelines/flux2/pipeline_flux2_klein_inpaint.py).
+Loads like any catalog diffusion model (``diffusion_recipe``): the components come from the
+stable-diffusion.cpp recipe (``--diffusion-model``, ``--llm``, ``--vae``), placed by the same
+memory rules, and an installed FLUX.2 model (Klein 9B, Klein base, FLUX.2-dev) replaces the
+default weights with its own text encoder and VAE. Without one it runs the pinned Klein 4B
+files, the default from Koharu's ``flux2_klein/mod.rs`` and ``model.rs``.
 
+Inference stays Koharu's: the preprocessing, strength and overlay logic follow ``processor.rs``
+and diffusers' FLUX.2 inpaint pipeline
+(https://github.com/huggingface/diffusers/blob/a37f6f8394ac2a7ee8360c3abea811efe54512b1/src/diffusers/pipelines/flux2/pipeline_flux2_klein_inpaint.py).
 The FLUX.2 scheduler (``Scheduler::Flux2``) is computed here and passed to
 stable-diffusion.cpp as custom sigmas, which also pins the schedule to exactly
 values. They are identical to upstream's ``Flux2Scheduler`` (``black-forest-labs/flux2
 sampling.py``, as ported in stable-diffusion.cpp).
 
-Koharu fixes the step count and text CFG; here they are settings whose defaults are
-Koharu's values, and the schedule and strength boundary follow the chosen step count.
+Koharu fixes the step count and text CFG; here they are settings. Empty, they follow the
+model's recipe, which for the distilled Klein models are Koharu's values (4 steps, CFG 1);
+the schedule and strength boundary follow the chosen step count.
 """
 
 from __future__ import annotations
@@ -24,13 +29,16 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
+from urakatsu.catalog.recipes import Recipe
+from urakatsu.core.errors import ProviderUnavailable
 from urakatsu.core.registry import register
-from urakatsu.providers.base import InpaintingProvider, ProviderSettings, server_fields
+from urakatsu.providers.base import ProviderSettings, server_fields
 from urakatsu.runtimes.device import Backend
 from urakatsu.runtimes.diffusion import SdServer, image_b64
 from urakatsu.runtimes.store import HuggingFaceFile
 
-from .common import LANCZOS3, resize_pil
+from .common import LANCZOS3, apply_overlay, resize_pil
+from .diffusion_recipe import DiffusionRecipeProvider
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +51,12 @@ TEXT_ENCODER_WEIGHTS = HuggingFaceFile(
 VAE_WEIGHTS = HuggingFaceFile(
     "black-forest-labs/FLUX.2-small-decoder", "full_encoder_small_decoder.safetensors", "a3efc24f613ef42d9428af62fdbd6f5fd8856c4a"
 )
+# The stable-diffusion.cpp docs page (``docs/flux2.md``) of the models this provider runs.
+FAMILY = "flux2"
+# The recipe of the default weights, and what it means when the runtime's recipes cannot be
+# read (offline before they were cached): Koharu's values.
+DEFAULT_RECIPE = "flux2-klein-4b"
+KOHARU_RECIPE = Recipe(id=DEFAULT_RECIPE, name="FLUX.2 Klein 4B", features=frozenset({"ref_images"}))
 
 # Flux2KleinInpaintOptions::default()
 INPAINT_STRENGTH = 0.8
@@ -62,8 +76,10 @@ class Flux2KleinSettings(ProviderSettings):
     """``Flux2KleinConfig``."""
 
     prompt: str = "Remove the text and reconstruct the background."
-    steps: int = Field(default=INPAINT_STEPS, ge=1, description="Sampling steps. FLUX.2 Klein is distilled for 4.")
-    cfg_scale: float = Field(default=TEXT_CFG, ge=0, description="Text guidance scale. Above 1 also runs the negative pass, about doubling the time.")
+    steps: Optional[int] = Field(default=None, ge=1, description="Sampling steps; empty uses the model's recipe (4 for the distilled Klein models).")
+    cfg_scale: Optional[float] = Field(
+        default=None, ge=0, description="Text guidance scale; empty uses the model's recipe (1 for Klein). Above 1 also runs the negative pass, about doubling the time."
+    )
     server_url: Optional[str] = _SERVER_URL
     server_api_key: Optional[str] = _SERVER_KEY
 
@@ -117,22 +133,15 @@ def _binarize(mask: np.ndarray) -> np.ndarray:
     return np.where(mask < 128, 0, 255).astype(np.uint8)
 
 
-def apply_overlay(mask: np.ndarray, init_image: np.ndarray, generated: np.ndarray) -> np.ndarray:
-    """``Flux2ImageProcessor::apply_overlay`` without a crop region: a soft blend by the (unbinarized) mask."""
-    amount = (mask.astype(np.float32) / np.float32(255.0))[..., None]
-    original = init_image.astype(np.float32)
-    blended = generated.astype(np.float32) * amount + original * (np.float32(1.0) - amount)
-    return np.floor(blended + np.float32(0.5)).clip(0.0, 255.0).astype(np.uint8)
-
-
 class Flux2KleinProcessor:
     """``Flux2KleinInpaint::inference`` with the default options (no padding crop, no reference)."""
 
-    def __init__(self, server: SdServer, prompt: str, steps: int = INPAINT_STEPS, cfg_scale: float = TEXT_CFG):
+    def __init__(self, server: SdServer, prompt: str, steps: int = INPAINT_STEPS, cfg_scale: float = TEXT_CFG, distilled_guidance: float = DISTILLED_GUIDANCE):
         self.server = server
         self.prompt = prompt
         self.steps = steps
         self.cfg_scale = cfg_scale
+        self.distilled_guidance = distilled_guidance
 
     def inference(self, image: Image.Image, mask: np.ndarray, prompt: Optional[str] = None) -> Image.Image:
         if image.size != (mask.shape[1], mask.shape[0]):
@@ -167,7 +176,7 @@ class Flux2KleinProcessor:
                     "sample_method": "euler",
                     "sample_steps": self.steps,
                     "custom_sigmas": [float(s) for s in sigmas],
-                    "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": DISTILLED_GUIDANCE},
+                    "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": float(self.distilled_guidance)},
                 },
                 "output_format": "png",
             }
@@ -181,73 +190,65 @@ class Flux2KleinProcessor:
 
 
 @register
-class Flux2KleinProvider(InpaintingProvider):
+class Flux2KleinProvider(DiffusionRecipeProvider):
     id: ClassVar[str] = "flux2-klein"
     name: ClassVar[str] = "FLUX.2 Klein"
-    description: ClassVar[str] = "FLUX.2 Klein 4B diffusion inpainting (stable-diffusion.cpp, GGUF Q4_K_M)."
+    description: ClassVar[str] = "FLUX.2 diffusion inpainting (stable-diffusion.cpp): Klein 4B by default, or any FLUX.2 model from the Models page."
     runtimes: ClassVar[tuple[str, ...]] = ("diffusion",)
     prompted: ClassVar[bool] = True
     instructed: ClassVar[bool] = True  # edits the crop it gets as a reference image
+    Settings: ClassVar[type[ProviderSettings]] = Flux2KleinSettings
 
     weight_roles = {"diffusion": ("diffusion_model", "llm", "vae")}
 
-    catalog_queries = ('flux.2 klein 4b',)
+    catalog_queries = ("flux.2 klein",)
 
     @classmethod
     def accepts(cls, facts) -> Optional[str]:
-        """FLUX.2 Klein 4B weights (any quantization); the Qwen3-4B text encoder and VAE stay the defaults."""
-        if facts.runtime != "diffusion" or facts.family is None or facts.family.doc != "flux2":
+        """FLUX.2 models (Klein of any size, Klein base, dev, fine-tunes) whose recipe can clean a page."""
+        if facts.runtime != "diffusion" or facts.family is None or facts.family.doc != FAMILY:
             return None
-        names = " ".join(facts.names()).replace("-", "").replace("_", "").replace(".", "")
-        return "diffusion" if "klein4b" in names else None
-    Settings: ClassVar[type[ProviderSettings]] = Flux2KleinSettings
-
-    def __init__(self, settings=None, runtimes=None, runtime=None):
-        super().__init__(settings, runtimes, runtime)
-        self._processor: Flux2KleinProcessor | None = None
+        return "diffusion" if facts.recipe is not None and facts.recipe.cleans_pages() else None
 
     @classmethod
     def weight_sources(cls, runtime=None):
         return (TRANSFORMER_WEIGHTS, TEXT_ENCODER_WEIGHTS, VAE_WEIGHTS)
 
-    def _processor_for(self, server: SdServer) -> Flux2KleinProcessor:
-        return Flux2KleinProcessor(server, self.settings.prompt, self.settings.steps, self.settings.cfg_scale)
+    def _components(self):
+        if not self.settings.model:
+            return self.id, DEFAULT_RECIPE, list(zip(self.weight_roles["diffusion"], self.weight_sources()))
+        installed = self._installed()
+        if installed.family != FAMILY:
+            raise ProviderUnavailable(f"{self.name}: {installed.repo} is not a FLUX.2 model; run it with Diffusion model instead")
+        return super()._components()
+
+    def _recipe(self, tag: str, recipe_id: str) -> Recipe:
+        try:
+            return super()._recipe(tag, recipe_id)
+        except ProviderUnavailable:
+            if recipe_id != DEFAULT_RECIPE:
+                raise
+            return KOHARU_RECIPE
+
+    def _server_args(self, device) -> list[str]:
+        args = super()._server_args(device)
+        if device.backend is Backend.CUDA:
+            args += ["--conv-direct", "auto,diffusion=on,vae=on"]
+        return args
+
+    def _processor_for(self, server: SdServer, recipe: Optional[Recipe] = None) -> Flux2KleinProcessor:
+        """Koharu's inference, with the steps and guidance of the settings, else the recipe's."""
+        defaults = dict(recipe.defaults) if recipe is not None else {}
+        settings = self.settings
+        steps = settings.steps or int(defaults.get("steps", INPAINT_STEPS))
+        cfg_scale = settings.cfg_scale if settings.cfg_scale is not None else float(defaults.get("cfg_scale", TEXT_CFG))
+        return Flux2KleinProcessor(server, settings.prompt, steps, cfg_scale, float(defaults.get("distilled_guidance", DISTILLED_GUIDANCE)))
 
     def _load(self) -> None:
         if "\0" in self.settings.prompt:
             raise ValueError("FLUX.2 prompt contains NUL")
-        if self.attached():  # an sd-server started elsewhere with the Klein weights
+        if self.attached():  # an sd-server started elsewhere with FLUX.2 weights
             self._processor = self._processor_for(SdServer.attach(self.settings.server_url, self.settings.server_api_key))
             log.info("attached FLUX.2 Klein to %s", self.settings.server_url)
             return
-        runtime = self.runtime_instance()
-        transformer, text_encoder, vae = (self.resolve(source) for source in self.weight_sources(self.runtime_name))
-        device = runtime.device
-        use_accelerator = device.is_accelerator
-        use_cuda = device.backend is Backend.CUDA
-        # Parameters stay resident only on accelerators with at least 20 GiB free;
-        # otherwise the parameters stay in host memory ("*=cpu" params_backend).
-        keep_resident = use_accelerator and device.memory_free >= 20 * 1024**3
-        args = ["--diffusion-model", str(transformer), "--llm", str(text_encoder), "--vae", str(vae), "--mmap"]
-        args += ["--flash-attn", "on" if use_cuda else "off"]
-        if use_cuda:
-            args += ["--conv-direct", "auto,diffusion=on,vae=on"]
-        if use_accelerator and not keep_resident:
-            args.append("--offload-to-cpu")
-        self._processor = self._processor_for(runtime.launch("flux2-klein", args))
-        log.info("loaded FLUX.2 Klein on %s", device.label())
-
-    def _unload(self) -> None:
-        if self._processor is not None:
-            self._processor.server.close()
-        self._processor = None
-
-    def _inpaint(self, image: Image.Image, mask: np.ndarray) -> Image.Image:
-        if self._processor is None:
-            raise RuntimeError("FLUX.2 Klein is not loaded")
-        return self._processor.inference(image.convert("RGB"), mask)
-
-    def _fill(self, image: Image.Image, mask: np.ndarray, prompt: Optional[str]) -> Image.Image:
-        if self._processor is None:
-            raise RuntimeError("FLUX.2 Klein is not loaded")
-        return self._processor.inference(image.convert("RGB"), mask, prompt)
+        super()._load()
