@@ -136,6 +136,8 @@ def _binarize(mask: np.ndarray) -> np.ndarray:
 class Flux2KleinProcessor:
     """``Flux2KleinInpaint::inference`` with the default options (no padding crop, no reference)."""
 
+    edits = True  # the crop always goes in as ``ref_images``
+
     def __init__(self, server: SdServer, prompt: str, steps: int = INPAINT_STEPS, cfg_scale: float = TEXT_CFG, distilled_guidance: float = DISTILLED_GUIDANCE):
         self.server = server
         self.prompt = prompt
