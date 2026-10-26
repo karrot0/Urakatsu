@@ -373,6 +373,9 @@ class InpaintingProvider(Provider):
     # Whether the prompt is an edit instruction ("replace X with Y"), as for models that take the
     # crop as a reference image, rather than a description of what belongs there.
     instructed: ClassVar[bool] = False
+    # Whether the model edits the whole crop it gets from the instruction, not knowing the mask
+    # (it takes the crop as a reference image); generative fill then sends a tight crop.
+    crop_edits: ClassVar[bool] = False
     remotable = True
 
     def _remote_methods(self, remote) -> dict[str, Any]:

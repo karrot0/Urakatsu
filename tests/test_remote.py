@@ -203,7 +203,7 @@ async def test_remote_providers_match_local_runs(worker):
 
     inpainter = remote(EchoInpainter)
     await inpainter.load()
-    assert inpainter.instructed is False  # what the worker's loaded model says
+    assert inpainter.instructed is False and inpainter.crop_edits is False  # what the worker's loaded model says
     # The stage calls these synchronously, per tile.
     assert np.array_equal(np.asarray(inpainter._inpaint(image, mask)), np.asarray(EchoInpainter()._inpaint(image, mask)))
     filled = np.asarray(inpainter._fill(image, mask, "abc"))

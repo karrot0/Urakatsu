@@ -10,7 +10,9 @@ the same tiling here.
 Generative fill is a user mask with ``generative`` set, run by the fill
 model. A model that follows prompts gets the whole selection as one crop with its
 surroundings (``fill_region``), so a sound effect is painted as one piece rather than in
-tiles; LaMa and AOT go through the tiling like the remove tool. Either way the result is
+tiles; a model that edits the crop it is given (``crop_edits``) gets only a rim of
+surroundings, since its instruction applies to everything in view. LaMa and AOT go through
+the tiling like the remove tool. Either way the result is
 committed to the Cleanup layer as a user edit.
 """
 
@@ -60,6 +62,11 @@ UNIFORM_BACKGROUND_MIN_PIXELS = 16
 FLAT_FILL_EDGE_MARGIN = 3.0
 # Context around a generative fill selection, as a share of its longer side (at least TILE_CONTEXT).
 FILL_CONTEXT = 0.5
+# The same for a model that edits the whole crop it sees from an instruction (Qwen Image, FLUX.2
+# Klein): with a page's worth of context, "remove the text" goes to a speech balloon beside the
+# selected sound effect, outside the mask, and the selection comes back unchanged.
+EDIT_CONTEXT = 0.1
+EDIT_CONTEXT_MIN = 48
 
 Inference = Callable[[Image.Image, np.ndarray], Image.Image]
 
@@ -106,7 +113,8 @@ class InpaintingStage(StageProcessor):
         if mask is not None and mask.generative:
             fill = functools.partial(provider._fill, prompt=mask.prompt or None)
             if getattr(provider, "prompted", False):
-                image = await asyncio.to_thread(fill_region, prepared.image, prepared.mask, fill)
+                context = (EDIT_CONTEXT, EDIT_CONTEXT_MIN) if getattr(provider, "crop_edits", False) else (FILL_CONTEXT, TILE_CONTEXT)
+                image = await asyncio.to_thread(fill_region, prepared.image, prepared.mask, fill, *context)
             else:
                 image = await asyncio.to_thread(inpaint_tiled, prepared.image, prepared.mask, prepared.text_mask, [], fill)
             return commit(input, provider, prepared, image)
@@ -308,8 +316,9 @@ def inpaint_tiled(
     return Image.fromarray(output, "RGB")
 
 
-def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference) -> Image.Image:
-    """Generative fill: the masked area in one crop, with context around it on every side."""
+def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference, context: float = FILL_CONTEXT, minimum: int = TILE_CONTEXT) -> Image.Image:
+    """Generative fill: the masked area in one crop, with ``context`` of its longer side (at least
+    ``minimum`` pixels) around it on every side."""
     if image.size != (mask.shape[1], mask.shape[0]):
         raise ValueError("image and mask dimensions differ")
     output = np.asarray(image.convert("RGB")).copy()
@@ -318,7 +327,7 @@ def fill_region(image: Image.Image, mask: np.ndarray, fill: Inference) -> Image.
         return Image.fromarray(output, "RGB")
     height, width = mask.shape
     left, top, right, bottom = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
-    margin = max(TILE_CONTEXT, round(max(right - left, bottom - top) * FILL_CONTEXT))
+    margin = max(minimum, round(max(right - left, bottom - top) * context))
     left, top = max(left - margin, 0), max(top - margin, 0)
     right, bottom = min(right + margin, width), min(bottom + margin, height)
     crop_mask = np.where(mask[top:bottom, left:right] >= 127, 255, 0).astype(np.uint8)

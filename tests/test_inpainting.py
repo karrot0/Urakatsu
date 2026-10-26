@@ -410,6 +410,42 @@ def test_generative_fill_runs_the_prompt_and_commits_cleanup(tmp_path):
     assert overlay[0, 0, 3] == 0
 
 
+def test_a_model_that_edits_its_crop_gets_only_a_rim_of_context():
+    from urakatsu.pipeline.stages.inpainting import EDIT_CONTEXT, EDIT_CONTEXT_MIN
+
+    image = Image.new("RGB", (1000, 800), (255, 255, 255))
+    mask = np.zeros((800, 1000), dtype=np.uint8)
+    mask[300:500, 400:650] = 255
+    sizes = []
+
+    def fill(crop, crop_mask):
+        sizes.append(crop.size)
+        return Image.new("RGB", crop.size, (9, 9, 9))
+
+    fill_region(image, mask, fill, EDIT_CONTEXT, EDIT_CONTEXT_MIN)
+    fill_region(image, mask, fill)
+    # 250x200 plus 48 px (10% of 250 is less) on every side; the default adds 128.
+    assert sizes == [(346, 296), (506, 456)]
+
+
+def test_generative_fill_sends_a_tight_crop_to_models_that_edit_it(tmp_path, monkeypatch):
+    import urakatsu.pipeline.stages.inpainting as stage
+
+    seen = []
+    monkeypatch.setattr(stage, "fill_region", lambda image, mask, fill, *context: seen.append(context) or image)
+    session, page = make_page_session(tmp_path, cleanup=False)
+    selection = Image.new("L", (8, 8), 0)
+    selection.paste(255, (2, 2, 6, 6))
+    inp = StageInput(session.snapshot(), page, None, None, ImageCache(), InpaintingMask(page=page, png=encode_png(selection), prompt="remove it", generative=True))
+    describer = PromptedFake()
+    editor = PromptedFake()
+    editor.crop_edits = True
+    for provider in (describer, editor):
+        asyncio.run(InpaintingStage().process(inp, provider))
+    assert seen == [(stage.FILL_CONTEXT, stage.TILE_CONTEXT), (stage.EDIT_CONTEXT, stage.EDIT_CONTEXT_MIN)]
+    assert Flux2KleinProvider.crop_edits
+
+
 def test_generative_fill_with_a_prompt_needs_a_prompted_model():
     lama = LamaProvider()
     with pytest.raises(ValueError, match="cannot follow a prompt"):

@@ -173,6 +173,7 @@ class RemoteModel:
             raise error_for(failure.get("kind", "load"), str(failure.get("error") or "the model failed to load"))
         if "instructed" in state:  # an inpainter whose recipe on the worker decides it
             self.provider.instructed = bool(state["instructed"])
+            self.provider.crop_edits = bool(state["instructed"]) and not getattr(type(self.provider), "sees_mask", False)
         self._check_weights(state)
 
     def _check_weights(self, state: dict[str, Any]) -> None:

@@ -129,6 +129,7 @@ class NanoBananaProvider(InpaintingProvider):
     remotable = False  # a Urakatsu worker cannot run it; only Google and Urakatsu Cloud can
     prompted: ClassVar[bool] = True
     instructed: ClassVar[bool] = True
+    sees_mask: ClassVar[bool] = True  # gets the mask as a second image, so a wide crop is fine
     Settings: ClassVar[type[ProviderSettings]] = NanoBananaSettings
     # Tests swap in a mock; Urakatsu Cloud runs many calls at once on one client.
     transport: ClassVar[Optional[httpx.BaseTransport]] = None

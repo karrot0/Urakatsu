@@ -197,6 +197,7 @@ class Flux2KleinProvider(DiffusionRecipeProvider):
     runtimes: ClassVar[tuple[str, ...]] = ("diffusion",)
     prompted: ClassVar[bool] = True
     instructed: ClassVar[bool] = True  # edits the crop it gets as a reference image
+    crop_edits: ClassVar[bool] = True
     Settings: ClassVar[type[ProviderSettings]] = Flux2KleinSettings
 
     weight_roles = {"diffusion": ("diffusion_model", "llm", "vae")}
