@@ -764,6 +764,7 @@ class Workspace:
         job = Job(id=f"job_{int(time.time() * 1000):x}{len(self.jobs)}", project_id=project_id, stop=StopToken())
         request = Request(operation=operation, scope=scope, stop=job.stop, progress=job.publish, inpainting_mask=mask)
         self.jobs[job.id] = job
+        job.publish(Progress(kind=ProgressKind.QUEUED))
 
         async def runner() -> None:
             try:

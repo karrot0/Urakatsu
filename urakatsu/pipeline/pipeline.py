@@ -29,7 +29,7 @@ from urakatsu.core.errors import ModelLoadError, ProcessingError, UrakatsuError,
 from urakatsu.core.progress import Progress, ProgressKind, ProgressSink, StepPreview, StepSink, reporting_steps
 from urakatsu.core.registry import Registry, registry as default_registry
 from urakatsu.core.stage import Operation, Stage
-from urakatsu.core.stop import StopToken
+from urakatsu.core.stop import StopToken, stopping
 from urakatsu.pipeline.images import ImageCache
 from urakatsu.pipeline.scheduler import Scheduler
 from urakatsu.pipeline.scope import NormalizedScope, ProjectScope, Scope
@@ -254,17 +254,18 @@ class Pipeline:
     async def _load_and_process(self, stage, processor, provider, input, stop, progress):
         _emit(progress, Progress(kind=ProgressKind.LOADING, page=input.page, stage=stage, model=provider.id))
         try:
-            await provider.load()
+            with stopping(stop):
+                await provider.load()
         except Exception as error:
-            return _Attempt(ErrorKind.MODEL_LOAD, error)
+            return _STOPPED if stop.stopped else _Attempt(ErrorKind.MODEL_LOAD, error)
         if stop.stopped:
             return _STOPPED
         _emit(progress, Progress(kind=ProgressKind.RUNNING, page=input.page, stage=stage, model=provider.id))
         try:
-            with reporting_steps(_step_sink(progress, input.page, stage, provider.id)):
+            with reporting_steps(_step_sink(progress, input.page, stage, provider.id)), stopping(stop):
                 patch = await processor.process(input, provider)
         except Exception as error:
-            return _Attempt(ErrorKind.PROCESSING, error)
+            return _STOPPED if stop.stopped else _Attempt(ErrorKind.PROCESSING, error)
         return _SKIPPED if patch.is_empty() else patch
 
     def _stage_error(self, stage: Stage, provider: Provider, kind: ErrorKind, error: BaseException) -> PipelineError:
