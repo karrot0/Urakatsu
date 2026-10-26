@@ -424,9 +424,10 @@ export function Canvas() {
   const mask = useRef<HTMLCanvasElement>(null);
   const dragLayer = useRef<HTMLDivElement>(null);
   const dragDelta = useRef<Pt>({ x: 0, y: 0 });
-  // In the render view the selected block is lifted off the render, so a move shows its text where it
-  // goes rather than where the render drew it: `origin` is the block's first frame point in that render.
-  const [lift, setLift] = useState<(Lift & { id: string; key: string; origin: Pt }) | null>(null);
+  // In the render view the selected block is lifted off the render, so a move or a turn shows its text
+  // where it goes rather than where the render drew it: `box` is the block's oriented box in that render,
+  // and `quad` whether it was laid out in it (a free-form block is lifted as its box to be turned).
+  const [lift, setLift] = useState<(Lift & { id: string; key: string; box: OBox; quad: boolean }) | null>(null);
   const liftText = useRef<HTMLImageElement>(null);
   // The version of the base image on screen, and of the one its URL is for.
   const [shown, setShown] = useState<string | null>(null);
@@ -499,7 +500,9 @@ export function Canvas() {
     if (editing && !editingBlock) setEditing(null);
   }, [editing, editingBlock]);
 
-  const movingId = gesture?.kind === "move" ? gesture.id : nudge?.id;
+  const movingId = gesture?.kind === "move" || gesture?.kind === "transform" ? gesture.id : nudge?.id;
+  const movingRef = useRef(movingId);
+  movingRef.current = movingId;
   const liftId = ws.view === "render" && !missing ? ws.blockId : undefined;
   useEffect(() => {
     const block = liftId ? page?.blocks.find((b) => b.layerId === liftId) : undefined;
@@ -507,24 +510,43 @@ export function Canvas() {
     const key = `${pageId}/${liftId}@${baseVersion}`;
     // A moving block keeps the lift it started with: the render behind it changes once the move is saved.
     if (lift?.id === liftId && (lift.key === key || movingId === liftId)) return;
-    const origin = { x: block.frame[0].x, y: block.frame[0].y };
+    const { box, quad } = orientedBox(block.frame);
     let alive = true;
-    void fetchLift(projectId, pageId, liftId, baseVersion).then((found) => alive && found && setLift({ ...found, id: liftId, key, origin }));
+    void fetchLift(projectId, pageId, liftId, baseVersion).then((found) => alive && found && setLift({ ...found, id: liftId, key, box, quad }));
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, pageId, liftId, baseVersion, movingId]);
-  // A block is lifted when the pointer comes onto it, ahead of a press that moves it.
-  const hoverBlock = (block: TextBlock) => {
-    if (projectId && pageId && ws.view === "render" && !missing && ws.tool === "select") void fetchLift(projectId, pageId, block.layerId, baseVersion);
+  // A free-form block lifted as its box would lay it out, for turning it (null when it needs none).
+  const liftAsBox = (block: TextBlock) => {
+    const { box, quad } = orientedBox(block.frame);
+    return projectId && pageId && ws.view === "render" && !missing && !quad ? fetchLift(projectId, pageId, block.layerId, baseVersion, boxCorners(box)) : null;
   };
-  // Where the lifted block's text is drawn: moved as far as the block is, from where the render had it.
-  const lifted = lift && lift.id === movingId && ws.view === "render" && !missing ? lift : null;
-  const liftShift = (): Pt => {
-    const from = gesture?.kind === "move" ? gesture.origin[0] : nudge?.points[0];
+  // A block is lifted when the pointer comes onto it (or onto a rotate handle), ahead of a press that moves (or turns) it.
+  const hoverBlock = (block: TextBlock, rotate?: boolean) => {
+    if (rotate) void liftAsBox(block);
+    else if (projectId && pageId && ws.view === "render" && !missing && ws.tool === "select") void fetchLift(projectId, pageId, block.layerId, baseVersion);
+  };
+  // Where the lifted block is shown, as its oriented box (a drag adds `dragDelta` as the pointer moves).
+  const pose =
+    !lift || lift.id !== movingId
+      ? null
+      : gesture?.kind === "move"
+        ? orientedBox(gesture.origin)
+        : gesture?.kind === "transform"
+          ? orientedBox(gesture.points)
+          : nudge && orientedBox(nudge.points);
+  const shownBox = pose?.box;
+  // Its text moves and turns with it, laid out as it is shown; a resize reflows the text, so that waits for the render.
+  const rigid = lift && pose && pose.quad === lift.quad && Math.abs(pose.box.w - lift.box.w) < 0.5 && Math.abs(pose.box.h - lift.box.h) < 0.5;
+  const lifted = rigid && ws.view === "render" && !missing ? lift : null;
+  const liftTransform = (): string => {
+    if (!lifted || !shownBox) return "none";
     const drag = gesture?.kind === "move" ? dragDelta.current : { x: 0, y: 0 };
-    return lifted && from ? { x: from.x - lifted.origin.x + drag.x, y: from.y - lifted.origin.y + drag.y } : { x: 0, y: 0 };
+    const dx = shownBox.cx + drag.x - lifted.box.cx;
+    const dy = shownBox.cy + drag.y - lifted.box.cy;
+    return `translate(${dx * zoom}px, ${dy * zoom}px) rotate(${shownBox.angle - lifted.box.angle}rad)`;
   };
 
   // A selection belongs to the fill tool and its page.
@@ -1105,6 +1127,13 @@ export function Canvas() {
     const { box, quad } = orientedBox(block.frame);
     // Rotating a free-form outline turns it into its box: only a rectangle carries an angle to the renderer.
     const origin = mode === "rotate" && !quad ? boxCorners(box) : block.frame.map((p) => ({ x: p.x, y: p.y }));
+    // So its text is lifted as the box would lay it out, to be turned while it rotates.
+    const turning = mode === "rotate" ? liftAsBox(block) : null;
+    if (turning) {
+      movingRef.current = block.layerId; // a prefetched lift arrives before the gesture renders
+      const key = `${pageId}/${block.layerId}@${baseVersion}#box`;
+      void turning.then((found) => found && movingRef.current === block.layerId && setLift({ ...found, id: block.layerId, key, box, quad: true }));
+    }
     setGesture({ kind: "transform", id: block.layerId, mode, handle, box, origin, start: toImage(event), points: origin, readout: "" });
   };
 
@@ -1156,10 +1185,7 @@ export function Canvas() {
       const dy = clamp(point.y - gesture.start.y, -Math.min(...ys), page.height - Math.max(...ys));
       dragDelta.current = { x: dx, y: dy };
       if (dragLayer.current) dragLayer.current.style.transform = `translate(${dx * zoom}px, ${dy * zoom}px)`;
-      if (liftText.current && lifted) {
-        const shift = liftShift();
-        liftText.current.style.transform = `translate(${shift.x * zoom}px, ${shift.y * zoom}px)`;
-      }
+      if (liftText.current && lifted) liftText.current.style.transform = liftTransform();
     } else if (gesture.kind === "transform") {
       const { box } = gesture;
       if (gesture.mode === "rotate") {
@@ -1213,13 +1239,13 @@ export function Canvas() {
       return;
     }
     const moved = gesture.points.some((p, i) => Math.abs(p.x - gesture.origin[i].x) > 0.01 || Math.abs(p.y - gesture.origin[i].y) > 0.01);
-    if (moved) void ws.updateBlock(gesture.id, { frame: gesture.points });
+    if (moved) saveFrame(gesture.id, gesture.origin, gesture.points);
   };
 
   if (!ws.project) return null;
   // The comparison shows between fills of the current selection, not while one runs.
   const comparing = comparison?.ready && comparison.selection === selection && !filling ? comparison : null;
-  const liftAt = liftShift();
+  const liftAt = liftTransform();
   const svgCursor = panning ? (gesture?.kind === "pan" ? "grabbing" : "grab") : brushCursor ? (osRing ?? "none") : ws.tool === "text" || ws.tool === "fill" ? "crosshair" : ws.tool === "color_picker" ? "copy" : "default";
 
   return (
@@ -1323,7 +1349,7 @@ export function Canvas() {
                 </div>
               ))}
             {lifted && (
-              // The moving block's text lifted off the render, over the render as it is without it.
+              // The moving or turning block's text lifted off the render, over the render as it is without it.
               <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" aria-hidden>
                 <img className="absolute max-w-none select-none" src={lifted.under} alt="" draggable={false} style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom }} />
                 <img
@@ -1332,7 +1358,15 @@ export function Canvas() {
                   src={lifted.text}
                   alt=""
                   draggable={false}
-                  style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom, transform: `translate(${liftAt.x * zoom}px, ${liftAt.y * zoom}px)` }}
+                  style={{
+                    left: lifted.x * zoom,
+                    top: lifted.y * zoom,
+                    width: lifted.width * zoom,
+                    height: lifted.height * zoom,
+                    // Turned about the block's center, where a rotation turns it.
+                    transformOrigin: `${(lifted.box.cx - lifted.x) * zoom}px ${(lifted.box.cy - lifted.y) * zoom}px`,
+                    transform: liftAt,
+                  }}
                 />
               </div>
             )}
@@ -1609,12 +1643,16 @@ type Lift = { x: number; y: number; width: number; height: number; text: string;
 
 const lifts = new Map<string, Promise<Lift | null>>();
 
-/** A text block lifted off the render at `version`; the last few are kept, for moving a block again. */
-function fetchLift(projectId: string, pageId: string, layerId: string, version: string): Promise<Lift | null> {
-  const key = `${projectId}/${pageId}/${layerId}@${version}`;
+/**
+ * A text block lifted off the render at `version`, or as it would render with the frame `outline`; the
+ * last few are kept, for moving a block again.
+ */
+function fetchLift(projectId: string, pageId: string, layerId: string, version: string, outline?: Pt[]): Promise<Lift | null> {
+  const frame = outline?.map((p) => `${p.x},${p.y}`).join(",");
+  const key = `${projectId}/${pageId}/${layerId}@${version}${frame ? `#${frame}` : ""}`;
   let found = lifts.get(key);
   if (!found) {
-    const url = `/api/v1/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(pageId)}/blocks/${encodeURIComponent(layerId)}/lift`;
+    const url = `/api/v1/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(pageId)}/blocks/${encodeURIComponent(layerId)}/lift${frame ? `?frame=${frame}` : ""}`;
     found = fetch(url).then((response) => (response.ok ? response.json() : null)).catch(() => null);
     lifts.set(key, found);
     if (lifts.size > 8) lifts.delete(lifts.keys().next().value!);
@@ -1929,7 +1967,7 @@ function Overlays({
   dragging?: string;
   startMove: (event: ReactPointerEvent, block: TextBlock) => void;
   startTransform: TransformStart;
-  hoverBlock: (block: TextBlock) => void;
+  hoverBlock: (block: TextBlock, rotate?: boolean) => void;
 }) {
   const ws = useWorkspace();
   return (
@@ -1993,7 +2031,7 @@ function BlockOverlay({
   zoom: number;
   startMove?: (event: ReactPointerEvent, block: TextBlock) => void;
   startTransform?: TransformStart;
-  hoverBlock?: (block: TextBlock) => void;
+  hoverBlock?: (block: TextBlock, rotate?: boolean) => void;
   /** "120 × 80" or "15°" while this block is being transformed. */
   readout?: string;
 }) {
@@ -2037,6 +2075,7 @@ function BlockOverlay({
                 r={12 / zoom}
                 style={{ cursor: ROTATE_CURSOR }}
                 onPointerDown={startTransform && ((event) => startTransform(event, block, "rotate", handle))}
+                onPointerEnter={hoverBlock && (() => hoverBlock(block, true))}
               />
             );
           })}

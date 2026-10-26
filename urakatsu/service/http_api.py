@@ -263,8 +263,11 @@ def api_router(ws: Workspace) -> APIRouter:
     # -- text blocks -------------------------------------------------------------------------------------
 
     @router.get("/projects/{project_id}/pages/{page_id}/blocks/{layer_id}/lift")
-    def lift_block(project_id: str, page_id: str, layer_id: str):
-        return guard(ws.lift, project_id, page_id, layer_id)
+    def lift_block(project_id: str, page_id: str, layer_id: str, frame: Optional[str] = None):
+        # ``frame`` ("x,y,x,y,..."): lift the block as it would render with that frame.
+        values = [float(v) for v in frame.split(",")] if frame else None
+        outline = [{"x": x, "y": y} for x, y in zip(values[::2], values[1::2])] if values else None
+        return guard(ws.lift, project_id, page_id, layer_id, outline)
 
     @router.patch("/projects/{project_id}/pages/{page_id}/blocks/{layer_id}")
     def update_block(project_id: str, page_id: str, layer_id: str, patch: TextBlockPatch):
