@@ -5,6 +5,27 @@ uses (distance transform, morphology, Suzuki-Abe contour tracing, Ramer-Douglas-
 simplification, polygon area and length) are reproduced with the same integer and f64/f32
 semantics, including tie-breaking of ``min_by_key`` (first) and ``max_by_key`` (last). OpenCV is
 used only for exact connected-component labelling and the exact Euclidean distance transform.
+
+Difference from Koharu: ``infer_outline`` only finds a stroke whose colour differs from the page
+behind the text, so the common manga case of dark text with a white stroke on white paper, where
+the stroke shows only where the text crosses art or screentone, came back as unstroked text.
+``infer_background_halo`` (no Rust counterpart) runs when no outline is found and recognises that
+stroke by its rim: the art around the glyphs stops at one constant distance from them.
+
+Difference from Koharu: ``measured_stroke_width`` takes the median rim distance in Rust. When the
+stroke colour joins larger areas of the same colour in the window (white clothes, a white text
+box), their far edges outnumber the true rim and pull the median to two or three times the real
+width. The width is taken at the peak of the rim distances instead, and a rim with no clear peak
+(a box behind the text rather than a stroke traced around it) measures no stroke. ``infer_outline``
+also skips a fill that lies mostly outside the text's mask: when a neighbouring text reaches into
+the sampling window, the counters of its glyphs otherwise read as a fill "outlined" by the glyphs.
+
+Difference from Koharu: without an outline, Rust picks the ink as the cluster most unlike the
+window border's colour, counting a cluster's pixels outside the mask when it has none inside. Text
+on a coloured band that the window cuts across then took the colour of the page beside the band,
+or of a neighbouring text. ``infer_text_paint`` judges ink against what lines the inside of the
+mask's edge when the border colour barely reaches into the mask (``local_background_index``), and
+passes over clusters with no pixels in the mask while another cluster has some.
 """
 
 from __future__ import annotations
@@ -42,6 +63,22 @@ COLOR_CLUSTER_MIN_DISTANCE_SQUARED = 32 * 32
 COLOR_CLUSTER_COUNT = 4
 MIN_EXTREME_COLOR_PIXELS = 4
 MIN_MEASURED_STROKE_WIDTH = 2
+# measured_stroke_width: share of the nearby rim (out to twice the peak distance) that must lie
+# within one pixel of the peak for the band to count as a stroke.
+OUTLINE_RIM_CONCENTRATION = 0.35
+# local_background_index: below this share of the mask, the window border's colour is not what the
+# text sits on.
+LOCAL_BACKGROUND_MIN_SHARE = 0.3
+# infer_background_halo: rings around the glyphs are searched out to this distance; inside the
+# stroke almost no ring pixel contrasts with the halo colour, and at its rim a clear share does.
+HALO_SEARCH_DISTANCE = 24
+HALO_QUIET_FRACTION = 0.06
+HALO_RIM_FRACTION = 0.15
+HALO_MIN_RIM_PIXELS = 16
+HALO_RIM_CONCENTRATION = 0.5
+# A wider "stroke" than this many glyph depths (distance from glyph centre line to its edge) is
+# plain paper between unstroked text and nearby art.
+HALO_MAX_WIDTH_PER_GLYPH_DEPTH = 5
 DIALOGUE_MASK_CONTAINMENT_THRESHOLD = np.float32(0.9)
 NON_MAXIMUM_SUPPRESSION_THRESHOLD = np.float32(0.5)
 F32_ZERO = np.float32(0.0)
@@ -644,20 +681,51 @@ def infer_text_paint(pixels: _Pixels, background, width: int, height: int):
         return normalize_text_color(centers[nonempty[0]]), None, None
 
     background_index = min(nonempty, key=lambda index: color_distance_squared(centers[index], background))
+    background_index = local_background_index(pixels, assignment, background_index, width, height)
+    # Not in Rust: a cluster with no pixels in the mask is a neighbour's ink, unless no cluster has any.
+    in_mask = {index: int(np.count_nonzero(pixels.inside[assignment == index])) >= 8 for index in nonempty}
+    candidates = [index for index in nonempty if index != background_index]
+    if any(in_mask[index] for index in candidates):
+        candidates = [index for index in candidates if in_mask[index]]
     fill_index = None
     fill_score = -1
-    for index in nonempty:
-        if index == background_index:
-            continue
-        score = cluster_ink_score(pixels, assignment, index, centers[index], background)
+    for index in candidates:
+        score = cluster_ink_score(pixels, assignment, index, centers[index], centers[background_index])
         if fill_index is None or score >= fill_score:  # max_by_key: last maximum
             fill_index, fill_score = index, score
-    color = (
-        representative_ink_color(pixels, assignment, fill_index)
-        if fill_index is not None
-        else centers[background_index]
-    )
+    if fill_index is None:
+        return normalize_text_color(centers[background_index]), None, None
+    color = representative_ink_color(pixels, assignment, fill_index)
+    halo = infer_background_halo(pixels, assignment, fill_index, color, background, width, height)
+    if halo is not None:
+        return normalize_text_color(color), halo[0], halo[1]
     return normalize_text_color(color), None, None
+
+
+def local_background_index(pixels: _Pixels, assignment: np.ndarray, background_index: int, width: int, height: int) -> int:
+    """The cluster the text sits on (no Rust counterpart).
+
+    Rust judges ink against the window border's colour. When that colour barely reaches into the
+    mask (text on a band or box that the axis-aligned window cuts across), the text sits on whatever
+    lines the inside of the mask's edge instead; the edge rather than the whole mask, since bold
+    lettering can fill most of a tight mask.
+    """
+    inside_counts = np.bincount(assignment[pixels.inside], minlength=COLOR_CLUSTER_COUNT)
+    total = int(inside_counts.sum())
+    if total == 0 or inside_counts[background_index] >= total * LOCAL_BACKGROUND_MIN_SHARE:
+        return background_index
+    inside_grid = np.zeros((height, width), dtype=bool)
+    inside_grid[pixels.ly[pixels.inside], pixels.lx[pixels.inside]] = True
+    edge = (inside_grid & _dilate3(~inside_grid))[pixels.ly, pixels.lx]
+    edge_counts = np.bincount(assignment[edge], minlength=COLOR_CLUSTER_COUNT)
+    if int(edge_counts.sum()) == 0:
+        return background_index
+    local = int(np.argmax(edge_counts))
+    # A background runs on past the mask; ink lining a glyph-tight mask stops at it.
+    outside = int(np.count_nonzero((assignment == local) & ~pixels.inside))
+    if outside < inside_counts[local] * LOCAL_BACKGROUND_MIN_SHARE:
+        return background_index
+    return local
 
 
 def cluster_ink_score(pixels: _Pixels, assignment: np.ndarray, index: int, center, background) -> int:
@@ -715,7 +783,10 @@ def measured_stroke_width(
     width: int,
     height: int,
 ) -> Optional[float]:
-    """``measured_stroke_width``: median distance from fill to the outer rim of the stroke band."""
+    """``measured_stroke_width``: the peak distance from fill to the outer rim of the stroke band.
+
+    Rust takes the median; see the module docstring for why the peak is used here.
+    """
     if len(stroke_index) < 8 or len(fill_index) < 8:
         return None
     fill_grid = np.zeros((height, width), dtype=bool)
@@ -727,8 +798,13 @@ def measured_stroke_width(
     values = distances[sy, sx][keep].astype(np.int64)
     if len(values) < 8:
         return None
-    median = _histogram_median_values(values)
-    return float(median) if median >= MIN_MEASURED_STROKE_WIDTH else None
+    counts = np.bincount(values, minlength=2)
+    windows = counts + np.append(counts[1:], 0) + np.insert(counts[:-1], 0, 0)
+    counts[0] = 0
+    peak = int(np.argmax(counts))
+    if windows[peak] < counts[1 : 2 * peak + 3].sum() * OUTLINE_RIM_CONCENTRATION:
+        return None
+    return float(peak) if peak >= MIN_MEASURED_STROKE_WIDTH else None
 
 
 def infer_outline(
@@ -759,6 +835,11 @@ def infer_outline(
             enclosed = fill_members[~outside[pixels.ly[fill_members], pixels.lx[fill_members]]]
             if len(enclosed) < 8:
                 continue
+            # Not in Rust: a fill outside this text's mask is a neighbour's glyph counters, and the
+            # glyph around them is not this text's stroke.
+            inside_fill = int(np.count_nonzero(pixels.inside[enclosed]))
+            if inside_fill * 2 < len(enclosed):
+                continue
             fill_grid = np.zeros((height, width), dtype=bool)
             fill_grid[pixels.ly[enclosed], pixels.lx[enclosed]] = True
             selection = _enclosing_cluster_selection(assignments, stroke_index, fill_grid)
@@ -785,12 +866,84 @@ def infer_outline(
             stroke_width = measured_stroke_width(pixels, stroke, enclosed, outside, width, height)
             if stroke_width is None:
                 continue
-            inside_fill = int(np.count_nonzero(pixels.inside[enclosed]))
             evidence = len(enclosed) + inside_fill
             score = contrast * min(evidence, 4096)
             if best is None or score > best.score:
                 best = _Outline(fill=normalized_fill, stroke=normalized_stroke, width=stroke_width, score=score)
     return best
+
+
+def infer_background_halo(
+    pixels: _Pixels,
+    assignment: np.ndarray,
+    fill_index: int,
+    fill_color,
+    background,
+    width: int,
+    height: int,
+) -> Optional[tuple[tuple[int, int, int], float]]:
+    """A stroke in the page's own colour, seen only where the text crosses art (no Rust counterpart).
+
+    Glyphs are the fill cluster's components inside the mask that do not touch the window border, so
+    art in the fill colour is not mistaken for text. Rings at each distance from the glyphs then show
+    the stroke: the first rings past the anti-aliasing hold almost nothing but the halo colour, and
+    the ring just past the stroke's rim suddenly holds art. The art's edge must sit at that one
+    distance, as a stroke traced around the glyphs makes it, rather than spread like a panel or
+    bubble line that merely passes nearby, and the band must stay in proportion to the glyph lines.
+    """
+    valid = np.zeros((height, width), dtype=bool)
+    valid[pixels.ly, pixels.lx] = True
+    members = assignment == fill_index
+    fill_grid = np.zeros((height, width), dtype=bool)
+    fill_grid[pixels.ly[members], pixels.lx[members]] = True
+    inside_grid = np.zeros((height, width), dtype=bool)
+    inside_grid[pixels.ly[pixels.inside], pixels.lx[pixels.inside]] = True
+    _, labels = cv2.connectedComponents(fill_grid.astype(np.uint8), connectivity=8)
+    border = np.concatenate([labels[1], labels[-2], labels[:, 1], labels[:, -2]])
+    glyph_labels = np.setdiff1d(np.unique(labels[fill_grid & inside_grid]), np.append(border, 0))
+    glyph = np.isin(labels, glyph_labels)
+    if int(np.count_nonzero(glyph)) < 8:
+        return None
+
+    distance = _distance_from_sites(glyph).astype(np.int64)
+    colors = np.zeros((height, width, 3), dtype=np.int64)
+    colors[pixels.ly, pixels.lx] = pixels.color
+    ring = valid & (distance >= 2) & (distance <= 4)
+    if int(np.count_nonzero(ring)) < 8:
+        return None
+    halo = median_color(colors[ring])
+    # A halo unlike the background is infer_outline's to judge, and it already declined.
+    if (
+        color_distance_squared(halo, background) >= COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+        or color_distance_squared(halo, fill_color) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+    ):
+        return None
+    near = valid & (((colors - np.array(halo, dtype=np.int64)) ** 2).sum(axis=2) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED)
+    contrast = valid & ~near & ~glyph
+    edge = contrast & _dilate3(near)
+
+    searched = valid & (distance <= HALO_SEARCH_DISTANCE)
+    length = HALO_SEARCH_DISTANCE + 1
+    totals = np.bincount(distance[searched], minlength=length)
+    contrasts = np.bincount(distance[searched & contrast], minlength=length)
+    edges = np.bincount(distance[searched & edge], minlength=length)
+    fractions = contrasts / np.maximum(totals, 1)
+    quiet = next((d for d in range(2, length) if totals[d] > 0 and fractions[d] <= HALO_QUIET_FRACTION), None)
+    if quiet is None:
+        return None
+    rim = next((d for d in range(quiet + 1, length) if fractions[d] >= HALO_RIM_FRACTION), None)
+    if rim is None or rim - 1 < MIN_MEASURED_STROKE_WIDTH or contrasts[rim] < HALO_MIN_RIM_PIXELS:
+        return None
+    depths = np.sort(_distance_from_sites(~glyph)[glyph])
+    if rim - 1 > HALO_MAX_WIDTH_PER_GLYPH_DEPTH * int(depths[(len(depths) - 1) * 99 // 100]):
+        return None
+    nearby_edges = int(edges[rim : rim + 6].sum())
+    if nearby_edges == 0 or int(edges[rim : rim + 2].sum()) < nearby_edges * HALO_RIM_CONCENTRATION:
+        return None
+    stroke_color = normalize_text_color(halo)
+    if stroke_color == normalize_text_color(fill_color):
+        return None
+    return stroke_color, float(rim - 1)
 
 
 # ---- geometry (rectangle, rotated rectangle, mask outline) ---------------------------------------

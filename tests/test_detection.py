@@ -430,6 +430,62 @@ def _outlined_text_on_textured_background():
     return image, detection
 
 
+def _text_crossing_artwork(stroke_width, bar_lefts, art_corner):
+    """Black bars on white paper, black art in the corner past ``art_corner``, an optional paper-white stroke."""
+    size = 120
+    left, top, right, bottom = 20, 20, 100, 100
+    image = np.full((size, size, 3), 255, dtype=np.uint8)
+    image[art_corner[1] :, art_corner[0] :] = (12, 12, 12)
+    bars = np.zeros((size, size), dtype=bool)
+    for x in bar_lefts:
+        bars[30:90, x : x + 3] = True
+    if stroke_width:
+        image[det._distance_from_sites(bars) <= stroke_width] = (255, 255, 255)
+    image[bars] = (0, 0, 0)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[top:bottom, left:right] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _outlined_text_joining_a_stroke_colored_area(stroke_width):
+    """Black text with a white outline on navy, the outline running into a white area to its right."""
+    size = 120
+    image = np.full((size, size, 3), (16, 24, 88), dtype=np.uint8)
+    image[40:60, 20:100] = (255, 255, 255)
+    fill = np.zeros((size, size), dtype=bool)
+    fill[40 + stroke_width : 60 - stroke_width, 20 + stroke_width : 60 - stroke_width] = True
+    image[fill] = (0, 0, 0)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[40:60, 20:60] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _text_on_a_band_across_the_page():
+    """White bars on an orange band crossing pink paper, a dark red neighbouring glyph outside the mask."""
+    size = 120
+    image = np.full((size, size, 3), (230, 178, 200), dtype=np.uint8)
+    image[:, 40:80] = (239, 159, 20)
+    for x in (50, 60, 70):
+        image[20:100, x : x + 3] = (246, 237, 238)
+    image[20:100, 95:99] = (103, 41, 32)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[16:104, 44:78] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
+def _plain_text_beside_a_neighbouring_glyph():
+    """Blue bars inside the mask; outside it, a black ring around a white counter on pink paper."""
+    size = 120
+    image = np.full((size, size, 3), (230, 178, 200), dtype=np.uint8)
+    for x in (24, 34, 44):
+        image[30:90, x : x + 3] = (20, 60, 200)
+    image[40:80, 70:100] = (0, 0, 0)
+    image[46:74, 76:94] = (255, 255, 255)
+    pixels = np.zeros((size, size), dtype=np.uint8)
+    pixels[26:94, 20:50] = 255
+    return image, _detection_from_mask("text", 0, 0, size, size, pixels)
+
+
 def test_typography_comes_from_horizontal_text_mask():
     image, detection = _masked_text(52.0, 12.0, 12.0, (24, 80, 160))
 
@@ -534,6 +590,56 @@ def test_outlined_text_is_separated_from_matching_dark_artwork():
     assert inferred.color == (0, 0, 0)
     assert inferred.stroke_color == (255, 255, 255)
     assert inferred.stroke_width == 3.0
+
+
+@pytest.mark.parametrize("stroke_width", [3, 5])
+def test_outline_width_ignores_a_same_colored_area_the_outline_runs_into(stroke_width):
+    image, detection = _outlined_text_joining_a_stroke_colored_area(stroke_width)
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color == (255, 255, 255)
+    assert inferred.stroke_width == float(stroke_width)
+
+
+def test_text_on_a_band_is_judged_against_the_band_not_the_page_beside_it():
+    image, detection = _text_on_a_band_across_the_page()
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (255, 255, 255)
+    assert inferred.stroke_color is None
+
+
+def test_counters_of_a_neighbouring_glyph_are_not_an_outlined_fill():
+    image, detection = _plain_text_beside_a_neighbouring_glyph()
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.stroke_color is None
+    assert inferred.stroke_width is None
+
+
+@pytest.mark.parametrize("stroke_width", [3, 4, 6])
+def test_stroke_matching_the_paper_shows_where_text_crosses_artwork(stroke_width):
+    image, detection = _text_crossing_artwork(stroke_width, (30, 50, 70, 90), (64, 56))
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color == (255, 255, 255)
+    assert inferred.stroke_width == float(stroke_width)
+
+
+def test_paper_between_unstroked_text_and_artwork_is_not_a_stroke():
+    image, detection = _text_crossing_artwork(0, (60,), (75, 24))
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color is None
+    assert inferred.stroke_width is None
 
 
 def test_colors_in_the_same_luminance_class_do_not_create_a_border():
