@@ -127,6 +127,7 @@ BUN = Package(
         Variant("win-cpu", (r"bun-windows-x64-baseline\.zip",)),
         Variant("linux-cpu", (r"bun-linux-x64-baseline\.zip",)),
         Variant("macos-arm64", (r"bun-darwin-aarch64\.zip",)),
+        Variant("macos-x64", (r"bun-darwin-x64-baseline\.zip",)),
     ),
     on_demand=True,
 )
@@ -141,6 +142,7 @@ SUWAYOMI = Package(
         Variant("win-cpu", (r"Suwayomi-Server-v[\d.]+-windows-x64\.zip",)),
         Variant("linux-cpu", (r"Suwayomi-Server-v[\d.]+-linux-x64\.tar\.gz",)),
         Variant("macos-arm64", (r"Suwayomi-Server-v[\d.]+-macOS-arm64\.tar\.gz",)),
+        Variant("macos-x64", (r"Suwayomi-Server-v[\d.]+-macOS-x64\.tar\.gz",)),
     ),
     on_demand=True,
 )
@@ -159,7 +161,8 @@ def preferred_variants(devices: list[Device]) -> list[str]:
 
     CUDA for NVIDIA, ROCm for a supported AMD GPU once the ROCm libraries the builds load are
     present (``rocm.available``), then Vulkan for any GPU, then the CPU. On macOS, the build for
-    the Mac's processor: Apple silicon, or Intel (``macos-x64``, which only llama.cpp publishes).
+    the Mac's processor: Apple silicon, or Intel (``macos-x64``: llama.cpp, Bun and Suwayomi
+    Server publish one; stable-diffusion.cpp does not).
     """
     system = platform.system()
     prefix = {"Windows": "win", "Linux": "linux", "Darwin": "macos"}.get(system, "")
