@@ -370,12 +370,20 @@ export function Canvas() {
   const mask = useRef<HTMLCanvasElement>(null);
   const dragLayer = useRef<HTMLDivElement>(null);
   const dragDelta = useRef<Pt>({ x: 0, y: 0 });
+  // In the render view the selected block is lifted off the render, so a move shows its text where it
+  // goes rather than where the render drew it: `origin` is the block's first frame point in that render.
+  const [lift, setLift] = useState<(Lift & { id: string; key: string; origin: Pt }) | null>(null);
+  const liftText = useRef<HTMLImageElement>(null);
+  // The version of the base image on screen, and of the one its URL is for.
+  const [shown, setShown] = useState<string | null>(null);
+  const urlVersion = useRef("");
   const anchor = useRef<{ point: Pt; client: Pt } | null>(null);
   // The scroll area is the page plus room to scroll it nearly out of view, so it depends on the viewport size.
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const center = useRef(false);
   // An arrow-key nudge in progress: previewed like a drag, saved as one edit when the keys rest.
-  const [nudge, setNudge] = useState<{ id: string; origin: Pt[]; points: Pt[]; saving?: boolean } | null>(null);
+  // `saved` once the server has it: it is still shown until the render with it is on screen.
+  const [nudge, setNudge] = useState<{ id: string; origin: Pt[]; points: Pt[]; saving?: boolean; saved?: boolean } | null>(null);
   const nudgeRef = useRef(nudge);
   nudgeRef.current = nudge;
   const nudgeTimer = useRef<number | undefined>(undefined);
@@ -403,11 +411,16 @@ export function Canvas() {
     setMissing(false);
     void (async () => {
       let found = await assetUrl(projectId, pageId, ws.view === "render" ? "render" : "source", baseVersion);
+      let version = baseVersion;
       if (!found && ws.view === "render") {
         setMissing(true);
         found = await assetUrl(projectId, pageId, "source", sourceVersion);
+        version = sourceVersion;
       }
-      if (alive) setUrl(found);
+      if (alive) {
+        urlVersion.current = version;
+        setUrl(found);
+      }
     })();
     return () => {
       alive = false;
@@ -430,6 +443,34 @@ export function Canvas() {
   useEffect(() => {
     if (editing && !editingBlock) setEditing(null);
   }, [editing, editingBlock]);
+
+  const movingId = gesture?.kind === "move" ? gesture.id : nudge?.id;
+  const liftId = ws.view === "render" && !missing ? ws.blockId : undefined;
+  useEffect(() => {
+    const block = liftId ? page?.blocks.find((b) => b.layerId === liftId) : undefined;
+    if (!projectId || !pageId || !liftId || !block?.frame.length) return;
+    const key = `${pageId}/${liftId}@${baseVersion}`;
+    // A moving block keeps the lift it started with: the render behind it changes once the move is saved.
+    if (lift?.id === liftId && (lift.key === key || movingId === liftId)) return;
+    const origin = { x: block.frame[0].x, y: block.frame[0].y };
+    let alive = true;
+    void fetchLift(projectId, pageId, liftId, baseVersion).then((found) => alive && found && setLift({ ...found, id: liftId, key, origin }));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, pageId, liftId, baseVersion, movingId]);
+  // A block is lifted when the pointer comes onto it, ahead of a press that moves it.
+  const hoverBlock = (block: TextBlock) => {
+    if (projectId && pageId && ws.view === "render" && !missing && ws.tool === "select") void fetchLift(projectId, pageId, block.layerId, baseVersion);
+  };
+  // Where the lifted block's text is drawn: moved as far as the block is, from where the render had it.
+  const lifted = lift && lift.id === movingId && ws.view === "render" && !missing ? lift : null;
+  const liftShift = (): Pt => {
+    const from = gesture?.kind === "move" ? gesture.origin[0] : nudge?.points[0];
+    const drag = gesture?.kind === "move" ? dragDelta.current : { x: 0, y: 0 };
+    return lifted && from ? { x: from.x - lifted.origin.x + drag.x, y: from.y - lifted.origin.y + drag.y } : { x: 0, y: 0 };
+  };
 
   // A selection belongs to the fill tool and its page.
   useEffect(() => {
@@ -513,13 +554,16 @@ export function Canvas() {
 
   const clampPoint = useCallback((p: Pt): Pt => (page ? { x: clamp(p.x, 0, page.width), y: clamp(p.y, 0, page.height) } : p), [page]);
 
-  // Shows a moved block where it was dropped until the saved page arrives.
+  // Shows a moved block where it was dropped until the saved page arrives, and its render with it.
   const saveFrame = useCallback((id: string, origin: Pt[], points: Pt[]) => {
     const saving = { id, origin, points, saving: true };
     nudgeRef.current = saving;
     setNudge(saving);
-    void updateBlock.current(id, { frame: points }).finally(() => setNudge((current) => (current === saving ? null : current)));
+    void updateBlock.current(id, { frame: points }).finally(() => setNudge((current) => (current === saving ? { ...saving, saved: true } : current)));
   }, []);
+  useEffect(() => {
+    if (nudge?.saved && (shown === baseVersion || missing)) setNudge(null);
+  }, [nudge, shown, baseVersion, missing]);
 
   const commitNudge = useCallback(() => {
     window.clearTimeout(nudgeTimer.current);
@@ -538,7 +582,7 @@ export function Canvas() {
       if (!block || block.frame.length < 3) return false;
       const pending = nudgeRef.current;
       // Keys pressed while a nudge is saving continue from where the block is shown.
-      const base = pending && pending.id === block.layerId ? { ...pending, saving: false } : { id: block.layerId, origin: block.frame.map((p) => ({ x: p.x, y: p.y })), points: block.frame.map((p) => ({ x: p.x, y: p.y })) };
+      const base = pending && pending.id === block.layerId ? { ...pending, saving: false, saved: false } : { id: block.layerId, origin: block.frame.map((p) => ({ x: p.x, y: p.y })), points: block.frame.map((p) => ({ x: p.x, y: p.y })) };
       const xs = base.points.map((p) => p.x);
       const ys = base.points.map((p) => p.y);
       const stepX = clamp(dx, -Math.min(...xs), page.width - Math.max(...xs));
@@ -990,6 +1034,10 @@ export function Canvas() {
       const dy = clamp(point.y - gesture.start.y, -Math.min(...ys), page.height - Math.max(...ys));
       dragDelta.current = { x: dx, y: dy };
       if (dragLayer.current) dragLayer.current.style.transform = `translate(${dx * zoom}px, ${dy * zoom}px)`;
+      if (liftText.current && lifted) {
+        const shift = liftShift();
+        liftText.current.style.transform = `translate(${shift.x * zoom}px, ${shift.y * zoom}px)`;
+      }
     } else if (gesture.kind === "transform") {
       const { box } = gesture;
       if (gesture.mode === "rotate") {
@@ -1049,6 +1097,7 @@ export function Canvas() {
   if (!ws.project) return null;
   // The comparison shows between fills of the current selection, not while one runs.
   const comparing = comparison?.ready && comparison.selection === selection && !filling ? comparison : null;
+  const liftAt = liftShift();
   const svgCursor = panning ? (gesture?.kind === "pan" ? "grabbing" : "grab") : brushCursor ? (osRing ?? "none") : ws.tool === "text" || ws.tool === "fill" ? "crosshair" : ws.tool === "color_picker" ? "copy" : "default";
 
   return (
@@ -1069,7 +1118,18 @@ export function Canvas() {
             className="absolute rounded-pill bg-surface shadow-floating"
             style={{ width: page.width * zoom, height: page.height * zoom, left: Math.max(viewport.width - MIN_OVERLAP, 40), top: Math.max(viewport.height - MIN_OVERLAP, 40) }}
           >
-            {url && <img ref={baseImage} className="block rounded-[inherit] select-none" src={url} width={page.width * zoom} height={page.height * zoom} alt={page.name} draggable={false} />}
+            {url && (
+              <img
+                ref={baseImage}
+                className="block rounded-[inherit] select-none"
+                src={url}
+                width={page.width * zoom}
+                height={page.height * zoom}
+                alt={page.name}
+                draggable={false}
+                onLoad={() => setShown(urlVersion.current)}
+              />
+            )}
             {showLayers &&
               rasters.map((layer) => (
                 <LayerCanvas
@@ -1119,6 +1179,20 @@ export function Canvas() {
                   )}
                 </div>
               ))}
+            {lifted && (
+              // The moving block's text lifted off the render, over the render as it is without it.
+              <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" aria-hidden>
+                <img className="absolute max-w-none select-none" src={lifted.under} alt="" draggable={false} style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom }} />
+                <img
+                  ref={liftText}
+                  className="absolute max-w-none select-none will-change-transform"
+                  src={lifted.text}
+                  alt=""
+                  draggable={false}
+                  style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom, transform: `translate(${liftAt.x * zoom}px, ${liftAt.y * zoom}px)` }}
+                />
+              </div>
+            )}
             <svg
               ref={svg}
               // touch-none: a pen or finger drag draws instead of scrolling the page (which would cancel the stroke).
@@ -1146,6 +1220,7 @@ export function Canvas() {
                 dragging={gesture?.kind === "move" ? gesture.id : undefined}
                 startMove={startMove}
                 startTransform={startTransform}
+                hoverBlock={hoverBlock}
               />
               {gesture?.kind === "select" ? <Marquee points={gesture.points} /> : selection && <Marquee points={selection.points} busy={filling} />}
               {comparing && <CompareDivider bounds={comparing.bounds} position={comparing.position} zoom={zoom} onPointerDown={startCompare} />}
@@ -1315,6 +1390,24 @@ function useTextLayout(projectId: string, page: Page): Record<string, BlockLayou
     };
   }, [key, projectId, page.id, page.revision]);
   return layouts?.key === key ? layouts.value : (layouts?.value ?? null);
+}
+
+/** A text block lifted off its page as rendered (the service's lift): its pixels and the page under them, as data URLs, and where they go. */
+type Lift = { x: number; y: number; width: number; height: number; text: string; under: string };
+
+const lifts = new Map<string, Promise<Lift | null>>();
+
+/** A text block lifted off the render at `version`; the last few are kept, for moving a block again. */
+function fetchLift(projectId: string, pageId: string, layerId: string, version: string): Promise<Lift | null> {
+  const key = `${projectId}/${pageId}/${layerId}@${version}`;
+  let found = lifts.get(key);
+  if (!found) {
+    const url = `/api/v1/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(pageId)}/blocks/${encodeURIComponent(layerId)}/lift`;
+    found = fetch(url).then((response) => (response.ok ? response.json() : null)).catch(() => null);
+    lifts.set(key, found);
+    if (lifts.size > 8) lifts.delete(lifts.keys().next().value!);
+  }
+  return found;
 }
 
 /**
@@ -1616,6 +1709,7 @@ function Overlays({
   dragging,
   startMove,
   startTransform,
+  hoverBlock,
 }: {
   page: Page;
   zoom: number;
@@ -1623,6 +1717,7 @@ function Overlays({
   dragging?: string;
   startMove: (event: ReactPointerEvent, block: TextBlock) => void;
   startTransform: TransformStart;
+  hoverBlock: (block: TextBlock) => void;
 }) {
   const ws = useWorkspace();
   return (
@@ -1654,6 +1749,7 @@ function Overlays({
               zoom={zoom}
               startMove={startMove}
               startTransform={startTransform}
+              hoverBlock={hoverBlock}
               readout={gesture?.kind === "transform" && gesture.id === block.layerId ? gesture.readout : undefined}
             />
           ),
@@ -1674,6 +1770,7 @@ function BlockOverlay({
   zoom,
   startMove,
   startTransform,
+  hoverBlock,
   readout,
 }: {
   block: TextBlock;
@@ -1684,6 +1781,7 @@ function BlockOverlay({
   zoom: number;
   startMove?: (event: ReactPointerEvent, block: TextBlock) => void;
   startTransform?: TransformStart;
+  hoverBlock?: (block: TextBlock) => void;
   /** "120 × 80" or "15°" while this block is being transformed. */
   readout?: string;
 }) {
@@ -1699,6 +1797,7 @@ function BlockOverlay({
         className={regionClass({ selected, user: manual, hidden: !block.visible })}
         points={points.map((p) => `${p.x},${p.y}`).join(" ")}
         onPointerDown={startMove && ((event) => startMove(event, block))}
+        onPointerEnter={hoverBlock && (() => hoverBlock(block))}
       />
       <rect className="fill-[var(--overlay-block)] [vector-effect:non-scaling-stroke]" x={rect.x} y={rect.y - 16 / zoom} width={(10 + 7 * tag.length) / zoom} height={16 / zoom} rx={3 / zoom} />
       <text className="fill-on-brand [font-family:var(--font)] font-semibold pointer-events-none tabular-nums" x={rect.x + 5 / zoom} y={rect.y - 4 / zoom} style={{ fontSize: 11 / zoom }}>

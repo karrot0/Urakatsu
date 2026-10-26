@@ -248,6 +248,10 @@ def api_router(ws: Workspace) -> APIRouter:
 
     # -- text blocks -------------------------------------------------------------------------------------
 
+    @router.get("/projects/{project_id}/pages/{page_id}/blocks/{layer_id}/lift")
+    def lift_block(project_id: str, page_id: str, layer_id: str):
+        return guard(ws.lift, project_id, page_id, layer_id)
+
     @router.patch("/projects/{project_id}/pages/{page_id}/blocks/{layer_id}")
     def update_block(project_id: str, page_id: str, layer_id: str, patch: TextBlockPatch):
         return guard(ws.update_text_block, project_id, page_id, layer_id, patch.model_dump(exclude_unset=True))
