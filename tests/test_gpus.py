@@ -1,5 +1,6 @@
 """GPUs beyond NVIDIA: discovery (DXGI, OpenCL, sysfs), ranking, native builds, PyTorch and ONNX choices."""
 
+import inspect
 import sys
 import types
 
@@ -172,6 +173,19 @@ def test_onnx_reaches_other_gpus_through_directml(monkeypatch):
     runtime._ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
     runtime.device, runtime._fallback_reason = ARC, None
     assert runtime._select_providers() == ["CPUExecutionProvider"] and runtime._fallback_reason
+
+
+def test_onnx_preloads_cuda_with_arguments_onnxruntime_accepts(monkeypatch):
+    # An unknown keyword made preload_dlls raise, so CUDA sessions fell back to CPU.
+    calls = []
+    monkeypatch.setattr("urakatsu.runtimes.onnx._PRELOADED", False)
+    runtime = OnnxRuntime.__new__(OnnxRuntime)
+    runtime._ort = types.SimpleNamespace(preload_dlls=lambda **kwargs: calls.append(kwargs))
+    runtime._preload_cuda()
+    assert calls and calls[0]["cuda"] and calls[0]["cudnn"]
+    ort = pytest.importorskip("onnxruntime")
+    if hasattr(ort, "preload_dlls"):
+        inspect.signature(ort.preload_dlls).bind(**calls[0])
 
 
 def test_other_gpus_report_memory_from_the_windows_counters(monkeypatch):

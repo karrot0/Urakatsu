@@ -5,7 +5,7 @@ Urakatsu always runs the newest release of every runtime it uses.
 | Runtime | How Urakatsu gets it | Used by |
 | --- | --- | --- |
 | PyTorch | pip: the newest CUDA build the NVIDIA driver supports, AMD's ROCm build, Intel's XPU build, or the CPU build | RF-DETR, manga-ocr, Baberu, Hayai, LaMa, AOT |
-| ONNX Runtime | pip: `onnxruntime-gpu` for NVIDIA (sharing PyTorch's CUDA libraries), `onnxruntime-directml` for any other GPU on Windows | ONNX providers |
+| ONNX Runtime | pip: `onnxruntime-gpu[cuda,cudnn]` for NVIDIA (CUDA and cuDNN from the `nvidia-*` wheels, or PyTorch's when its CUDA major matches), `onnxruntime-directml` for any other GPU on Windows | ONNX providers |
 | llama.cpp | the newest official release, run as `llama-server` | PaddleOCR-VL (GGUF), local translation |
 | stable-diffusion.cpp | the newest official release, run as `sd-server` | FLUX.2 Klein, RORem, catalog diffusion models |
 | Bun | the newest official release, installed the first time a source system needs it | Mana sources |
