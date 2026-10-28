@@ -141,6 +141,87 @@
 
   --ease-settle: cubic-bezier(0.2, 1, 0.2, 1);
   --spacing-bar: var(--bar);
+
+  /* Mobile: bg-grouped, h-touch, pt-safe-top, rounded-sheet, text-body-lg, text-large-title ... */
+  --color-grouped: var(--grouped);
+  --color-grouped-cell: var(--grouped-cell);
+  --color-grouped-fill: var(--grouped-fill);
+  --color-glass-selected: var(--glass-selected);
+  --color-glass-scrim: var(--glass-scrim);
+  --spacing-touch: var(--touch);
+  --spacing-safe-top: var(--safe-top);
+  --spacing-safe-right: var(--safe-right);
+  --spacing-safe-bottom: var(--safe-bottom);
+  --spacing-safe-left: var(--safe-left);
+  --radius-sheet: var(--r-sheet);
+  --radius-group: var(--r-group);
+  --text-body-lg: var(--t-17);
+  --text-body-lg--line-height: var(--lh-17);
+  --text-large-title: var(--t-34);
+  --text-large-title--line-height: var(--lh-34);
+  --text-large-title--letter-spacing: 0.01em;
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Glass material for the phone layer: `glass` for floating controls (tab bar, toolbars, bar
+   buttons), `glass-thick` for sheets and menus that carry text, `glass-edge` for the soft
+   scroll-edge behind a navigation bar. Without backdrop-filter, or with reduced transparency,
+   they turn into the opaque raised surface. */
+@utility glass {
+  background-color: var(--glass-fill);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    inset 0 -1px 0 var(--glass-rim-low),
+    inset 0 0 12px var(--glass-lens),
+    0 0 0 0.5px var(--glass-edge),
+    var(--glass-shadow);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--glass-fill-solid);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--glass-fill-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@utility glass-thick {
+  background-color: var(--glass-fill-thick);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    inset 0 0 16px var(--glass-lens),
+    0 0 0 0.5px var(--glass-edge),
+    var(--glass-shadow);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--glass-fill-solid);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--glass-fill-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@utility glass-edge {
+  background-color: color-mix(in oklab, var(--grouped) 55%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(var(--glass-saturate));
+  backdrop-filter: blur(10px) saturate(var(--glass-saturate));
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: color-mix(in oklab, var(--grouped) 92%, transparent);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--grouped);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 @layer base {

@@ -581,7 +581,11 @@ export function Canvas() {
     if (!el || !page) return;
     center.current = true;
     setViewport({ width: el.clientWidth, height: el.clientHeight });
-    const fitted = strip ? (el.clientWidth - 120) / strip.width : Math.min((el.clientWidth - 120) / page.width, (el.clientHeight - 80) / page.height);
+    // A phone has no room to spare beside the page, and its glass bars float over the top and bottom.
+    const narrow = el.clientWidth < 768;
+    const marginX = narrow ? 24 : 120;
+    const marginY = narrow ? 200 : 80;
+    const fitted = strip ? (el.clientWidth - marginX) / strip.width : Math.min((el.clientWidth - marginX) / page.width, (el.clientHeight - marginY) / page.height);
     setZoom(clamp(Math.min(fitted, 2), MIN_ZOOM, MAX_ZOOM));
   }, [page, strip]);
 
@@ -605,7 +609,8 @@ export function Canvas() {
   // The scroll position code set, which the strip's page tracking leaves alone.
   const placedScroll = useRef<number | null>(null);
   const placeStrip = (el: HTMLElement) => {
-    el.scrollTop = padY + pageTop * zoom - STRIP_MARGIN;
+    // On a phone the page's top clears the glass bar floating over the canvas.
+    el.scrollTop = padY + pageTop * zoom - (el.clientWidth < 768 ? STRIP_MARGIN + 96 : STRIP_MARGIN);
     placedScroll.current = el.scrollTop;
   };
 
@@ -841,6 +846,79 @@ export function Canvas() {
     return () => el.removeEventListener("wheel", onWheel);
   }, [page, ws, toImage]);
 
+  // Touch: two fingers pinch to zoom and pan, whatever the tool (a stroke one finger began is
+  // dropped); one finger on the margin around the page pans it. The browser's own touch panning
+  // and zooming are off here, so they do not fight the tools.
+  useEffect(() => {
+    const el = scroll.current;
+    if (!el || !hasPage) return;
+    el.style.touchAction = "none";
+    const fingers = new Map<number, Pt>();
+    let pinch: { distance: number; zoom: number; point: Pt; mid: Pt } | null = null;
+    let drag: { client: Pt; scroll: Pt } | null = null;
+    const pair = () => {
+      const [a, b] = [...fingers.values()];
+      return { mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+    };
+    const down = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (fingers.size === 1 && !svg.current?.contains(event.target as Node)) {
+        drag = { client: { x: event.clientX, y: event.clientY }, scroll: { x: el.scrollLeft, y: el.scrollTop } };
+        return;
+      }
+      if (fingers.size === 2) {
+        touchState.current.cancelGesture();
+        drag = null;
+        const { mid, distance } = pair();
+        pinch = { distance, zoom: touchState.current.zoom, point: touchState.current.toImage({ clientX: mid.x, clientY: mid.y }), mid };
+      }
+      if (fingers.size >= 2) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+    };
+    const move = (event: PointerEvent) => {
+      if (!fingers.has(event.pointerId)) return;
+      fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (drag) {
+        el.scrollLeft = drag.scroll.x - (event.clientX - drag.client.x);
+        el.scrollTop = drag.scroll.y - (event.clientY - drag.client.y);
+        return;
+      }
+      if (!pinch || fingers.size < 2) return;
+      event.stopPropagation();
+      const { mid, distance } = pair();
+      const next = clamp(pinch.zoom * (distance / pinch.distance), MIN_ZOOM, MAX_ZOOM);
+      if (Math.abs(next - touchState.current.zoom) > 1e-4) {
+        // The page point under the fingers at the start stays under their midpoint.
+        anchor.current = { point: pinch.point, client: mid };
+        setZoom(next);
+      } else {
+        el.scrollLeft -= mid.x - pinch.mid.x;
+        el.scrollTop -= mid.y - pinch.mid.y;
+      }
+      pinch.mid = mid;
+    };
+    const up = (event: PointerEvent) => {
+      if (!fingers.delete(event.pointerId)) return;
+      if (pinch) event.stopPropagation();
+      if (fingers.size < 2) pinch = null;
+      if (fingers.size === 0) drag = null;
+    };
+    el.addEventListener("pointerdown", down, { capture: true });
+    el.addEventListener("pointermove", move, { capture: true });
+    el.addEventListener("pointerup", up, { capture: true });
+    el.addEventListener("pointercancel", up, { capture: true });
+    return () => {
+      el.style.touchAction = "";
+      el.removeEventListener("pointerdown", down, { capture: true });
+      el.removeEventListener("pointermove", move, { capture: true });
+      el.removeEventListener("pointerup", up, { capture: true });
+      el.removeEventListener("pointercancel", up, { capture: true });
+    };
+  }, [hasPage]);
+
   // Strokes are stamped as round dabs, so pen pressure can set each dab's size and opacity (Photoshop's
   // Shape Dynamics and Transfer). A mouse presses fully: solid strokes of the set size, as before.
   const strokeTo = (canvas: HTMLCanvasElement, tool: "draw" | "eraser" | "remove", from: Sample, to: Sample) => {
@@ -1029,7 +1107,10 @@ export function Canvas() {
     if (!page) return;
     if (editing) setEditing(null);
     const point = toImage(event);
-    const panning = event.button === 1 || ws.tool === "pan" || spaceHeld;
+    // A finger with the Select tool pans the page (a tap on a text frame still selects it, in startMove).
+    const fingerPan = event.pointerType === "touch" && ws.tool === "select";
+    if (fingerPan) ws.selectBlock(undefined);
+    const panning = event.button === 1 || ws.tool === "pan" || spaceHeld || fingerPan;
     if (event.button !== 0 && !panning) return;
     event.preventDefault();
     if (panning && scroll.current) {
@@ -1215,6 +1296,18 @@ export function Canvas() {
     }
   };
 
+  const cancelGesture = () => {
+    // A cancelled stroke is not saved; its canvas stops counting it.
+    if (gesture?.kind === "stroke" && gesture.tool !== "remove") {
+      const pixels = pixelsOf(gesture.target);
+      pixels.drawing--;
+      pixels.busy--;
+    }
+    setGesture(null);
+  };
+  const touchState = useRef({ cancelGesture, toImage, zoom });
+  touchState.current = { cancelGesture, toImage, zoom };
+
   const onPointerUp = () => {
     if (!gesture) return;
     setGesture(null);
@@ -1380,15 +1473,7 @@ export function Canvas() {
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerLeave={() => !gesture && moveRing(null)}
-              onPointerCancel={() => {
-                // A cancelled stroke is not saved; its canvas stops counting it.
-                if (gesture?.kind === "stroke" && gesture.tool !== "remove") {
-                  const pixels = pixelsOf(gesture.target);
-                  pixels.drawing--;
-                  pixels.busy--;
-                }
-                setGesture(null);
-              }}
+              onPointerCancel={cancelGesture}
             >
               <Overlays
                 page={page}
@@ -1479,7 +1564,8 @@ const StatusBar = memo(function StatusBar({
   reader?: { on: boolean; set: (on: boolean) => void };
 }) {
   return (
-    <footer className="flex h-[30px] items-center gap-3 px-3 text-xs tabular-nums text-fg-3 shadow-[inset_0_1px_0_var(--border-soft)]">
+    // A phone pinches to zoom; its glass toolbar takes the bottom edge.
+    <footer className="flex h-[30px] items-center gap-3 px-3 text-xs tabular-nums text-fg-3 shadow-[inset_0_1px_0_var(--border-soft)] max-md:hidden">
       <div className="flex w-[180px] items-center gap-1">
         <Slider label="Zoom" min={10} max={800} step={5} value={clamp(Math.round(zoom * 100), 10, 800)} onChange={(value) => setZoom(value / 100)} />
         <button className="h-[22px] w-12 cursor-pointer rounded-pill bg-transparent text-xs tabular-nums text-fg hover:bg-hover" title={`Fit (${fitKey.toUpperCase()})`} onClick={fit}>

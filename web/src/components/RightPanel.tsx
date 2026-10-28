@@ -49,7 +49,7 @@ export function RightPanel() {
     if (ws.job?.status === "running") setTab((current) => (current === "agent" ? current : "activity"));
   }, [ws.job?.status]);
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-surface-sunk shadow-[inset_1px_0_0_var(--border-soft)]">
+    <aside className="flex min-h-0 flex-1 flex-col bg-surface-sunk shadow-[inset_1px_0_0_var(--border-soft)] max-md:bg-transparent max-md:shadow-none">
       <div className="@container flex h-12 items-center gap-0.5 px-2 shadow-[inset_0_-1px_0_var(--border-soft)]" role="tablist" data-titlebar>
         <button role="tab" aria-selected={tab === "properties"} className={panelTab(tab === "properties")} title="Properties" onClick={() => setTab("properties")}>
           <SlidersHorizontal size={14} /> <span className={TAB_LABEL}>Properties</span>

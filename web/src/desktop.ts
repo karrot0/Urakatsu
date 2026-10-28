@@ -29,13 +29,27 @@ const KEY = "urakatsu.shell";
 
 function readShell(): Shell | null {
   const fromQuery = new URLSearchParams(location.search).get("shell");
+  let value: string | null = fromQuery;
   try {
     if (fromQuery) sessionStorage.setItem(KEY, fromQuery);
-    const value = fromQuery ?? sessionStorage.getItem(KEY);
-    return value === "windows" || value === "macos" || value === "linux" ? value : null;
+    value ??= sessionStorage.getItem(KEY);
   } catch {
-    return fromQuery === "windows" || fromQuery === "macos" || fromQuery === "linux" ? fromQuery : null;
+    // Storage blocked: the query and the webview are left.
   }
+  return value === "windows" || value === "macos" || value === "linux" ? value : hostShell();
+}
+
+/**
+ * The app window's webview, for a page that lost the query and its session storage: going back
+ * to the setup page (an about:blank document) and forward again reloads the workspace without
+ * either. WebView2 gives every page window.chrome.webview, and pywebview's WebKit windows a
+ * jsBridge message handler; a browser has neither.
+ */
+function hostShell(): Shell | null {
+  const host = window as unknown as { chrome?: { webview?: unknown }; webkit?: { messageHandlers?: { jsBridge?: unknown } } };
+  if (host.chrome?.webview) return "windows";
+  if (host.webkit?.messageHandlers?.jsBridge) return navigator.userAgent.includes("Mac") ? "macos" : "linux";
+  return null;
 }
 
 export const shell = readShell();

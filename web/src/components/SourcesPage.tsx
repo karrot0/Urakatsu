@@ -15,6 +15,8 @@ import { Select, type Option } from "./primitives";
 import { Badge } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
+import { GlassButton, ListRow, ListSection, Screen, SearchField, type Enter } from "./mobile/glass";
+import { useMobile } from "./mobile/useMobile";
 
 const SEARCH_DELAY = 350;
 const ALL = "all";
@@ -99,9 +101,12 @@ interface Selected {
 
 export function SourcesPage() {
   const ws = useWorkspace();
+  // A phone shows one level at a time (sources, a source's search, a series), so it starts at the list.
+  const mobile = useMobile();
+  const [enter, setEnter] = useState<Enter>("none");
   const [systems, setSystems] = useState<SystemSources[] | undefined>(recentSources);
   const [error, setError] = useState<string>();
-  const [selected, setSelected] = useState<Selected | undefined>(() => lastSelected(recentSources));
+  const [selected, setSelected] = useState<Selected | undefined>(() => (mobile ? undefined : lastSelected(recentSources)));
   const [series, setSeries] = useState<Series>();
   const [filter, setFilter] = useState("");
   const [language, setLanguage] = useState(ALL);
@@ -122,7 +127,7 @@ export function SourcesPage() {
         recentSources = sorted;
         setSystems(sorted);
         const last = lastSelected(sorted);
-        if (last) setSelected((current) => current ?? last);
+        if (last && !mobile) setSelected((current) => current ?? last);
       },
       (e) => setError(describeError(e)),
     );
@@ -151,6 +156,108 @@ export function SourcesPage() {
   const visible = (source: SourceInfo) =>
     (language === ALL || source.language === language) && source.name.toLowerCase().includes(filter.trim().toLowerCase());
   const total = systems?.reduce((sum, entry) => sum + entry.sources.length, 0) ?? 0;
+
+  if (mobile) {
+    const back = (step: () => void) => (swiped?: boolean) => {
+      setEnter(swiped ? "none" : "pop");
+      step();
+    };
+    if (selected && series) {
+      return (
+        <Screen title={series.title} large={false} enter={enter} back={{ label: `Back to ${siteName(selected.source)}`, onBack: back(() => setSeries(undefined)) }}>
+          <div className="-mx-4 flex flex-col">
+            <SeriesDetail key={series.id} selected={selected} series={series} />
+          </div>
+        </Screen>
+      );
+    }
+    if (selected) {
+      return (
+        <Screen title={siteName(selected.source)} large={false} enter={enter} back={{ label: "Back to sources", onBack: back(() => setSelected(undefined)) }}>
+          <div className="-mx-4 flex flex-col">
+            <SeriesSearch
+              key={`${selected.system}:${selected.source.id}`}
+              selected={selected}
+              languages={selected.source.extension ? (systems?.find((e) => e.system.id === selected.system)?.sources.filter((s) => s.extension === selected.source.extension) ?? []) : []}
+              onLanguage={(source) => {
+                rememberLanguage(source);
+                choose(selected.system, source);
+              }}
+              active={series?.id}
+              onSelect={(next) => {
+                setEnter("push");
+                setSeries(next);
+              }}
+            />
+          </div>
+        </Screen>
+      );
+    }
+    return (
+      <Screen
+        title="Browse"
+        enter={enter}
+        actions={
+          <GlassButton label="Manage sources" onClick={() => ws.setSettingsOpen(true, "sources")}>
+            <Settings2 size={20} />
+          </GlassButton>
+        }
+        accessory={total > 0 && <SearchField value={filter} onChange={setFilter} placeholder="Filter sources" />}
+      >
+        <p className="px-4 pb-1 text-[13px] leading-[18px] text-fg-2">{ws.project ? `Link a series to ${ws.project.name}.` : "Pick a series to follow. It becomes a new project."}</p>
+        {!systems && !error && <p className="px-4 py-10 text-center text-[15px] text-fg-2">Loading sources.</p>}
+        {error && (
+          <div className="px-4 py-10 text-center">
+            <p className="text-body-lg font-semibold">Sources did not load.</p>
+            <p className="mt-1 text-[15px] leading-5 text-fg-2">{error}</p>
+          </div>
+        )}
+        {systems && total === 0 && (
+          <div className="flex flex-col items-center gap-1 px-6 py-14 text-center">
+            <p className="text-body-lg font-semibold">No sources installed.</p>
+            <p className="max-w-[34ch] text-[15px] leading-5 text-fg-2">Turn on a source system and install the sites you read in Settings.</p>
+            <GlassButton label="Set up sources" shape="capsule" tone="prominent" className="mt-4" onClick={() => ws.setSettingsOpen(true, "sources")}>
+              Set up sources
+            </GlassButton>
+          </div>
+        )}
+        {systems?.map((entry) => {
+          const sites = sitesOf(entry.sources.filter(visible));
+          const note = !entry.system.enabled
+            ? "Turned off. Turn it on in Settings, Sources."
+            : entry.error
+              ? entry.error
+              : entry.system.state === "starting"
+                ? "Starting. Its sources appear in a moment."
+                : entry.sources.length === 0
+                  ? "No sources installed."
+                  : undefined;
+          if (sites.length === 0 && !note) return null;
+          return (
+            <ListSection key={entry.system.id} header={entry.system.name} footer={note}>
+              {sites.map((site) => {
+                const source = site.sources.length > 1 ? siteSource(site) : site.sources[0];
+                return (
+                  <ListRow
+                    key={site.key}
+                    leading={<SourceIcon url={source.icon} size={30} />}
+                    title={site.name}
+                    detail={site.sources.length > 1 ? `${site.sources.length} languages` : source.language.toUpperCase()}
+                    trailing={source.nsfw ? <Badge tone="warning">18+</Badge> : undefined}
+                    chevron
+                    onClick={() => {
+                      setEnter("push");
+                      choose(entry.system.id, source);
+                    }}
+                  />
+                );
+              })}
+            </ListSection>
+          );
+        })}
+      </Screen>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-surface">
@@ -330,10 +437,12 @@ function SystemGroup({
   );
 }
 
-export function SourceIcon({ url }: { url: string | null }) {
+export function SourceIcon({ url, size }: { url: string | null; size?: number }) {
   const [broken, setBroken] = useState(false);
-  if (!url || broken) return <span className="size-5 flex-none rounded-pill bg-surface-fill object-cover" aria-hidden />;
-  return <img className="size-5 flex-none rounded-pill bg-surface-fill object-cover" src={url} alt="" loading="lazy" onError={() => setBroken(true)} />;
+  // A list row on a phone takes a larger, rounder tile.
+  const style = size ? { width: size, height: size, borderRadius: 7 } : undefined;
+  if (!url || broken) return <span className="size-5 flex-none rounded-pill bg-surface-fill object-cover" style={style} aria-hidden />;
+  return <img className="size-5 flex-none rounded-pill bg-surface-fill object-cover" style={style} src={url} alt="" loading="lazy" onError={() => setBroken(true)} />;
 }
 
 /** A site check stopped the request: open the browser on it, then try again. */
@@ -422,8 +531,8 @@ function SeriesSearch({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-col" aria-label={`Search ${selected.source.name}`}>
-      <div className="flex items-center gap-3 py-3 px-4 shadow-[inset_0_-1px_0_var(--border-soft)]">
-        <label className="relative block max-w-[480px] flex-1">
+      <div className="flex items-center gap-3 py-3 px-4 shadow-[inset_0_-1px_0_var(--border-soft)] max-md:flex-wrap max-md:gap-2 max-md:shadow-none">
+        <label className="relative block max-w-[480px] flex-1 max-md:max-w-none max-md:basis-full">
           <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-icon-2" />
           <Input
             autoFocus
@@ -473,7 +582,7 @@ function SeriesSearch({
             <p className="mt-0.5 text-xs leading-5 text-fg-2">Try another title, or the title in the source's language.</p>
           </div>
         )}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-x-3 gap-y-4 p-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-x-3 gap-y-4 p-4 max-md:grid-cols-3 max-md:gap-x-2.5">
           {results.map((series) => (
             <button
               key={series.id}

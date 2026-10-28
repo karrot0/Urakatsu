@@ -12,7 +12,7 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 
 /** Floating surface: card radius, two-layer shadow with a hairline, quick fade. */
 const floatingSurface =
-  "origin-(--transform-origin) rounded-card bg-surface-over text-fg shadow-floating outline-none transition-[opacity,transform] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0"
+  "origin-(--transform-origin) rounded-card bg-surface-over text-fg shadow-floating outline-none transition-[opacity,transform] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 max-md:glass-thick max-md:max-w-[calc(100vw_-_24px)] max-md:rounded-[18px] max-md:data-starting-style:scale-[0.9]"
 
 function PopoverContent({
   className,

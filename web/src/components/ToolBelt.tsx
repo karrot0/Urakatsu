@@ -44,7 +44,7 @@ export const ToolBelt = memo(function ToolBelt() {
   const page = currentPage(ws);
   return (
     <aside
-      className="absolute top-3 left-3 z-20 flex w-11 flex-col items-center rounded-[14px] bg-surface-over p-0.5 shadow-floating"
+      className="absolute top-3 left-3 z-20 flex w-11 flex-col items-center rounded-[14px] bg-surface-over p-0.5 shadow-floating max-md:hidden"
       aria-label="Tools"
       role="toolbar"
       aria-orientation="vertical"

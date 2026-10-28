@@ -22,7 +22,7 @@ function SelectTrigger({ className, size = "default", children, ...props }: Sele
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-full min-w-0 cursor-default items-center justify-between gap-1 rounded-control bg-surface text-left text-fg shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,box-shadow] duration-[20ms] hover:bg-[color-mix(in_oklab,var(--surface),var(--n-950)_3%)] focus-visible:shadow-focus data-popup-open:shadow-focus data-disabled:pointer-events-none data-disabled:opacity-50 data-placeholder:text-fg-3 data-[size=default]:h-8 data-[size=default]:pr-1 data-[size=default]:pl-2 data-[size=default]:text-sm data-[size=sm]:h-[26px] data-[size=sm]:pr-0.5 data-[size=sm]:pl-1 data-[size=sm]:text-xs",
+        "flex w-full min-w-0 cursor-default items-center justify-between gap-1 rounded-control bg-surface text-left text-fg shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,box-shadow] duration-[20ms] hover:bg-[color-mix(in_oklab,var(--surface),var(--n-950)_3%)] focus-visible:shadow-focus data-popup-open:shadow-focus data-disabled:pointer-events-none data-disabled:opacity-50 data-placeholder:text-fg-3 data-[size=default]:h-8 data-[size=default]:pr-1 data-[size=default]:pl-2 data-[size=default]:text-sm data-[size=sm]:h-[26px] data-[size=sm]:pr-0.5 data-[size=sm]:pl-1 data-[size=sm]:text-xs max-md:data-[size=default]:h-10 max-md:data-[size=default]:pl-3 max-md:data-[size=default]:text-base max-md:data-[size=sm]:h-9 max-md:data-[size=sm]:pl-2.5 max-md:data-[size=sm]:text-base",
         className
       )}
       {...props}

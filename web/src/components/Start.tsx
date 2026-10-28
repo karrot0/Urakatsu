@@ -177,7 +177,7 @@ export function Start() {
 }
 
 /** The linked series' cover, else the first page; the name's initial when the project has neither. */
-function ProjectCover({ id, version, name }: { id: string; version: number | bigint; name: string }) {
+export function ProjectCover({ id, version, name }: { id: string; version: number | bigint; name: string }) {
   const [broken, setBroken] = useState(false);
   if (broken) {
     return (

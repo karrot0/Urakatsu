@@ -51,13 +51,12 @@ function parseJson(raw: string | undefined): Record<string, unknown> {
   }
 }
 
-export function SettingsPage() {
+export const SETTINGS_TABS = TABS;
+export type SettingsTab = Tab;
+
+/** The settings being edited: saved automatically a moment after the last change. */
+export function useSettingsDraft() {
   const ws = useWorkspace();
-  const [tab, setTab] = useState<Tab>(TABS.some(([id]) => id === ws.settingsTab) ? (ws.settingsTab as Tab) : "appearance");
-  const [installed, setInstalled] = useState<InstalledModel[]>([]);
-  useEffect(() => {
-    catalog.installed().then(setInstalled, () => undefined);
-  }, []);
   const [draft, setDraft] = useState<Config | undefined>(ws.config);
   const [status, setStatus] = useState<"saved" | "saving" | "idle">("idle");
   const saved = useRef(JSON.stringify(ws.config ?? null));
@@ -84,9 +83,43 @@ export function SettingsPage() {
   }, [draft]);
 
   const update = (patch: Partial<Config>) => setDraft((current) => (current ? ({ ...current, ...patch } as Config) : current));
+  return { draft, update, status };
+}
+
+/** Provides the installed models the sections offer; wraps every settings layout. */
+export function SettingsProvider({ children }: { children: ReactNode }) {
+  const [installed, setInstalled] = useState<InstalledModel[]>([]);
+  useEffect(() => {
+    catalog.installed().then(setInstalled, () => undefined);
+  }, []);
+  return <InstalledContext.Provider value={installed}>{children}</InstalledContext.Provider>;
+}
+
+/** One section's page. */
+export function SettingsSection({ tab, draft, update }: { tab: Tab; draft?: Config; update: (patch: Partial<Config>) => void }) {
+  return (
+    <>
+      {tab === "appearance" && <Appearance />}
+      {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
+      {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
+      {tab === "providers" && draft && <Providers draft={draft} update={update} />}
+      {tab === "translation" && draft && <Translation draft={draft} update={update} />}
+      {tab === "typesetting" && draft && <Typesetting draft={draft} update={update} />}
+      {tab === "shortcuts" && <Shortcuts />}
+      {tab === "runtimes" && <Runtimes />}
+      {tab === "sources" && <SourcesSettings />}
+      {tab === "about" && <AboutSettings />}
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const ws = useWorkspace();
+  const [tab, setTab] = useState<Tab>(TABS.some(([id]) => id === ws.settingsTab) ? (ws.settingsTab as Tab) : "appearance");
+  const { draft, update, status } = useSettingsDraft();
 
   return (
-    <InstalledContext.Provider value={installed}>
+    <SettingsProvider>
       <div className="settings grid h-screen grid-cols-[256px_minmax(0,1fr)] bg-surface-sunk">
         <nav className="flex flex-col gap-0.5 px-2 pt-[calc(--spacing(3)+var(--window-controls-top))] pb-3" aria-label="Settings sections" data-titlebar>
           <Button variant="ghost" className="mb-4 justify-start font-normal" onClick={() => ws.setSettingsOpen(false)}>
@@ -117,21 +150,12 @@ export function SettingsPage() {
           </header>
           <ScrollArea className="flex-1">
             <div className="mx-auto w-full max-w-[820px] px-8 pt-10 pb-16">
-              {tab === "appearance" && <Appearance />}
-              {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
-              {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
-              {tab === "providers" && draft && <Providers draft={draft} update={update} />}
-              {tab === "translation" && draft && <Translation draft={draft} update={update} />}
-              {tab === "typesetting" && draft && <Typesetting draft={draft} update={update} />}
-              {tab === "shortcuts" && <Shortcuts />}
-              {tab === "runtimes" && <Runtimes />}
-              {tab === "sources" && <SourcesSettings />}
-              {tab === "about" && <AboutSettings />}
+              <SettingsSection tab={tab} draft={draft} update={update} />
             </div>
           </ScrollArea>
         </main>
       </div>
-    </InstalledContext.Provider>
+    </SettingsProvider>
   );
 }
 
@@ -141,15 +165,17 @@ const InstalledContext = createContext<InstalledModel[]>([]);
 // ---- layout ------------------------------------------------------------------------------------
 
 /** One label-and-control row: the grid shared by PreferenceRow and the rows built by hand. */
-const PREF_ROW = "grid grid-cols-[minmax(160px,0.9fr)_minmax(240px,1.1fr)] gap-5 py-3 shadow-[inset_0_-1px_0_var(--border-soft)] last:shadow-none";
+// On a phone the label stacks over its control, in an inset grouped cell.
+const PREF_ROW =
+  "grid grid-cols-[minmax(160px,0.9fr)_minmax(240px,1.1fr)] gap-5 py-3 shadow-[inset_0_-1px_0_var(--border-soft)] last:shadow-none max-md:grid-cols-1 max-md:gap-2 max-md:shadow-[inset_0_-0.5px_0_var(--border)] max-md:[&_p.font-medium]:text-body-lg max-md:[&_p.font-medium]:font-normal";
 const CONTROL_PAIR = "flex min-w-0 items-center gap-1 [&>:first-child]:min-w-0 [&>:first-child]:flex-1";
 
 export function PreferencePage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
     <div>
-      <header className="mb-8">
-        <h2 className="text-xl font-semibold tracking-[-0.01em]">{title}</h2>
-        <p className="mt-0.5 max-w-[60ch] text-fg-2">{description}</p>
+      <header className="mb-8 max-md:mb-2 max-md:px-4">
+        <h2 className="text-xl font-semibold tracking-[-0.01em] max-md:sr-only">{title}</h2>
+        <p className="mt-0.5 max-w-[60ch] text-fg-2 max-md:text-[13px] max-md:leading-[18px]">{description}</p>
       </header>
       {children}
     </div>
@@ -158,15 +184,15 @@ export function PreferencePage({ title, description, children }: { title: string
 
 export function PreferenceSection({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="[&+&]:mt-8">
-      <div className="mb-2 flex items-end justify-between gap-3">
+    <section className="[&+&]:mt-8 max-md:mt-7">
+      <div className="mb-2 flex items-end justify-between gap-3 max-md:mb-1.5 max-md:px-4">
         <div>
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {description && <p className="mt-0.5 text-xs leading-4 text-fg-2">{description}</p>}
+          <h3 className="text-sm font-semibold max-md:text-[13px] max-md:leading-[18px] max-md:font-normal max-md:tracking-[0.02em] max-md:text-fg-2 max-md:uppercase">{title}</h3>
+          {description && <p className="mt-0.5 text-xs leading-4 text-fg-2 max-md:text-[13px] max-md:leading-[18px]">{description}</p>}
         </div>
         {action}
       </div>
-      <div className="rounded-card bg-surface px-4 shadow-raised">{children}</div>
+      <div className="rounded-card bg-surface px-4 shadow-raised max-md:rounded-group max-md:bg-grouped-cell max-md:shadow-none">{children}</div>
     </section>
   );
 }

@@ -57,6 +57,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
+import { GlassButton, Screen, Sheet } from "./mobile/glass";
+import { useMobile } from "./mobile/useMobile";
 
 const RUNTIMES: { value: CatalogRuntime; label: string; title: string }[] = [
   { value: "llama", label: "LLM", title: "GGUF language and vision models for llama.cpp" },
@@ -216,6 +218,35 @@ export function ModelsPage() {
   }, []);
 
   const active = state.downloads.filter((d) => d.status === "queued" || d.status === "downloading" || d.status === "paused");
+  const mobile = useMobile();
+
+  if (mobile) {
+    return (
+      <Screen
+        title="Models"
+        actions={
+          <GlassButton label="Runtimes" onClick={() => ws.setSettingsOpen(true, "runtimes")}>
+            <Cpu size={20} />
+          </GlassButton>
+        }
+        accessory={
+          <Segmented
+            label="Models view"
+            fill
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "discover", label: "Discover" },
+              { value: "installed", label: `Installed${state.installed.length ? ` ${state.installed.length}` : ""}` },
+            ]}
+          />
+        }
+      >
+        <div className="-mx-4 flex flex-col">{tab === "discover" ? <Discover state={state} /> : <Installed state={state} onDiscover={() => setTab("discover")} />}</div>
+        {active.length > 0 && <DownloadTray downloads={active} state={state} />}
+      </Screen>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-surface">
@@ -294,6 +325,9 @@ function Discover({ state }: { state: CatalogState }) {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string>();
   const spinner = useDelayed(busy);
+  // A phone lists the results and opens the one tapped in a sheet.
+  const mobile = useMobile();
+  const [opened, setOpened] = useState(false);
 
   // Typing waits SEARCH_DELAY for a pause; the first load and a remembered list do not.
   const typed = useRef(false);
@@ -329,12 +363,12 @@ function Discover({ state }: { state: CatalogState }) {
   }, [runtime, query, sort, usable]);
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[380px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(240px,40vh)_minmax(0,1fr)]">
+    <div className="grid min-h-0 flex-1 grid-cols-[380px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(240px,40vh)_minmax(0,1fr)] max-md:flex max-md:flex-col">
       <aside
-        className="flex min-h-0 flex-col bg-surface-sunk shadow-[inset_-1px_0_0_var(--border-soft)] max-[900px]:shadow-[inset_0_-1px_0_var(--border-soft)]"
+        className="flex min-h-0 flex-col bg-surface-sunk shadow-[inset_-1px_0_0_var(--border-soft)] max-[900px]:shadow-[inset_0_-1px_0_var(--border-soft)] max-md:bg-transparent max-md:shadow-none"
         aria-label="Search results"
       >
-        <div className="flex flex-col gap-2 p-3 shadow-[inset_0_-1px_0_var(--border-soft)]">
+        <div className="flex flex-col gap-2 p-3 shadow-[inset_0_-1px_0_var(--border-soft)] max-md:px-4 max-md:shadow-none">
           <label className="relative block">
             <Search size={14} className="pointer-events-none absolute top-1/2 left-[10px] -translate-y-1/2 text-icon-2" />
             <Input
@@ -354,7 +388,7 @@ function Discover({ state }: { state: CatalogState }) {
             </label>
           </div>
         </div>
-        <ScrollArea className="flex-1" contentClassName="relative px-2 pt-1 pb-8">
+        <ScrollArea className="flex-1 max-md:mx-4 max-md:rounded-group max-md:bg-grouped-cell" contentClassName="relative px-2 pt-1 pb-8 max-md:px-1 max-md:pb-1">
           {spinner && (
             <div className="absolute inset-x-0 top-0 h-0.5 w-auto overflow-hidden rounded-none bg-surface-fill" aria-label="Searching">
               <span className={cn(PROGRESS_FILL, PROGRESS_SLIDE)} />
@@ -373,13 +407,27 @@ function Discover({ state }: { state: CatalogState }) {
             </div>
           )}
           {results?.map((result) => (
-            <ResultRow key={result.repo} result={result} active={result.repo === selected} onSelect={() => setSelected(result.repo)} />
+            <ResultRow
+              key={result.repo}
+              result={result}
+              active={!mobile && result.repo === selected}
+              onSelect={() => {
+                setSelected(result.repo);
+                setOpened(true);
+              }}
+            />
           ))}
         </ScrollArea>
       </aside>
-      <section className="flex min-h-0 min-w-0 flex-col">
-        {selected ? <Details key={`${runtime}:${selected}`} runtime={runtime} repo={selected} state={state} onOpen={setSelected} /> : <EmptyDetail />}
-      </section>
+      {mobile ? (
+        <Sheet open={opened && !!selected} onOpenChange={setOpened} title={selected?.split("/").pop() ?? "Model"} detents={["large"]} contentClassName="flex flex-col px-0 pb-0">
+          {selected && <Details key={`${runtime}:${selected}`} runtime={runtime} repo={selected} state={state} onOpen={setSelected} />}
+        </Sheet>
+      ) : (
+        <section className="flex min-h-0 min-w-0 flex-col">
+          {selected ? <Details key={`${runtime}:${selected}`} runtime={runtime} repo={selected} state={state} onOpen={setSelected} /> : <EmptyDetail />}
+        </section>
+      )}
     </div>
   );
 }
@@ -809,7 +857,10 @@ function DownloadTray({ downloads, state }: { downloads: Download[]; state: Cata
     .filter(Boolean)
     .join(", ");
   return (
-    <aside className="fixed bottom-4 left-4 z-20 flex w-[360px] flex-col rounded-card bg-surface-over py-1 shadow-overlay" aria-label="Downloads">
+    <aside
+      className="fixed bottom-4 left-4 z-20 flex w-[360px] flex-col rounded-card bg-surface-over py-1 shadow-overlay max-md:glass-thick max-md:right-3 max-md:bottom-[calc(var(--safe-bottom)+92px)] max-md:left-3 max-md:w-auto max-md:rounded-[20px]"
+      aria-label="Downloads"
+    >
       <div className="flex items-baseline justify-between gap-2 px-3 pt-1.5 pb-1">
         <span className="font-semibold">Downloads</span>
         <span className="text-xs tracking-[0.005em] tabular-nums text-fg-3">{summary}</span>

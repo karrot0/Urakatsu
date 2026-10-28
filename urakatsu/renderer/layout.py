@@ -372,27 +372,12 @@ class TextLayout:
                     return best
             return self.run_with_size(text, minimum)
 
-        maximum_layout = self.run_with_size(text, maximum)
-        if fits(maximum_layout):
-            return maximum_layout
-
-        best = self.run_with_size(text, minimum)
-        if not fits(best):
-            return best
-
-        low = minimum
-        high = maximum
-        iterations = 0
-        while high - low > 0.01 and iterations < 16:
-            iterations += 1
-            size = (low + high) * 0.5
-            layout = self.run_with_size(text, size)
-            if fits(layout):
-                best = layout
-                low = size
-            else:
-                high = size
-        return best
+        # Koharu bisects between the minimum and maximum here, which needs the minimum to fit. It
+        # need not: balanced lines at a small size can come out a few pixels wider than the box.
+        # With free text sized to its box (text_renderer._automatic_maximum) the range is wide,
+        # so Urakatsu probes down from the top as for balloons.
+        best = largest_fitting_font_size(minimum, maximum, lambda size: self.run_with_size(text, size), fits)
+        return best if best is not None else self.run_with_size(text, minimum)
 
     def clone(self) -> "TextLayout":
         import copy
@@ -1059,7 +1044,7 @@ def _copy_run(run: LineRun) -> LineRun:
     )
 
 
-_PARAGRAPH_SEPARATORS = frozenset("\n\r\x1c\x1d\x1e\x85 ")  # Bidi_Class B
+_PARAGRAPH_SEPARATORS = frozenset("\n\r\x1c\x1d\x1e\x85")  # Bidi_Class B
 
 
 def _embedding_levels(text: str) -> list[int]:
@@ -1118,7 +1103,7 @@ def justify_lines(text: str, lines: list[LayoutLine], max_width: float, profiles
     last = len(lines) - 1
     for index, line in enumerate(lines):
         end = line.range[1]
-        if index == last or (0 <= end < len(text) and text[end] in "\n\r\u0085  "):
+        if index == last or (0 <= end < len(text) and text[end] in "\n\r\u0085"):
             continue
         target_width = profiles[index].width if index < len(profiles) else max_width
         if not math.isfinite(target_width) or target_width <= 0.0:

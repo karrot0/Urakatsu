@@ -26,7 +26,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-[color-mix(in_oklab,var(--n-950)_40%,transparent)] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed inset-0 z-50 bg-[color-mix(in_oklab,var(--n-950)_40%,transparent)] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 max-md:bg-glass-scrim max-md:duration-300",
         className
       )}
       {...props}
@@ -34,7 +34,10 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
   )
 }
 
-/** Modal surface: the largest radius, the modal shadow plus a hairline, centered. */
+/**
+ * Modal surface: the largest radius, the modal shadow plus a hairline, centered. On a phone it
+ * is a glass sheet that rises from the bottom, clear of the home indicator.
+ */
 function DialogContent({
   className,
   children,
@@ -48,6 +51,7 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-[51] flex w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-modal bg-surface p-5 text-sm text-fg shadow-[var(--shadow-modal),0_0_0_1px_var(--border-soft)] outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 sm:max-w-md",
+          "max-md:glass-thick max-md:top-auto max-md:right-2 max-md:bottom-2 max-md:left-2 max-md:max-h-[calc(100dvh_-_var(--safe-top)_-_24px)] max-md:w-auto max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:overflow-y-auto max-md:rounded-sheet max-md:pb-[calc(var(--safe-bottom)+20px)] max-md:text-[15px] max-md:transition-[translate,opacity] max-md:duration-300 max-md:ease-sheet max-md:data-ending-style:translate-y-[110%] max-md:data-ending-style:opacity-100 max-md:data-starting-style:translate-y-[110%] max-md:data-starting-style:opacity-100",
           className
         )}
         {...props}

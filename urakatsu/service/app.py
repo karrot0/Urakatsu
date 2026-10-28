@@ -91,7 +91,9 @@ def build_app(
             candidate = ui / path
             if path and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(ui / "index.html")
+            # The page names the hashed bundle of this build, so the browser revalidates it on every
+            # load. Without this, the desktop webview kept an old page and ran an old bundle after an update.
+            return FileResponse(ui / "index.html", headers={"cache-control": "no-cache"})
 
     else:
 

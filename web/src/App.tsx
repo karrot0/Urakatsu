@@ -15,14 +15,20 @@ import { BrowserPanel } from "./components/BrowserPanel";
 import { Sidebar } from "./components/Sidebar";
 import { Start } from "./components/Start";
 import { WindowControls } from "./components/WindowControls";
+import { MobileApp } from "./components/mobile/MobileApp";
+import { useMobile } from "./components/mobile/useMobile";
 import { UpdatePopup } from "./components/Updates";
 import { useWorkspace } from "./state/workspace";
 
 export function App() {
   const ws = useWorkspace();
+  // Phone widths get the mobile layer: a tab bar, navigation stacks and sheets.
+  const mobile = useMobile();
   return (
     <TooltipProvider>
-      {ws.settingsOpen ? (
+      {mobile ? (
+        <MobileApp />
+      ) : ws.settingsOpen ? (
         <SettingsPage />
       ) : ws.modelsOpen ? (
         <ModelsPage />
@@ -38,7 +44,7 @@ export function App() {
       <WindowControls />
       {ws.error && (
         <div
-          className="fixed bottom-5 left-1/2 z-50 flex max-w-[min(560px,calc(100vw_-_32px))] -translate-x-1/2 animate-[fade-in_var(--t-in)] items-center gap-2 rounded-card bg-surface-over py-2 pr-2 pl-3 shadow-overlay"
+          className="fixed bottom-5 left-1/2 z-50 flex max-w-[min(560px,calc(100vw_-_32px))] -translate-x-1/2 animate-[fade-in_var(--t-in)] items-center gap-2 rounded-card bg-surface-over py-2 pr-2 pl-3 shadow-overlay max-md:glass-thick max-md:top-[calc(var(--safe-top)+64px)] max-md:bottom-auto max-md:w-[calc(100vw_-_24px)] max-md:rounded-[18px] max-md:py-2.5"
           role="alert"
         >
           <CircleAlert size={16} className="text-danger" />

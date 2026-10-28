@@ -172,6 +172,43 @@
 
   /* ---- layout ---- */
   --bar: 48px;
+
+  /* ---- mobile (phone widths, under 768px) ----
+     The phone layer sits on the same ramp: grouped lists, glass chrome and touch sizes. */
+  --touch: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --grouped: var(--n-100);
+  --grouped-cell: var(--n-0);
+  --grouped-fill: color-mix(in oklab, var(--n-500) 16%, transparent);
+  --r-sheet: 28px;
+  --r-group: 12px;
+  --t-17: 1.0625rem;
+  --lh-17: 22px;
+  --t-34: 2.125rem;
+  --lh-34: 41px;
+  --t-sheet: 320ms cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ---- glass ----
+     Translucent chrome over content: a tinted fill, backdrop blur and saturation, a specular rim
+     on the top edge, a lensing glow along the inside and a hairline. Everything is derived from
+     the surface and the accent, so it follows light/dark and the neutral and accent themes. */
+  --glass-blur: 18px;
+  --glass-saturate: 1.9;
+  --glass-fill: color-mix(in oklab, var(--surface) 58%, transparent);
+  --glass-fill-thick: color-mix(in oklab, var(--surface) 78%, transparent);
+  --glass-fill-solid: var(--surface-over);
+  --glass-rim: color-mix(in oklab, white 85%, transparent);
+  --glass-rim-low: color-mix(in oklab, white 35%, transparent);
+  --glass-lens: color-mix(in oklab, white 40%, transparent);
+  --glass-edge: color-mix(in oklab, var(--n-950) 9%, transparent);
+  --glass-sheen: linear-gradient(180deg, color-mix(in oklab, white 34%, transparent) 0%, transparent 46%),
+    radial-gradient(130% 90% at 50% 120%, color-mix(in oklab, var(--brand) 5%, transparent), transparent 70%);
+  --glass-shadow: 0 10px 28px rgba(25, 25, 25, 0.08), 0 2px 6px rgba(25, 25, 25, 0.04);
+  --glass-selected: color-mix(in oklab, var(--n-950) 7%, transparent);
+  --glass-scrim: color-mix(in oklab, var(--n-950) 26%, transparent);
 }
 
 /* Dark mode, re-cut rather than inverted: small fixed canvas steps, warm off-white text,
@@ -222,6 +259,24 @@
   --shadow-md: 0 0 0 1px var(--surface-fill), 0 4px 12px -2px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 0 0 1px var(--surface-fill), 0 14px 28px -6px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.118);
   --shadow-modal: 0 24px 48px rgba(0, 0, 0, 0.64), 0 4px 12px rgba(0, 0, 0, 0.56);
+
+  /* Grouped lists sit on near-black with lifted cells, as on a phone in dark mode. */
+  --grouped: oklch(0.13 calc(0.003 * var(--nc)) var(--nh));
+  --grouped-cell: var(--surface);
+  --grouped-fill: color-mix(in oklab, var(--n-500) 24%, transparent);
+
+  /* Dark glass: a darker, cooler fill, a fainter rim, the edge as a white hairline. */
+  --glass-fill: color-mix(in oklab, var(--surface-over) 56%, transparent);
+  --glass-fill-thick: color-mix(in oklab, var(--surface-over) 76%, transparent);
+  --glass-rim: color-mix(in oklab, white 26%, transparent);
+  --glass-rim-low: color-mix(in oklab, white 7%, transparent);
+  --glass-lens: color-mix(in oklab, white 9%, transparent);
+  --glass-edge: color-mix(in oklab, white 9%, transparent);
+  --glass-sheen: linear-gradient(180deg, color-mix(in oklab, white 9%, transparent) 0%, transparent 46%),
+    radial-gradient(130% 90% at 50% 120%, color-mix(in oklab, var(--brand) 8%, transparent), transparent 70%);
+  --glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.22);
+  --glass-selected: color-mix(in oklab, white 12%, transparent);
+  --glass-scrim: color-mix(in oklab, black 50%, transparent);
 }
 
 :root {

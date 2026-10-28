@@ -560,3 +560,16 @@ def test_deleting_every_text_block_lets_detection_run_again(workspace):
     # With every block deleted, its region goes too and the next run detects the page again.
     workspace.delete_layer(project, page, second)
     assert not detected() and not workspace.page(project, page).regions
+
+
+@pytest.mark.asyncio
+async def test_app_page_is_revalidated(workspace, tmp_path):
+    # The page names this build's hashed bundle; a cached page would keep running an old build.
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<script src='/assets/index-abc.js'></script>")
+    app = build_app(workspace, UrakatsuServicer(workspace), ui_dir=tmp_path)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for path in ("/", "/projects/p1?page=x"):
+            response = await client.get(path)
+            assert response.status_code == 200 and "index-abc.js" in response.text
+            assert response.headers["cache-control"] == "no-cache"

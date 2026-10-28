@@ -11,7 +11,7 @@ const toggleVariants = cva(
         default:
           "rounded-control bg-transparent text-fg-2 hover:bg-hover hover:text-fg data-pressed:bg-selected data-pressed:text-fg data-pressed:[&_svg]:text-brand",
         segmented:
-          "rounded-[4px] bg-transparent text-fg-2 hover:text-fg data-pressed:bg-surface data-pressed:text-fg data-pressed:shadow-raised",
+          "rounded-[4px] bg-transparent text-fg-2 hover:text-fg data-pressed:bg-surface data-pressed:text-fg data-pressed:shadow-raised max-md:h-[30px] max-md:rounded-[8px] max-md:px-3 max-md:text-[13px] max-md:font-medium",
         outline:
           "rounded-control bg-surface text-fg shadow-[inset_0_0_0_1px_var(--border)] hover:bg-hover data-pressed:bg-selected",
       },

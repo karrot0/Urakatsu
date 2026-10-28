@@ -9,7 +9,7 @@ import { floatingSurface } from "@/components/ui/popover"
 
 /** Rows shared by menus and selects: 30px tall, control radius, background tint on highlight. */
 const menuItem =
-  "relative flex min-h-[30px] w-full cursor-default items-center gap-2 rounded-control px-2 py-0.5 text-left text-sm text-fg outline-none select-none transition-colors duration-[20ms] data-highlighted:bg-hover data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+  "relative flex min-h-[30px] w-full cursor-default items-center gap-2 rounded-control px-2 py-0.5 text-left text-sm text-fg outline-none select-none transition-colors duration-[20ms] data-highlighted:bg-hover data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 max-md:min-h-touch max-md:rounded-[12px] max-md:px-3 max-md:text-body-lg"
 
 const menuPopup = cn(
   floatingSurface,

@@ -386,9 +386,7 @@ class TextRenderer:
 
 
 def _automatic_maximum(descriptor: TextNodeDescriptor, bounds, is_bubble_text: bool) -> float:
-    if is_bubble_text:
-        return bounds.height if descriptor.writing_mode.is_vertical() else bounds.width
-    return 24.0
+    return bounds.height if descriptor.writing_mode.is_vertical() else bounds.width
 
 
 def _is_chinese_or_japanese_language(language: str) -> bool:

@@ -28,7 +28,7 @@ function ToggleGroup({
       data-size={size}
       className={cn(
         "group/toggle-group inline-flex w-fit items-center gap-0.5",
-        variant === "segmented" && "rounded-control bg-surface-fill p-0.5",
+        variant === "segmented" && "rounded-control bg-surface-fill p-0.5 max-md:rounded-[10px] max-md:bg-grouped-fill",
         className
       )}
       {...props}

@@ -741,3 +741,14 @@ def test_a_run_gradient_spans_only_its_own_words():
         # (It spans the ink, so it can start a side bearing after the first glyph's origin.)
         assert run.gradient.start[0] <= min(xs) + 6 and run.gradient.end[0] >= max(xs) and run.gradient.end[0] - run.gradient.start[0] < 120
     assert a.gradient.end[0] < b.gradient.start[0]
+
+
+def test_text_outside_a_balloon_fits_its_box_rather_than_24_px():
+    from types import SimpleNamespace
+
+    from urakatsu.renderer.text_renderer import _automatic_maximum
+    from urakatsu.renderer.types import WritingMode
+
+    box = SimpleNamespace(width=508.0, height=160.0)
+    assert _automatic_maximum(SimpleNamespace(writing_mode=WritingMode.HORIZONTAL), box, False) == 508.0
+    assert _automatic_maximum(SimpleNamespace(writing_mode=WritingMode.VERTICAL_RL), box, False) == 160.0

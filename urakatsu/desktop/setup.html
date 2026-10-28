@@ -381,6 +381,10 @@
     </div>
   </main>
   <script>
+    // Back (the mouse's back button) from the workspace's first page lands here: go on to the
+    // workspace again, where the page left it.
+    if (performance.getEntriesByType("navigation")[0]?.type === "back_forward") history.forward();
+    window.addEventListener("pageshow", (event) => event.persisted && history.forward());
     const shell = document.documentElement.dataset.shell;
     let doubleClickMs = 500;
     function showWindow(state) {
