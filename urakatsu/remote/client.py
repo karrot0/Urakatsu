@@ -5,9 +5,16 @@ A provider whose runtime is ``remote`` keeps its class, settings and stage behav
 worker (``Provider.__init__`` binds them here). The worker runs the provider's own methods on
 its runtime, so a remote run produces what a local one would.
 
-- Where: ``remote_url`` in the provider's settings, else ``URAKATSU_REMOTE_URL``; the token is
-  ``remote_api_key``, else ``URAKATSU_REMOTE_API_KEY``, sent as a bearer token. On the ``cloud``
-  runtime, Urakatsu Cloud and the account key instead (``cloud``).
+- Where: the app's worker the model is assigned to (``remote_worker``, picked in the runtime
+  menu; Settings, Workers), which may start a Kaggle worker first. Without one, ``remote_url`` in
+  the provider's settings, else ``URAKATSU_REMOTE_URL``; the token is ``remote_api_key``, else
+  ``URAKATSU_REMOTE_API_KEY``, sent as a bearer token. With none of those, the first of the app's
+  workers that answers (``workers.connect``).
+- A model the user installed from the Models page goes along with the load request
+  (``installed``): the worker has none of the app's installs. On the ``cloud`` runtime, Urakatsu Cloud and the account key
+  instead (``cloud``).
+- A Kaggle worker gets a new tunnel address when its session restarts: when it stops answering,
+  the client reads its address from the session's log again and repeats the request there once.
 - Loading and every inference call are jobs on the worker: the request returns at once, and the
   client polls with ``wait`` (the worker holds each poll open up to ``POLL_WAIT`` seconds, so it
   answers as soon as the job ends), then fetches the result. No request stays open longer than
@@ -37,7 +44,7 @@ from urakatsu.core.errors import ModelLoadError, OutOfMemory, ProcessingError, P
 from urakatsu.core.results import LayoutDetections
 from urakatsu.core.stop import current as current_stop
 
-from . import CLOUD, PROTOCOL, cloud, wire
+from . import CLOUD, PROTOCOL, cloud, wire, workers
 
 if TYPE_CHECKING:  # pragma: no cover
     from urakatsu.providers.base import Provider
@@ -52,7 +59,7 @@ POLL_WAIT = 20.0
 STOP_POLL_WAIT = 2.0
 # Settings that say where to connect or hold the user's own keys, not how the model runs: the
 # worker uses its own, and a key never leaves this machine.
-CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "server_url", "server_api_key", "api_key"})
+CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "remote_worker", "server_url", "server_api_key", "api_key"})
 
 # Tests swap this for one that returns a client bound to an in-process worker.
 client_factory: Callable[[str, dict[str, str]], httpx.Client] = lambda url, headers: httpx.Client(
@@ -96,6 +103,25 @@ def _poll_wait() -> float:
     return POLL_WAIT if current_stop() is None else STOP_POLL_WAIT
 
 
+def load_request(provider: "Provider") -> dict[str, Any]:
+    """What ``POST /v1/models`` (and a preload) sends a worker for ``provider``: its stage, its
+    settings without where it connects, and the installed model those settings name, if any."""
+    body: dict[str, Any] = {
+        "stage": provider.stage.value,
+        "provider": provider.id,
+        "settings": provider.settings.model_dump(mode="json", exclude=CONNECTION_SETTINGS),
+    }
+    model = getattr(provider.settings, "model", None)
+    if model:
+        from urakatsu.catalog.installed import InstalledModels
+
+        installed = InstalledModels(provider.store()).get(model)
+        if installed is None:
+            raise ProviderUnavailable(f"{provider.id}: installed model {model!r} was removed; pick another on the Models page")
+        body["installed"] = installed.model_dump(mode="json")
+    return body
+
+
 class ModelGone(Exception):
     """The worker no longer has the model (it restarted or swapped it out)."""
 
@@ -105,6 +131,10 @@ class RemoteModel:
         self.provider = provider
         self.client: Optional[httpx.Client] = None
         self.model_id: Optional[str] = None
+        # One of the app's workers, when the settings name no address (``pooled``).
+        self.endpoint: Optional[workers.Endpoint] = None
+        # Set once a request moved to the worker's new address: its jobs did not move along.
+        self.moved = False
 
     # -- connection -----------------------------------------------------------------------------
 
@@ -112,14 +142,33 @@ class RemoteModel:
     def on_cloud(self) -> bool:
         return self.provider.runtime_name == CLOUD
 
+    def _configured(self) -> str:
+        return (getattr(self.provider.settings, "remote_url", None) or os.environ.get(URL_ENV) or "").strip().rstrip("/")
+
+    @property
+    def assigned(self) -> Optional[str]:
+        """The app's worker picked for this model in the runtime menu, if one was."""
+        return getattr(self.provider.settings, "remote_worker", None) or None
+
+    @property
+    def pooled(self) -> bool:
+        """Whether this model runs on one of the app's workers rather than an address of its own."""
+        return not self.on_cloud and (self.assigned is not None or not self._configured())
+
     def url(self) -> str:
         if self.on_cloud:
             return cloud.url()
-        url = getattr(self.provider.settings, "remote_url", None) or os.environ.get(URL_ENV) or ""
-        return url.strip().rstrip("/")
+        if self.pooled:
+            return self.endpoint.url if self.endpoint is not None else ""
+        return self._configured()
 
     def headers(self) -> dict[str, str]:
-        key = cloud.api_key() if self.on_cloud else getattr(self.provider.settings, "remote_api_key", None) or os.environ.get(KEY_ENV)
+        if self.on_cloud:
+            key = cloud.api_key()
+        elif self.pooled:
+            key = self.endpoint.token if self.endpoint is not None else None
+        else:
+            key = getattr(self.provider.settings, "remote_api_key", None) or os.environ.get(KEY_ENV)
         return {"Authorization": f"Bearer {key.strip()}"} if key and key.strip() else {}
 
     def model_settings(self) -> dict[str, Any]:
@@ -133,12 +182,17 @@ class RemoteModel:
     # -- lifecycle ------------------------------------------------------------------------------
 
     def load(self) -> None:
+        self.close()
+        if self.pooled:
+            try:
+                self.endpoint = workers.connect(self.assigned)
+            except ProviderUnavailable as error:
+                raise ProviderUnavailable(f"{self.provider.name}: {error}") from None
         url = self.url()
         if not url:
             raise ProviderUnavailable(f"{self.provider.name}: set the worker URL in Settings, Pipeline (runtime remote)")
         if self.on_cloud and cloud.api_key() is None:
             raise ProviderUnavailable(f"{self.provider.name}: add your Urakatsu Cloud key in Settings, Providers ({cloud.KEYS_URL})")
-        self.close()
         self.client = client_factory(url, self.headers())
         try:
             info = self._request("GET", "/v1/info", action="describe itself")
@@ -158,7 +212,10 @@ class RemoteModel:
         log.info("loaded %s on the worker at %s (%s)", self.provider.id, url, info.get("device", "unknown device"))
 
     def _load_model(self) -> None:
-        body = {"stage": self.provider.stage.value, "provider": self.provider.id, "settings": self.model_settings()}
+        if self.on_cloud:
+            body = {"stage": self.provider.stage.value, "provider": self.provider.id, "settings": self.model_settings()}
+        else:
+            body = load_request(self.provider)
         state = self._request("POST", "/v1/models", json=body, action=f"load {self.provider.id}", error=ModelLoadError)
         self.model_id = state["id"]
         while state.get("state") == "loading":
@@ -200,6 +257,26 @@ class RemoteModel:
             self.client.close()
         self.client = None
         self.model_id = None
+        self.moved = False
+
+    def _move(self) -> bool:
+        """Follows a pooled worker to its current address; True if it moved."""
+        if not self.pooled or self.endpoint is None:
+            return False
+        try:
+            entry = workers.find(self.endpoint.worker)
+        except KeyError:
+            return False
+        point = workers.endpoint(entry, fresh=True)
+        if point is None or point.url == self.endpoint.url:
+            return False
+        log.info("the worker moved from %s to %s", self.endpoint.url, point.url)
+        if self.client is not None:
+            self.client.close()
+        self.endpoint = point
+        self.client = client_factory(point.url, self.headers())
+        self.moved = True
+        return True
 
     # -- calls ----------------------------------------------------------------------------------
 
@@ -211,10 +288,19 @@ class RemoteModel:
             raise ProcessingError(f"{self.provider.name} is not loaded")
         try:
             response = self.client.request(method, path, **kwargs)
+        except httpx.TransportError as failure:
+            if not self._move():
+                raise error(f"cannot reach the worker at {self.url()}: {failure}") from failure
+            try:
+                response = self.client.request(method, path, **kwargs)
+            except httpx.HTTPError as again:
+                raise error(f"cannot reach the worker at {self.url()}: {again}") from again
         except httpx.HTTPError as failure:
             raise error(f"cannot reach the worker at {self.url()}: {failure}") from failure
         if response.status_code == 404 and path.startswith("/v1/models/"):
             raise ModelGone()
+        if response.status_code == 404 and path.startswith("/v1/jobs/") and self.moved:
+            raise ModelGone()  # the restarted worker never had this job: load the model, run it again
         if response.status_code >= 400:
             raise worker_error(response, action, self.on_cloud)
         return response.json() if response.headers.get("content-type", "").startswith("application/json") else response.content
@@ -226,6 +312,7 @@ class RemoteModel:
         except ModelGone:
             log.info("the worker no longer has %s; loading it again", self.provider.id)
             self._load_model()
+            self.moved = False
         try:
             return self._job(operation, **kwargs)
         except ModelGone:

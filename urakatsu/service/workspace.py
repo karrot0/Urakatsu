@@ -45,7 +45,7 @@ from urakatsu.pipeline.projects import chapters_of
 from urakatsu.pipeline.scope import Bounds
 from urakatsu.pipeline.stitch import ProjectFormat, stitch
 from urakatsu.pipeline.stages import InpaintingMask
-from urakatsu.remote import OFFLOADED
+from urakatsu.remote import OFFLOADED, workers
 from urakatsu.runtimes.manager import RuntimeManager, RuntimeReport
 from urakatsu.scene import components as c
 from urakatsu.scene import At, Chapter, RemovePolicy, Session
@@ -238,6 +238,7 @@ class Workspace:
         self.config = config
         self.store.lossless_pages = config.storage.lossless_pages
         save_config(config)
+        workers.sync(config)  # workers that answer start loading models newly assigned to them
         return config
 
     # -- projects ------------------------------------------------------------------------------------

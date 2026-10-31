@@ -1,10 +1,11 @@
 // Settings: a left nav of sections and rows of label + control. Changes save
 // automatically a moment after you stop editing.
 
-import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cpu, Eye, EyeOff, Info, KeyRound, Keyboard, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, Type, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cloud, Cpu, Eye, EyeOff, Info, KeyRound, Keyboard, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, Type, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { catalog, RUNTIME_LABEL, type InstalledModel, type Release, type Runtimes as RuntimeList } from "../api/catalog";
+import { workers as workersApi, type Worker } from "../api/workers";
 import { describeError } from "../api/client";
 import { formatDate, formatTimestamp } from "../format";
 
@@ -18,6 +19,7 @@ import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
 import { WatermarkPreview, type WatermarkMode } from "./WatermarkPreview";
 import { SourcesSettings } from "./SourcesSettings";
 import { AboutSettings } from "./Updates";
+import { WorkersSettings } from "./WorkersSettings";
 import { TOOL_INFO } from "./ToolBelt";
 import { ACCENTS, NEUTRALS } from "../theme";
 import { Badge, Segmented } from "./ui";
@@ -31,6 +33,7 @@ import { TitleBarInset } from "./WindowControls";
 const TABS = [
   ["appearance", "Appearance", Palette],
   ["pipeline", "Pipeline", Cpu],
+  ["workers", "Workers", Cloud],
   ["providers", "Providers", KeyRound],
   ["translation", "Translation", Languages],
   ["typesetting", "Typesetting", Type],
@@ -97,10 +100,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
 /** One section's page. */
 export function SettingsSection({ tab, draft, update }: { tab: Tab; draft?: Config; update: (patch: Partial<Config>) => void }) {
+  // The app's workers, for the runtime menus; read again when a section with those menus opens.
+  const [workerList, setWorkerList] = useState<Worker[]>([]);
+  useEffect(() => {
+    if (tab === "pipeline" || tab === "providers") workersApi.list(false).then((list) => setWorkerList(list.workers), () => undefined);
+  }, [tab]);
   return (
-    <>
+    <WorkersContext.Provider value={workerList}>
       {tab === "appearance" && <Appearance />}
-      {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
+      {tab !== "appearance" && tab !== "shortcuts" && tab !== "runtimes" && tab !== "sources" && tab !== "workers" && tab !== "about" && !draft && <p className="text-fg-2">Loading settings.</p>}
       {tab === "pipeline" && draft && <Pipeline draft={draft} update={update} />}
       {tab === "providers" && draft && <Providers draft={draft} update={update} />}
       {tab === "translation" && draft && <Translation draft={draft} update={update} />}
@@ -108,8 +116,9 @@ export function SettingsSection({ tab, draft, update }: { tab: Tab; draft?: Conf
       {tab === "shortcuts" && <Shortcuts />}
       {tab === "runtimes" && <Runtimes />}
       {tab === "sources" && <SourcesSettings />}
+      {tab === "workers" && <WorkersSettings />}
       {tab === "about" && <AboutSettings />}
-    </>
+    </WorkersContext.Provider>
   );
 }
 
@@ -161,6 +170,8 @@ export function SettingsPage() {
 
 /** Models installed from the Models page, for the per-provider model choice. */
 const InstalledContext = createContext<InstalledModel[]>([]);
+/** The app's workers (Settings, Workers), each a choice in a model's runtime menu. */
+const WorkersContext = createContext<Worker[]>([]);
 
 // ---- layout ------------------------------------------------------------------------------------
 
@@ -321,15 +332,46 @@ function selectedRuntime(provider: ProviderInfo, draft: Config): string {
   return draft.runtimes[provider.id] || provider.defaultRuntime;
 }
 
+const WORKER_KINDS: Record<Worker["kind"], string> = { kaggle: "Kaggle", colab: "Colab", manual: "Your machine" };
+
+/** The worker a model on the remote runtime was assigned to in its runtime menu, if any. */
+function assignedWorker(provider: ProviderInfo, draft: Config): string | undefined {
+  const id = parseJson(draft.processorJson[provider.id]).remote_worker;
+  return typeof id === "string" && id ? id : undefined;
+}
+
+/** The runtime menu: the model's runtimes, with each of the app's workers in place of "remote". */
 function RuntimeSelect({ provider, draft, update }: { provider?: ProviderInfo; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const workers = useContext(WorkersContext);
   if (!provider || provider.runtimes.length < 2) return null;
+  const runtime = selectedRuntime(provider, draft);
+  const assigned = runtime === REMOTE ? assignedWorker(provider, draft) : undefined;
+  const options: Option[] = provider.runtimes.flatMap((r) => {
+    if (r.name !== REMOTE) return [{ value: r.name, label: RUNTIME_LABELS[r.name] ?? r.name, disabled: !r.available, detail: runtimeDetail(r) }];
+    const choices: Option[] = workers.map((w) => ({ value: `${REMOTE}:${w.id}`, label: w.name, detail: w.name !== WORKER_KINDS[w.kind] ? WORKER_KINDS[w.kind] : undefined }));
+    if (assigned && !workers.some((w) => w.id === assigned)) choices.push({ value: `${REMOTE}:${assigned}`, label: "Removed worker", detail: "Pick another" });
+    if (workers.length === 0) choices.push({ value: `${REMOTE}:none`, label: "No workers", disabled: true, detail: "Settings, Workers" });
+    return [...choices, { value: REMOTE, label: "Worker address", detail: "Enter below" }];
+  });
+  const choose = (value: string) => {
+    const settings = parseJson(draft.processorJson[provider.id]);
+    delete settings.remote_worker;
+    let next = value;
+    if (value.startsWith(`${REMOTE}:`)) {
+      next = REMOTE;
+      settings.remote_worker = value.slice(REMOTE.length + 1);
+      delete settings.remote_url; // the worker's address comes from Settings, Workers
+      delete settings.remote_api_key;
+    }
+    update({ runtimes: { ...draft.runtimes, [provider.id]: next }, processorJson: { ...draft.processorJson, [provider.id]: JSON.stringify(settings) } });
+  };
   return (
     <Select
       size="md"
       label={`${provider.name} runtime`}
-      value={selectedRuntime(provider, draft)}
-      options={provider.runtimes.map((r) => ({ value: r.name, label: RUNTIME_LABELS[r.name] ?? r.name, disabled: !r.available, detail: runtimeDetail(r) }))}
-      onChange={(runtime) => update({ runtimes: { ...draft.runtimes, [provider.id]: runtime } })}
+      value={assigned ? `${REMOTE}:${assigned}` : runtime}
+      options={options}
+      onChange={choose}
       className="w-[140px] flex-none"
     />
   );
@@ -593,7 +635,11 @@ function SchemaSection({
   const runtime = selectedRuntime(provider, draft);
   // Urakatsu Cloud runs its models with its own settings: the model's options do not apply there.
   if (map === "processorJson" && runtime === CLOUD) return null;
-  const fields = Object.entries(schema.properties ?? {}).filter(([key, property]) => key !== "translation" && (!property.runtimes || property.runtimes.includes(runtime)));
+  // A model assigned to one of the app's workers needs no address of its own.
+  const assigned = map === "processorJson" && runtime === REMOTE && assignedWorker(provider, draft) !== undefined;
+  const fields = Object.entries(schema.properties ?? {}).filter(
+    ([key, property]) => key !== "translation" && (!property.runtimes || (property.runtimes.includes(runtime) && !(assigned && property.runtimes.includes(REMOTE)))),
+  );
   if (fields.length === 0) return null;
   const values = { ...parseJson(provider.defaultsJson), ...parseJson(draft[map][provider.id]) };
   delete values.translation;

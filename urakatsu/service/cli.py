@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--token", default=None, help="token apps must send (default: URAKATSU_WORKER_TOKEN, else a new one)")
     worker.add_argument("--no-token", action="store_true", help="accept requests without a token (only on 127.0.0.1)")
     worker.add_argument("--device", default=None, help="auto | cpu | cuda | cuda:N | dml")
+    worker.add_argument("--tunnel", action="store_true", help="expose the worker through a Cloudflare quick tunnel and print the line to paste into the app")
+    worker.add_argument("--idle-exit", type=float, default=0, metavar="MINUTES", help="exit after this long without a request (0: never)")
+    worker.add_argument("--preload", default=None, metavar="JSON", help="models to load (or download) at start: a JSON list of {stage, provider, settings, installed?}")
     worker.add_argument("--log-level", default="info")
 
     run = sub.add_parser("run", help="run the pipeline on image files")
@@ -119,29 +122,73 @@ def cmd_serve(args: argparse.Namespace, serve_ui: bool) -> int:
 def cmd_worker(args: argparse.Namespace) -> int:
     import os
     import secrets
+    import threading
+    import time
 
     import uvicorn
 
     from urakatsu.core.config import load_config
-    from urakatsu.remote.worker import Worker, create_app
+    from urakatsu.remote.tunnel import Tunnel, connection_line
+    from pydantic import TypeAdapter, ValidationError
+
+    from urakatsu.remote.worker import LoadRequest, Worker, create_app
     from urakatsu.runtimes.manager import RuntimeManager
     from urakatsu.runtimes.packages import start_updater
 
     _configure_logging(args.log_level)
+    try:
+        preload = TypeAdapter(list[LoadRequest]).validate_json(args.preload) if args.preload else None
+    except ValidationError as error:
+        print(f"urakatsu worker: --preload is not a list of models: {error}", file=sys.stderr)
+        return 2
     token = None if args.no_token else args.token or os.environ.get("URAKATSU_WORKER_TOKEN") or secrets.token_urlsafe(24)
-    if token is None and args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("urakatsu worker: --no-token only listens on 127.0.0.1; anyone who can reach it could run models", file=sys.stderr)
+    if token is None and (args.tunnel or args.host not in ("127.0.0.1", "localhost", "::1")):
+        print("urakatsu worker: --no-token only listens on 127.0.0.1 without a tunnel; anyone who can reach it could run models", file=sys.stderr)
         return 2
     config = load_config()
     start_updater()  # always the newest llama.cpp and stable-diffusion.cpp (AGENTS.md)
     worker = Worker(config, RuntimeManager(args.device or config.device))
+    server = uvicorn.Server(uvicorn.Config(create_app(worker, token, preload), host=args.host, port=args.port, log_level=args.log_level, access_log=False))
+
+    def stop() -> None:
+        server.should_exit = True
+
+    worker.stop = stop
     print(f"Urakatsu worker on http://{args.host}:{args.port} ({worker.runtimes.device.label()})")
-    print(f"Token: {token}" if token else "No token: anything that reaches this port can run models (a tunnel exposes it too).")
-    print("In the app: Settings, Pipeline, pick a model, set its runtime to remote, and enter this address and token.")
+    tunnel = None
+    if args.tunnel:
+        print("Opening a Cloudflare tunnel. Cloudflare relays the pages and could read them.")
+
+        def opened(url: str) -> None:
+            # Kaggle workers: the app reads this line from the session's log. Colab: paste it in
+            # the app (Settings, Workers), again whenever the tunnel's address changes.
+            print(connection_line(url, token), flush=True)
+
+        tunnel = Tunnel(args.port, opened)
+        tunnel.start()
+    elif token:
+        print(f"Token: {token}")
+        print("In the app: Settings, Workers, Another machine: enter this address and token.")
+    else:
+        print("No token: anything that reaches this port can run models.")
+    if args.idle_exit > 0:
+
+        def watch_idle() -> None:
+            while not server.should_exit:
+                if worker.idle() > args.idle_exit * 60:
+                    print(f"No requests for {args.idle_exit:g} minutes; stopping.", flush=True)
+                    stop()
+                    return
+                time.sleep(15)
+
+        threading.Thread(target=watch_idle, name="idle-exit", daemon=True).start()
     try:
-        uvicorn.run(create_app(worker, token), host=args.host, port=args.port, log_level=args.log_level, access_log=False)
+        server.run()
     except KeyboardInterrupt:
         pass
+    finally:
+        if tunnel is not None:
+            tunnel.stop()
     return 0
 
 

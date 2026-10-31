@@ -8,7 +8,7 @@ import { SETTINGS_TABS, SettingsProvider, SettingsSection, useSettingsDraft, typ
 import { ListIcon, ListRow, ListSection, Screen, type Enter } from "./glass";
 
 // Sections in groups, as the phone's own Settings app groups them.
-const GROUPS: SettingsTab[][] = [["appearance"], ["pipeline", "providers", "translation", "typesetting"], ["runtimes", "sources", "shortcuts"], ["about"]];
+const GROUPS: SettingsTab[][] = [["appearance"], ["pipeline", "workers", "providers", "translation", "typesetting"], ["runtimes", "sources", "shortcuts"], ["about"]];
 
 const isTab = (value: string | undefined): value is SettingsTab => SETTINGS_TABS.some(([id]) => id === value);
 

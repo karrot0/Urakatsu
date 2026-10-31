@@ -41,6 +41,8 @@ tesseract = ["pytesseract>=0.3.10"]
 # The desktop app (packaging/launcher installs it with uv). Linux uses pywebview's Qt backend,
 # which installs from wheels; its GTK backend needs PyGObject built against system headers.
 desktop = ["pywebview>=6.2; sys_platform != 'linux'", "pywebview[qt]>=6.2; sys_platform == 'linux'"]
+# What `urakatsu worker` needs on a Linux GPU notebook (Kaggle, Colab): CUDA ONNX Runtime and PyTorch.
+worker = ["urakatsu[onnx-gpu,torch]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.scripts]

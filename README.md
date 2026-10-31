@@ -184,17 +184,28 @@ To run the Vite dev server against a service you started yourself, start it in `
 
 ### Run models on another machine
 
-Detection, OCR and inpainting models can run on a GPU elsewhere, such as a Colab or Kaggle
-notebook or a server. Install Urakatsu there and start a worker:
+Detection, OCR and inpainting models can run on a GPU elsewhere: a free Kaggle or Colab
+notebook, or another machine. Add one under Settings, Workers, then pick it as a model's runtime
+in Settings, Pipeline (each worker is listed there by name). A model runs only on the worker you
+picked, and a worker loads its models as soon as it starts (`urakatsu worker --preload`), so the
+first page does not wait for weights. A model you installed from the Models page goes along too.
 
-```bash
-urakatsu worker --port 8100
-```
+- **Kaggle**: paste a Kaggle API token (from kaggle.com/settings; the account must be
+  phone-verified). Urakatsu pushes a private notebook that runs on a T4, starts it when a run
+  needs one of its models, and finds its address in the session's log. The notebook stops itself
+  after 30 minutes without requests, so it spends no more of the weekly GPU hours than you use.
+- **Colab**: choose Add Colab worker. The notebook (`notebooks/worker.ipynb`) opens in Colab;
+  choose Run all and paste the `Connection:` line it prints into the worker's Connection field.
+  If the notebook restarts, paste its new line.
+- **Another machine**: run `urakatsu worker --port 8100` there and enter its address and the
+  token it prints.
 
-It prints a token. To reach a notebook from your machine, expose the port with a tunnel, for
-example `cloudflared tunnel --url http://localhost:8100`. In the app, open Settings, Pipeline,
-pick the model, set its runtime to `remote`, and enter the worker's address and token. The
-worker runs the same model code on its own runtime, downloads the weights itself, and keeps
+Notebook workers run `urakatsu worker --tunnel`, which opens a Cloudflare quick tunnel and prints
+its address with the worker's token. Your pages go through Cloudflare on the way: the tunnel is
+encrypted, but Cloudflare relays it and could read them. Use a machine you can reach directly
+(Another machine) to keep them off third parties.
+
+The worker runs the same model code on its own runtime, downloads the weights itself, and keeps
 one model per stage loaded. Loads and inference run as background jobs that the app polls, so
 no request stays open long enough for a tunnel to cut it, however slow the model is.
 

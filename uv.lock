@@ -3665,6 +3665,15 @@ torch = [
     { name = "torchvision" },
     { name = "transformers" },
 ]
+worker = [
+    { name = "onnxruntime-gpu" },
+    { name = "rfdetr" },
+    { name = "safetensors" },
+    { name = "tokenizers" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3705,9 +3714,10 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'torch'", specifier = ">=5.20" },
     { name = "uharfbuzz", specifier = ">=0.40" },
     { name = "uniseg", specifier = ">=0.8" },
+    { name = "urakatsu", extras = ["onnx-gpu", "torch"], marker = "extra == 'worker'" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["onnx", "onnx-gpu", "onnx-directml", "torch", "tesseract", "desktop", "dev"]
+provides-extras = ["onnx", "onnx-gpu", "onnx-directml", "torch", "tesseract", "desktop", "worker", "dev"]
 
 [[package]]
 name = "urllib3"

@@ -4,7 +4,8 @@ apps elsewhere (their ``remote`` runtime, ``client.RemoteModel``).
 API (every route needs ``Authorization: Bearer <token>`` unless the worker runs without one):
 
     GET    /v1/info                     protocol, version, device, the providers it can run
-    POST   /v1/models                   {stage, provider, settings} -> {id, state}; loads in the background
+    POST   /v1/models                   {stage, provider, settings, installed?} -> {id, state}; loads in the background
+    POST   /v1/preload                  [{stage, provider, settings, installed?}] -> 202; loads or downloads them early
     GET    /v1/models/{id}?wait=s       {id, state: loading | ready | failed, runtime, weights, failure}
     DELETE /v1/models/{id}              unloads it
     POST   /v1/models/{id}/detect       image (PNG)                             -> job
@@ -12,6 +13,7 @@ API (every route needs ``Authorization: Bearer <token>`` unless the worker runs 
     POST   /v1/models/{id}/inpaint      image (PNG), mask (npz), fill?, prompt? -> job
     GET    /v1/jobs/{job}?wait=s        {job, state: running | done | failed, failure}
     GET    /v1/jobs/{job}/result        detections JSON (``wire``), {texts}, or PNG; then the job is gone
+    POST   /v1/shutdown                 ends the worker (the app's Stop button), when it was started to allow it
 
 No request runs longer than ``MAX_WAIT``: loads and inference are background jobs, and ``wait``
 holds a poll open until the job ends or ``MAX_WAIT`` passes, so the client hears at once when
@@ -19,11 +21,23 @@ it is done. Tunnels and proxies close requests that take longer (Cloudflare afte
 diffusion model on a notebook GPU can take that long for one crop. A result nobody fetches is
 dropped after ``JOB_TTL``.
 
+``installed`` is a model the app installed from its Models page (the registry entry,
+``catalog.installed.InstalledModel``): the worker registers it in its own store and downloads its
+files, since only the app knows what it installed.
+
+Preloading (``/v1/preload``, ``urakatsu worker --preload``) takes the models the app assigned to
+this worker: the first of each stage loads, the others only download (one model per stage stays
+loaded), so the first page does not wait for weights.
+
 Like the pipeline, it keeps one model per stage (loading another for a stage unloads the
 first), runs one load or inference at a time (one accelerator lane), and on out-of-memory
 unloads the other stages' models and retries once. A model's id is a hash of its stage,
 provider and settings, so apps that ask for the same model share it. Each provider runs on the
 runtime this machine's configuration picks for it (``pipeline.toml``), never ``remote`` or ``cloud``.
+
+A worker on a notebook (``urakatsu worker --tunnel``) opens its own tunnel (``tunnel``) and can
+end itself after a while without requests (``--idle-exit``), so a session nobody uses stops
+spending the account's GPU quota.
 
 Failures come back as ``{"error", "kind"}``; ``kind`` (unavailable, load, out_of_memory,
 processing) lets the client raise the error the pipeline expects.
@@ -70,6 +84,8 @@ class LoadRequest(BaseModel):
     stage: str
     provider: str
     settings: dict[str, Any] = {}
+    # The app's Models page entry for ``settings["model"]``, when it names an installed model.
+    installed: Optional[dict[str, Any]] = None
 
 
 class ModelUnloaded(Exception):
@@ -164,6 +180,16 @@ class Worker:
         self.models: dict[str, Model] = {}
         self.jobs: dict[str, Job] = {}
         self.lane = asyncio.Lock()
+        self.active = time.monotonic()
+        # Ends the process; set by ``urakatsu worker``, so ``/v1/shutdown`` and ``--idle-exit`` work.
+        self.stop: Optional[Callable[[], None]] = None
+
+    def touch(self) -> None:
+        self.active = time.monotonic()
+
+    def idle(self) -> float:
+        """Seconds since the last request that used a model, or 0 while one runs."""
+        return 0.0 if self.lane.locked() else time.monotonic() - self.active
 
     def info(self) -> dict[str, Any]:
         providers = [
@@ -172,7 +198,13 @@ class Worker:
             for cls in self.registry.list(stage)
             if local(cls)
         ]
-        return {"protocol": PROTOCOL, "version": __version__, "device": self.runtimes.device.label(), "providers": providers}
+        return {
+            "protocol": PROTOCOL,
+            "version": __version__,
+            "device": self.runtimes.device.label(),
+            "providers": providers,
+            "stoppable": self.stop is not None,
+        }
 
     def runtime_for(self, cls: type[Provider]) -> Optional[str]:
         """This machine's choice for ``cls``; ``remote`` or ``cloud`` here would only send the work on again."""
@@ -190,13 +222,47 @@ class Worker:
         existing = self.models.get(identifier)
         if existing is not None and existing.state != "failed":
             return existing
-        provider = cls(request.settings, self.runtimes, self.runtime_for(cls))
+        provider = self.provider(cls, request)
         model = Model(identifier, stage, provider)
         for other in [m for m in self.models.values() if m.stage is stage and m.id != identifier]:
             await self.unload(other.id)
         self.models[identifier] = model
         model.task = asyncio.create_task(self._load(model))
         return model
+
+    def provider(self, cls: type[Provider], request: LoadRequest) -> Provider:
+        """``cls`` with the request's settings on this machine's runtime, its installed model registered."""
+        if request.installed is not None:
+            from urakatsu.catalog.installed import InstalledModel, InstalledModels
+
+            installed = InstalledModel.model_validate(request.installed)
+            if installed.id != request.settings.get("model"):
+                raise ValueError(f"the installed model sent is {installed.id}, not the one the settings name")
+            InstalledModels(self.runtimes.store).add(installed)  # its files download when the model loads
+        return cls(request.settings, self.runtimes, self.runtime_for(cls))
+
+    async def fetch(self, request: LoadRequest) -> None:
+        """Downloads a model's weights without loading it."""
+        cls = self.registry.get(Stage.parse(request.stage), request.provider)
+        provider = self.provider(cls, request)
+        await asyncio.to_thread(provider.resolve_weights)
+
+    async def preload(self, requests: list[LoadRequest]) -> None:
+        """Loads the first model of each stage and downloads the rest, one after another."""
+        loaded: set[Stage] = set()
+        for request in requests:
+            try:
+                stage = Stage.parse(request.stage)
+                if stage in loaded:
+                    await self.fetch(request)
+                    log.info("downloaded %s ahead of use", request.provider)
+                    continue
+                loaded.add(stage)
+                model = await self.load(request)
+                if model.task is not None:
+                    await asyncio.wait({model.task})
+            except Exception as error:  # noqa: BLE001 - a preload that fails is retried when the app asks
+                log.warning("could not preload %s: %s", request.provider, error)
 
     async def _load(self, model: Model) -> None:
         try:
@@ -266,10 +332,21 @@ class Worker:
         return self.jobs[identifier]
 
 
-def create_app(worker: Worker, token: Optional[str]) -> FastAPI:
+def create_app(worker: Worker, token: Optional[str], preload: Optional[list[LoadRequest]] = None) -> FastAPI:
+    tasks: set[asyncio.Task] = set()
+
+    def start_preload(requests: list[LoadRequest]) -> None:
+        task = asyncio.create_task(worker.preload(requests))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI):
+        if preload:
+            start_preload(preload)
         yield
+        for task in tasks:
+            task.cancel()
         await worker.unload_all()  # stops the llama-server / sd-server processes it started
 
     app = FastAPI(title="Urakatsu worker", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -280,6 +357,8 @@ def create_app(worker: Worker, token: Optional[str]) -> FastAPI:
             sent = request.headers.get("authorization", "")
             if not hmac.compare_digest(sent.encode("utf-8"), f"Bearer {token}".encode("utf-8")):
                 return JSONResponse({"error": "missing or wrong token", "kind": "unavailable"}, status_code=401)
+        if request.url.path != "/v1/info":  # the app's status checks do not keep a worker alive
+            worker.touch()
         return await call_next(request)
 
     def gone(identifier: str) -> JSONResponse:
@@ -288,6 +367,18 @@ def create_app(worker: Worker, token: Optional[str]) -> FastAPI:
     @app.get("/v1/info")
     async def info():
         return worker.info()
+
+    @app.post("/v1/preload")
+    async def preload_models(requests: list[LoadRequest]):
+        start_preload(requests)
+        return Response(status_code=202)
+
+    @app.post("/v1/shutdown")
+    async def shutdown():
+        if worker.stop is None:
+            return JSONResponse({"error": "this worker was not started to be stopped remotely", "kind": "unavailable"}, status_code=501)
+        asyncio.get_running_loop().call_later(0.5, worker.stop)  # after this answer is sent
+        return Response(status_code=202)
 
     @app.post("/v1/models")
     async def load(request: LoadRequest):

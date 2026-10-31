@@ -30,6 +30,7 @@ from .network import NetworkServer, network_router
 from .servicer import UrakatsuServicer
 from .sources_api import sources_router
 from .updates_api import updates_router
+from .workers_api import workers_router
 from .workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ def build_app(
     app.include_router(updates_router(), prefix="/api/v1")
     app.include_router(automations_router(workspace), prefix="/api/v1")
     app.include_router(komga_router(workspace), prefix="/api/v1")
+    app.include_router(workers_router(), prefix="/api/v1")
     app.state.agents = AgentService(workspace)
     app.include_router(agent_router(app.state.agents), prefix="/api/v1")
 

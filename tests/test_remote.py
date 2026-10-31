@@ -237,7 +237,8 @@ async def test_wrong_token_is_refused(worker):
 
 async def test_missing_url_says_where_to_set_it(worker, monkeypatch):
     monkeypatch.delenv(remote_client.URL_ENV, raising=False)
-    with pytest.raises(ProviderUnavailable, match="worker URL"):
+    # No address of its own and no workers in Settings, Workers.
+    with pytest.raises(ProviderUnavailable, match="Settings, Workers, or set this model's Worker URL"):
         await EchoOcr({}, None, REMOTE).load()
 
 

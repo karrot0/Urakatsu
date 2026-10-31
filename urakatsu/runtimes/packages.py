@@ -1,5 +1,6 @@
 """Native runtime packages: the newest official builds of llama.cpp, stable-diffusion.cpp,
-and the runtimes behind the source systems (Bun for Mana bundles, Suwayomi Server).
+the runtimes behind the source systems (Bun for Mana bundles, Suwayomi Server), and cloudflared
+for the tunnel a notebook worker opens (``urakatsu.remote.tunnel``).
 
 Urakatsu always runs the latest runtimes (AGENTS.md). Python bindings vendor old
 snapshots of these projects, so instead Urakatsu installs each project's own release
@@ -156,7 +157,24 @@ SUWAYOMI = Package(
     on_demand=True,
 )
 
-PACKAGES = {package.id: package for package in (LLAMA_CPP, STABLE_DIFFUSION_CPP, BUN, SUWAYOMI)}
+# Linux and Windows builds are the executable itself, not an archive (``_install``).
+CLOUDFLARED = Package(
+    id="cloudflared",
+    name="cloudflared",
+    repository="cloudflare/cloudflared",
+    executable="cloudflared",
+    variants=(
+        Variant("win-cpu", (r"cloudflared-windows-amd64\.exe",)),
+        Variant("linux-cpu", (r"cloudflared-linux-amd64",)),
+        Variant("macos-arm64", (r"cloudflared-darwin-arm64\.tgz",)),
+        Variant("macos-x64", (r"cloudflared-darwin-amd64\.tgz",)),
+    ),
+    on_demand=True,
+)
+
+PACKAGES = {package.id: package for package in (LLAMA_CPP, STABLE_DIFFUSION_CPP, BUN, SUWAYOMI, CLOUDFLARED)}
+
+ARCHIVES = (".zip", ".tar.gz", ".tgz")
 
 
 @lru_cache(maxsize=1)
@@ -480,8 +498,14 @@ class PackageManager:
                 for asset in release.assets:
                     archive = staging / asset.name
                     self._download(client, asset, archive, progress)
-                    _extract(archive, staging / "files")
-                    archive.unlink()
+                    if asset.name.endswith(ARCHIVES):
+                        _extract(archive, staging / "files")
+                        archive.unlink()
+                    else:  # the executable itself
+                        executable = staging / "files" / (package.executable + (".exe" if asset.name.endswith(".exe") else ""))
+                        executable.parent.mkdir(parents=True, exist_ok=True)
+                        archive.rename(executable)
+                        executable.chmod(executable.stat().st_mode | 0o111)
             find_executable(staging / "files", package.executable)
             if target.exists():
                 shutil.rmtree(target)
@@ -586,7 +610,7 @@ def _extract(archive: Path, destination: Path) -> None:
     # Executables in tarballs may lose their mode bits in zip extraction on POSIX.
     if os.name != "nt":
         for path in destination.rglob("*"):
-            if path.is_file() and (path.name.startswith(("llama-", "sd-")) or path.name in ("bun", "java")) and "." not in path.name:
+            if path.is_file() and (path.name.startswith(("llama-", "sd-")) or path.name in ("bun", "java", "cloudflared")) and "." not in path.name:
                 path.chmod(path.stat().st_mode | 0o111)
 
 

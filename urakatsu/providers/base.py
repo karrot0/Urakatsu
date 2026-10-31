@@ -11,7 +11,9 @@ Lifecycle (the ``StageProcessor`` model cell): ``load()`` -> calls ... -> ``unlo
 
 Remote (not in Koharu): detection, OCR and inpainting providers also declare the ``remote``
 runtime, which runs the same provider on a Urakatsu worker on another machine
-(``urakatsu.remote``). It is never picked by default: it needs ``remote_url``. Settings fields
+(``urakatsu.remote``). It is never picked by default. It runs on the app's worker picked in
+the runtime menu (``remote_worker``; Settings, Workers; ``urakatsu.remote.workers``), else on
+``remote_url``, else on the first of the app's workers that answers. Settings fields
 that only apply to some runtimes name them in their schema (``"runtimes"``), and the Settings
 page shows them only for those. The ``cloud`` runtime is the same client against Urakatsu
 Cloud (``urakatsu.remote.cloud``): available once the account key is set, for the providers
@@ -52,12 +54,14 @@ class ProviderSettings(BaseModel):
     # Where the ``remote`` runtime finds its worker (``urakatsu worker``).
     remote_url: Optional[str] = Field(
         default=None,
-        description="Address of the Urakatsu worker (urakatsu worker) that runs this model.",
+        description="Address of a Urakatsu worker (urakatsu worker) that runs this model. Empty uses the first worker in Settings, Workers that answers.",
         json_schema_extra={"runtimes": [REMOTE]},
     )
     remote_api_key: Optional[str] = Field(
         default=None, description="The token the worker printed when it started.", json_schema_extra={"runtimes": [REMOTE]}
     )
+    # Which of the app's workers runs it (Settings, Workers), picked in the runtime menu.
+    remote_worker: Optional[str] = Field(default=None, json_schema_extra={"runtimes": [REMOTE]})
 
 
 def server_fields(runtime: str) -> tuple[Any, Any]:
@@ -216,9 +220,9 @@ class Provider(ABC):
         default = cls.default_runtime()
         schema = cls.Settings.model_json_schema()
         defaults = cls.Settings().model_dump(mode="json")
-        hidden = [] if cls.uses_catalog() else ["model"]  # no catalog model can replace its weights
+        hidden = ["remote_worker"] if cls.uses_catalog() else ["model", "remote_worker"]  # the runtime menu picks the worker
         if not cls.remotable:
-            hidden += ["remote_url", "remote_api_key"]
+            hidden += ["remote_url", "remote_api_key"]  # remote_worker is hidden above
         for name in hidden:
             schema.get("properties", {}).pop(name, None)
             defaults.pop(name, None)
