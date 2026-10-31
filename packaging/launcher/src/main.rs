@@ -411,11 +411,7 @@ fn window(paths: Paths, initial: Value, start: Option<Flow>) {
             }
             "open-log" => platform::reveal(&current.log),
             "pick-home" => {
-                let chosen = rfd::FileDialog::new()
-                    .set_title("Choose where Urakatsu keeps its data")
-                    .set_directory(&current.home)
-                    .set_parent(window)
-                    .pick_folder();
+                let chosen = ui::pick_folder("Choose where Urakatsu keeps its data", &current.home, window);
                 if let Some(folder) = chosen {
                     let home = discover::home_for(folder);
                     let chosen = Paths::with_home(home);
@@ -432,11 +428,8 @@ fn window(paths: Paths, initial: Value, start: Option<Flow>) {
                 }
             }
             "pick-models" => {
-                let chosen = rfd::FileDialog::new()
-                    .set_title("Choose where Urakatsu keeps its models")
-                    .set_directory(discover::models_dir_of(&current.home))
-                    .set_parent(window)
-                    .pick_folder();
+                let start = discover::models_dir_of(&current.home);
+                let chosen = ui::pick_folder("Choose where Urakatsu keeps its models", &start, window);
                 if let Some(folder) = chosen {
                     let mut next = current.clone();
                     next.models = Some(discover::models_folder_in(folder));

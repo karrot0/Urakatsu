@@ -4,6 +4,8 @@
 //! The page sends commands with `window.ipc.postMessage`; the host answers by calling the
 //! page's `render(state)`. Work runs on other threads and reaches the window through `Ui`.
 
+use std::path::{Path, PathBuf};
+
 use serde_json::Value;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
@@ -177,4 +179,37 @@ fn build_webview(builder: WebViewBuilder, window: &Window) -> wry::Result<WebVie
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 fn build_webview(builder: WebViewBuilder, window: &Window) -> wry::Result<WebView> {
     builder.build(window)
+}
+
+/// Asks for a folder, modal to the window. On Linux this runs GTK's chooser on this thread,
+/// which keeps the window alive while it is open. Not rfd there: its GTK backend blocks this
+/// thread until a GTK thread of its own answers, and that thread needs the main context tao
+/// holds here, so the window freezes for good.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn pick_folder(title: &str, start: &Path, window: &Window) -> Option<PathBuf> {
+    use gtk::prelude::*;
+    use tao::platform::unix::WindowExtUnix;
+    let dialog = gtk::FileChooserNative::new(
+        Some(title),
+        Some(window.gtk_window()),
+        gtk::FileChooserAction::SelectFolder,
+        None,
+        None,
+    );
+    dialog.set_modal(true);
+    // A new data folder does not exist yet: start from what does.
+    if let Some(folder) = start.ancestors().find(|folder| folder.is_dir()) {
+        dialog.set_current_folder(folder);
+    }
+    let accepted = dialog.run() == gtk::ResponseType::Accept;
+    accepted.then(|| dialog.filename()).flatten()
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+pub fn pick_folder(title: &str, start: &Path, window: &Window) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .set_directory(start)
+        .set_parent(window)
+        .pick_folder()
 }

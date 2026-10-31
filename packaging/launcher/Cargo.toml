@@ -26,6 +26,7 @@ tar = "0.4.46"
 rfd = { version = "0.17.2", default-features = false }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+gtk = "0.18.2"
 rfd = { version = "0.17.2", default-features = false, features = ["gtk3"] }
 
 [build-dependencies]
