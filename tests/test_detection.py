@@ -459,6 +459,22 @@ def _text_crossing_artwork(stroke_width, bar_lefts, art_corner):
     return image, _detection_from_mask("text", 0, 0, size, size, pixels)
 
 
+def _light_text_among_denser_art():
+    """White bar on a black panel; white art gets denser with distance from it but never starts at one."""
+    width, height = 120, 160
+    bar = np.zeros((height, width), dtype=bool)
+    bar[40:120, 55:66] = True
+    distance = det._distance_from_sites(bar)
+    density = np.where(distance < 23, np.clip((distance - 6.0) * 0.007, 0.0, None), 0.18)
+    art = np.random.default_rng(0).random((height, width)) < density
+    image = np.full((height, width, 3), 4, dtype=np.uint8)
+    image[art] = (250, 250, 250)
+    image[bar] = (250, 250, 250)
+    pixels = np.zeros((height, width), dtype=np.uint8)
+    pixels[35:125, 50:71] = 255
+    return image, _detection_from_mask("onomatopoeia", 0, 0, width, height, pixels)
+
+
 def _outlined_text_joining_a_stroke_colored_area(stroke_width):
     """Black text with a white outline on navy, the outline running into a white area to its right."""
     size = 120
@@ -650,6 +666,16 @@ def test_paper_between_unstroked_text_and_artwork_is_not_a_stroke():
     inferred = det.infer_typography(image, detection)
 
     assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color is None
+    assert inferred.stroke_width is None
+
+
+def test_art_growing_denser_around_light_text_is_not_a_stroke():
+    image, detection = _light_text_among_denser_art()
+
+    inferred = det.infer_typography(image, detection)
+
+    assert inferred.color == (255, 255, 255)
     assert inferred.stroke_color is None
     assert inferred.stroke_width is None
 

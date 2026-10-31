@@ -75,6 +75,10 @@ LOCAL_BACKGROUND_MIN_SHARE = 0.3
 HALO_SEARCH_DISTANCE = 24
 HALO_QUIET_FRACTION = 0.06
 HALO_RIM_FRACTION = 0.15
+# How much that share must rise across the rim (two rings inside it to one ring past it): art that
+# merely gets denser with distance, as other lettering around white text on a black panel does,
+# drifts past HALO_RIM_FRACTION without a rim.
+HALO_RIM_STEP = 0.15
 HALO_MIN_RIM_PIXELS = 16
 HALO_RIM_CONCENTRATION = 0.5
 # A wider "stroke" than this many glyph depths (distance from glyph centre line to its edge) is
@@ -986,6 +990,8 @@ def infer_background_halo(
         return None
     rim = next((d for d in range(quiet + 1, length) if fractions[d] >= HALO_RIM_FRACTION), None)
     if rim is None or rim - 1 < MIN_MEASURED_STROKE_WIDTH or contrasts[rim] < HALO_MIN_RIM_PIXELS:
+        return None
+    if fractions[min(rim + 1, length - 1)] - fractions[max(rim - 2, quiet)] < HALO_RIM_STEP:
         return None
     depths = np.sort(_distance_from_sites(~glyph)[glyph])
     if rim - 1 > HALO_MAX_WIDTH_PER_GLYPH_DEPTH * int(depths[(len(depths) - 1) * 99 // 100]):
