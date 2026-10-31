@@ -227,10 +227,14 @@ def write_page(
     detections = list(output.detections)
     if input.region is not None:
         detections = [d for d in detections if _intersects(d.bbox, input.region)]
+    # Only these labels become text blocks; off, onomatopoeia stay plain regions and no block is at stake.
+    blocks = ("text", SOUND_EFFECT_LABEL) if input.sound_effects != "off" else ("text",)
     if kept:
-        detections = [d for d in detections if d.label != "text" or not any(_same_text(d.bbox, box) for box in kept)]
+        detections = [d for d in detections if d.label not in blocks or not any(_same_text(d.bbox, box) for box in kept)]
     non_maximum_suppression(detections, NON_MAXIMUM_SUPPRESSION_THRESHOLD)
     suppress_nested_text(detections)
+    if input.sound_effects != "off":
+        suppress_doubled_lettering(detections)
     sort_by_layout(detections)
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
@@ -1494,6 +1498,21 @@ def suppress_nested_text(detections: list) -> None:
             dropped.add(id(outer))
         else:
             dropped.update(id(text) for text in inner)
+    detections[:] = [d for d in detections if id(d) not in dropped]
+
+
+def suppress_doubled_lettering(detections: list) -> None:
+    lettering = sorted((d for d in detections if d.label in ("text", SOUND_EFFECT_LABEL)), key=lambda d: -d.score)
+    dropped: set[int] = set()
+    for index, weaker in enumerate(lettering):
+        for stronger in lettering[:index]:
+            if (
+                stronger.label != weaker.label
+                and id(stronger) not in dropped
+                and max(containment(stronger.bbox, weaker.bbox), containment(weaker.bbox, stronger.bbox)) >= NESTED_TEXT_CONTAINMENT
+            ):
+                dropped.add(id(weaker))
+                break
     detections[:] = [d for d in detections if id(d) not in dropped]
 
 

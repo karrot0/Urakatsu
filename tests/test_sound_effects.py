@@ -134,6 +134,46 @@ def test_redraw_hides_the_blocks_and_keeps_the_originals_in_the_art(tmp_path):
     assert snapshot.asset(page, sfx.MASK) is None
 
 
+def _detect_pair(session: Session, snapshot, page, mode: str, text_score: float, sound_effect_score: float, force: bool = False):
+    """One lettering found under both labels."""
+    found = [_piece("text", 20, 20, 40, 100, score=text_score), _piece("onomatopoeia", 24, 24, 24, 90, score=sound_effect_score)]
+    stage_input = StageInput(snapshot, page, None, None, ImageCache(), None, mode, force)
+    return session.commit(asyncio.run(DetectionStage().process(stage_input, _Detector(found))))
+
+
+def test_lettering_found_under_both_labels_is_one_block_of_the_stronger_kind(tmp_path):
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect_pair(session, snapshot, page, "typeset", 0.46, 0.22)
+    assert len(snapshot.text_layers(page)) == 1 and _sound_effect_layers(snapshot, page) == []
+
+    session = Session(tmp_path / "sound-effect")
+    snapshot, page = _page(session)
+    snapshot = _detect_pair(session, snapshot, page, "typeset", 0.38, 0.74)
+    assert len(snapshot.text_layers(page)) == 1 and len(_sound_effect_layers(snapshot, page)) == 1
+
+
+def test_off_never_gives_up_text_to_an_onomatopoeia_that_makes_no_block(tmp_path):
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect_pair(session, snapshot, page, "off", 0.38, 0.74)
+    assert len(snapshot.text_layers(page)) == 1 and _sound_effect_layers(snapshot, page) == []
+
+
+def test_a_sound_effect_is_not_written_over_a_block_the_user_edited(tmp_path):
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect_pair(session, snapshot, page, "typeset", 0.46, 0.22)
+    layer = snapshot.text_layers(page)[0]
+    edit = snapshot.edit()
+    edit.set(snapshot.layer_content(layer), c.Translation(text=c.Authored.user("Mine"), language="en"))
+    snapshot = session.commit(edit.finish())
+
+    snapshot = _detect_pair(session, snapshot, page, "typeset", 0.46, 0.8, force=True)
+
+    assert snapshot.text_layers(page) == [layer] and _sound_effect_layers(snapshot, page) == []
+
+
 # ---- translation ----------------------------------------------------------------------------------
 
 

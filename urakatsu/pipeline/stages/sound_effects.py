@@ -7,7 +7,9 @@ Koharu's layout detector finds onomatopoeia but nothing downstream uses them. Wi
   because the detector often cuts one sound effect into pieces (달 | 칵, グ | ビ), and writes each
   group as a text region with a text block whose role is ``ROLE``. The OCR and translation stages
   then read and translate it like any other block; translation asks for a sound effect
-  (``TranslationRequest.sound_effects``). In ``typeset`` mode the block is lettered and the
+  (``TranslationRequest.sound_effects``). Lettering the detector also called text keeps only the
+  higher-scoring label (``detection.suppress_doubled_lettering``), so it is not written twice. In
+  ``typeset`` mode the block is lettered and the
   onomatopoeia mask (``coo-mask``) lets inpainting erase the original. In ``redraw`` mode the
   block starts hidden and the original stays in the art for this stage to redraw; the pieces' own
   boxes are kept as ``sound-effect-mask``, because a merged box can span art between the pieces

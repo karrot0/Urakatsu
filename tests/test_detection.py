@@ -1021,3 +1021,44 @@ def test_a_paragraph_over_a_line_the_user_edited_is_not_written_again():
     assert det._same_text((169.0, 452.0, 722.0, 666.0), kept_line)  # its paragraph
     assert det._same_text((180.0, 460.0, 700.0, 540.0), kept_line)  # the line again
     assert not det._same_text((169.0, 700.0, 722.0, 800.0), kept_line)  # text elsewhere
+
+
+# ---- one lettering under two labels (not in Koharu) ------------------------------------------------
+
+
+def test_lettering_read_as_text_and_onomatopoeia_keeps_the_stronger_label():
+    # Page 7 of Ikiru no Heta na Takou no Joshi: つぷ… beside a character, stronger as text.
+    found = [_detection("text", 0.46, (488, 758, 567, 998)), _detection("onomatopoeia", 0.22, (491, 765, 538, 998))]
+    det.suppress_doubled_lettering(found)
+    assert [d.label for d in found] == ["text"]
+
+    # The other way round: a real sound effect, weakly read as text too.
+    found = [_detection("text", 0.38, (917, 1540, 1047, 1820)), _detection("onomatopoeia", 0.74, (935, 1545, 1029, 1815))]
+    det.suppress_doubled_lettering(found)
+    assert [d.label for d in found] == ["onomatopoeia"]
+
+
+def test_the_piece_of_a_sound_effect_a_dropped_text_box_held_is_kept():
+    found = [
+        _detection("onomatopoeia", 0.7, (10, 10, 50, 50)),
+        _detection("text", 0.5, (0, 0, 120, 60)),
+        _detection("onomatopoeia", 0.3, (60, 10, 100, 50)),
+    ]
+    det.suppress_doubled_lettering(found)
+    assert sorted(d.bbox for d in found) == [(10.0, 10.0, 50.0, 50.0), (60.0, 10.0, 100.0, 50.0)]
+
+
+def test_text_beside_or_barely_crossing_a_sound_effect_is_kept():
+    found = [
+        _detection("text", 0.8, (0, 0, 100, 100)),
+        _detection("onomatopoeia", 0.3, (90, 0, 190, 100)),
+        _detection("onomatopoeia", 0.3, (300, 0, 400, 100)),
+    ]
+    det.suppress_doubled_lettering(found)
+    assert len(found) == 3
+
+
+def test_bubbles_and_panels_are_not_lettering():
+    found = [_detection("bubble", 0.9, (0, 0, 100, 100)), _detection("panel", 0.9, (0, 0, 100, 100)), _detection("text", 0.2, (10, 10, 90, 90))]
+    det.suppress_doubled_lettering(found)
+    assert len(found) == 3
