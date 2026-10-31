@@ -13,7 +13,8 @@ urakatsu/
 │                server processes
 ├── providers/   one package per stage; each provider is a class registered with @register
 │   ├── detection/   koharu-layout-rfdetr-seg-2xl (Torch)
-│   ├── ocr/         paddleocr-vl-1.6 (llama.cpp or Torch), manga-ocr, baberu-ocr, hayai-ocr
+│   ├── ocr/         paddleocr-vl-1.6 (llama.cpp or Torch), manga-ocr, baberu-ocr, hayai-ocr,
+│   │                charspot-ocr (ONNX)
 │   ├── inpainting/  lama, aot (Torch); flux2-klein, rorem-mixed, any catalog diffusion model
 │   │                (stable-diffusion.cpp)
 │   └── translation/ local GGUF models (llama.cpp) and hosted APIs (Claude, OpenAI, DeepL, ...)

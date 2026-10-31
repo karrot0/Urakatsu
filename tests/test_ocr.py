@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
 import os
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -17,7 +19,9 @@ from urakatsu.pipeline.stages.base import StageInput
 from urakatsu.providers.base import OcrProvider
 from urakatsu.pipeline.stages.ocr import OcrStage, crop, normalize_ocr_text
 from urakatsu.providers.ocr._common import pillow_grayscale, read_lines
+from urakatsu.catalog.facts import ModelFacts
 from urakatsu.providers.ocr.baberu_ocr import BaberuOcrProvider
+from urakatsu.providers.ocr.charspot_ocr import COMBOS, CharspotOcrProvider, load_vocabulary, pad_grid, preprocess
 from urakatsu.providers.ocr.hayai_ocr import _image_size_for_max_patches
 from urakatsu.providers.ocr.manga_ocr import (
     MangaOcrProvider,
@@ -293,6 +297,76 @@ def test_ocr_stage_rejects_a_region_outside_the_source(tmp_path):
         asyncio.run(stage.process(input, _StubOcr()))
 
 
+# ---- Charspot: preprocessing, vocabulary and catalog matching -----------------------------------
+
+
+@pytest.mark.parametrize("height, width", [(40, 300), (300, 40), (128, 128), (1, 900), (3000, 2000)])
+@pytest.mark.parametrize("budget", [196, 256])
+def test_charspot_grid_fits_the_budget(height, width, budget):
+    scale, rows, columns = pad_grid(height, width, budget, 16)
+    assert 1 <= rows * columns <= budget
+    assert scale > 0
+
+
+def test_charspot_preprocess_pads_with_the_border_median():
+    image = Image.new("RGB", (40, 300), (200, 100, 50))
+    pixels, factors = preprocess(image, 256, 16)
+    assert factors[0] > 0 and factors[1] > 0
+    assert pixels.dtype == np.uint8
+    assert pixels.shape[0] == 3
+    assert pixels.shape[1] % 16 == 0 and pixels.shape[2] % 16 == 0
+    assert (pixels[0] == 200).all() and (pixels[1] == 100).all() and (pixels[2] == 50).all()
+
+
+def test_charspot_vocabulary_ends_with_the_combined_glyphs(tmp_path):
+    path = tmp_path / "vocab.json"
+    path.write_text(json.dumps({"characters": ["あ", "い"]}), encoding="utf-8")
+    vocabulary = load_vocabulary(path, 4)
+    assert vocabulary[:4] == ["あ", "い", "", ""]
+    assert vocabulary[4:] == COMBOS
+    assert len(COMBOS) == 12
+
+
+def test_charspot_reads_characters_in_model_order():
+    class Session:
+        def run(self, outputs, inputs):
+            assert outputs == ["ids", "order"]
+            assert inputs["img"].dtype == np.float32 and inputs["img"].shape[:2] == (1, 3)
+            return np.array([0, 1, 2]), np.array([2, 0, 1])
+
+    provider = CharspotOcrProvider()
+    provider._session = Session()
+    provider._cell, provider._budget = 16, 256
+    provider._vocabulary = ["字", "の", "!?"]
+    assert provider._recognize([Image.new("RGB", (32, 64), "white")]) == ["!?字の"]
+
+
+def test_charspot_reads_an_empty_crop_as_no_text():
+    class Session:
+        def run(self, outputs, inputs):
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+
+    provider = CharspotOcrProvider()
+    provider._session = Session()
+    provider._cell, provider._budget = 16, 256
+    provider._vocabulary = []
+    assert provider._recognize([Image.new("RGB", (32, 64), "white")]) == [""]
+
+
+@pytest.mark.parametrize(
+    "runtime, repo, files, expected",
+    [
+        ("onnx", "muscgab/manga-ocr-charspot-small", ["config.json", "vocab.json", "model.onnx"], "onnx"),
+        ("onnx", "muscgab/manga-ocr-charspot-nano", ["config.json", "vocab.json", "model.onnx"], "onnx"),
+        ("onnx", "muscgab/manga-ocr-charspot-small", ["config.json", "model.onnx"], None),
+        ("onnx", "someone/other-ocr", ["config.json", "vocab.json", "model.onnx"], None),
+        ("torch", "muscgab/manga-ocr-charspot-small", ["config.json", "vocab.json", "model.onnx"], None),
+    ],
+)
+def test_charspot_accepts_its_family(runtime, repo, files, expected):
+    assert CharspotOcrProvider.accepts(ModelFacts(runtime=runtime, repo=repo, files=files)) == expected
+
+
 # ---- weight tests (skip when the checkpoint is not cached) --------------------------------------
 
 
@@ -356,6 +430,21 @@ def test_hayai_ocr_matches_balloons(real_home):
     from urakatsu.runtimes import RuntimeManager
 
     provider = HayaiOcrProvider({}, RuntimeManager(), "torch")
+    import asyncio
+
+    asyncio.run(provider.load())
+    try:
+        results = provider._recognize(_fixture_crops())
+    finally:
+        provider.unload()
+    assert _check_balloons(results) >= 7, results
+
+
+def test_charspot_ocr_matches_balloons(real_home):
+    _require_weights(real_home, CharspotOcrProvider, "onnx")
+    from urakatsu.runtimes import RuntimeManager
+
+    provider = CharspotOcrProvider({}, RuntimeManager(), "onnx")
     import asyncio
 
     asyncio.run(provider.load())

@@ -92,14 +92,16 @@ class OnnxRuntime(Runtime):
         name = first[0] if isinstance(first, tuple) else first
         return self.device if name != "CPUExecutionProvider" else Device.cpu()
 
-    def session(self, path: Path | str, **options: Any):
+    def session(self, path: Path | str, *, cpu: bool = False, **options: Any):
+        """An inference session. ``cpu`` keeps a graph that a GPU provider runs incorrectly off the GPU."""
         session_options = self._ort.SessionOptions()
         session_options.graph_optimization_level = self._ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         session_options.log_severity_level = 3  # errors only; EP fallback is reported below
         for key, value in options.items():
             setattr(session_options, key, value)
-        session = self._ort.InferenceSession(str(path), sess_options=session_options, providers=self._providers)
-        wanted = self._providers[0]
+        providers = ["CPUExecutionProvider"] if cpu else self._providers
+        session = self._ort.InferenceSession(str(path), sess_options=session_options, providers=providers)
+        wanted = providers[0]
         wanted_name = wanted[0] if isinstance(wanted, tuple) else wanted
         if wanted_name != "CPUExecutionProvider" and wanted_name not in session.get_providers():
             if self._fallback_reason is None:

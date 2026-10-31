@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import hashlib
 import json
 import logging
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -240,6 +242,33 @@ def _set_icon() -> None:
 # ---- the window ---------------------------------------------------------------------------------
 
 
+def drop_stale_cache(storage: Path) -> None:
+    """Empties the webview's HTTP cache when the UI build changed since the last start.
+
+    Earlier builds served the app page without ``cache-control``, and WebView2 kept such a page as
+    fresh for hours after an update, so the window ran the old bundle it names. The cache is
+    only that: emptying it keeps the saved theme, shortcuts and sign-ins (Local Storage, cookies).
+    Runs before the webview starts, while nothing holds the files (one instance, see above).
+    """
+    from urakatsu.service.app import DEFAULT_UI_DIR
+
+    page = DEFAULT_UI_DIR / "index.html"
+    if not page.is_file():
+        return
+    build = hashlib.sha256(page.read_bytes()).hexdigest()[:16]
+    stamp = storage / "ui-build"
+    try:
+        if stamp.read_text(encoding="utf-8").strip() == build:
+            return
+    except OSError:
+        pass
+    shutil.rmtree(storage / "EBWebView" / "Default" / "Cache", ignore_errors=True)
+    try:
+        stamp.write_text(build, encoding="utf-8")
+    except OSError:
+        log.warning("could not record the UI build in %s", stamp)
+
+
 class Bridge:
     """Methods the pages call (``window.pywebview.api``): the setup page's buttons, and the window
     controls of the title bar the pages draw (chrome.py)."""
@@ -432,6 +461,7 @@ def main() -> int:
     desktop.window.events.closed += desktop.closed
     storage = home() / "app" / "webview"
     storage.mkdir(parents=True, exist_ok=True)
+    drop_stale_cache(storage)
     webview.settings["ALLOW_DOWNLOADS"] = True
     icon = str(resources.files("urakatsu.desktop") / "urakatsu.png") if sys.platform.startswith("linux") else None
     webview.start(desktop.boot, private_mode=False, storage_path=str(storage), icon=icon)

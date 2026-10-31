@@ -15,8 +15,8 @@
 
 - **The whole pipeline, locally.** Text detection, OCR, translation, inpainting and typesetting,
   on an NVIDIA, AMD or Intel GPU, or on your CPU.
-- **Edit everything.** Text blocks, typography, layers, cleanup brushes and generative fill. A
-  re-run never overwrites your edits.
+- **Edit everything.** Text blocks, rich text, typography, layers, cleanup brushes and generative
+  fill. A re-run never overwrites your edits.
 - **Chapters from the sites you read.** Download series from Suwayomi (Tachiyomi and Mihon
   extensions) and Mana sources straight into a project.
 - **Webtoons, manhwa and manhua.** A webtoon project joins each chapter into one strip and
@@ -32,8 +32,12 @@
 
 | | |
 | :---: | :---: |
-| ![Source view: the detected text blocks over the original page](docs/images/screenshots/editor-source.webp) | ![The project list with three series](docs/images/screenshots/projects.webp) |
+| ![Source view: the detected text blocks over the original page](docs/images/screenshots/editor-source.webp) | ![The project list with a webtoon and a manga](docs/images/screenshots/projects.webp) |
 | **Source view:** every detected text block, before translation | **Projects:** each series with its chapters and pages |
+| ![A webtoon chapter read as one strip, with pages joined edge to edge](docs/images/screenshots/webtoon.webp) | ![A speech bubble with bold, italic, underlined, coloured and larger words](docs/images/screenshots/rich-text.webp) |
+| **Webtoons:** a chapter read and edited as one long strip | **Rich text:** bold, italic, colour, size and font for any word |
+| ![The Remove text brush painting over lettering, half of it already gone](docs/images/screenshots/inpainting.webp) | ![Generative fill redrawing a brown bag in red, with a before and after slider](docs/images/screenshots/generative-fill.webp) |
+| **Inpainting:** brush over anything to remove it | **Generative fill:** describe a change and compare before and after |
 | ![Link a series: search a source and download its chapters](docs/images/screenshots/sources.webp) | ![The model catalog, rating each download for this machine](docs/images/screenshots/models.webp) |
 | **Sources:** search a site, link a series, download its chapters | **Models:** a Hugging Face catalog rated for your hardware |
 

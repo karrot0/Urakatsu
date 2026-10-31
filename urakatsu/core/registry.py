@@ -26,11 +26,13 @@ BUILTIN_MODULES = (
     "urakatsu.providers.detection.comic_text_detector",
     "urakatsu.providers.detection.comic_text_bubble_detector",
     "urakatsu.providers.detection.dbnet_resnet34",
+    "urakatsu.providers.detection.charspot_detector",
     # OCR, in display order
     "urakatsu.providers.ocr.paddle_ocr_vl",
     "urakatsu.providers.ocr.manga_ocr",
     "urakatsu.providers.ocr.baberu_ocr",
     "urakatsu.providers.ocr.hayai_ocr",
+    "urakatsu.providers.ocr.charspot_ocr",
     # inpainting
     "urakatsu.providers.inpainting.lama",
     "urakatsu.providers.inpainting.aot_inpainting",
