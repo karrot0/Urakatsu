@@ -128,6 +128,9 @@ def weight_sources(model_id: str, quantization: Optional[str]) -> tuple[HuggingF
 
 @register
 class LocalTranslator(TranslatorProvider):
+    # N_CTX also holds the prompt, the page's segments, the page image and up to 1000 output tokens.
+    context_budget: ClassVar[int] = 2000
+
     id: ClassVar[str] = "local"
     name: ClassVar[str] = "Local"
     stage: ClassVar[Stage] = Stage.TRANSLATION

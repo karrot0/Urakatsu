@@ -27,12 +27,22 @@ class TranslationContext:
 
 
 @dataclass
+class TranslationTerm:
+    source: str
+    translation: str = ""
+    note: str = ""
+
+
+@dataclass
 class TranslationRequest:
     segments: list[str]
     target_language: Language
     source_language: Optional[Language] = None
     instructions: Optional[str] = None
     context: list[TranslationContext] = field(default_factory=list)
+    # From the project's knowledge (not in Koharu). Providers without a model prompt ignore these two.
+    glossary: list[TranslationTerm] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     image: Optional[Image.Image] = None
     # Indexes of segments that are sound effects drawn into the art (not in Koharu).
     sound_effects: frozenset[int] = frozenset()

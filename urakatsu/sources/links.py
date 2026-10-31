@@ -27,6 +27,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
+from urakatsu.pipeline import knowledge
 from urakatsu.pipeline.projects import ProjectStore, chapters_of, write_chapters
 from urakatsu.scene import Chapter, Chapters
 
@@ -169,6 +170,7 @@ class SourceLinks:
         if self.store.name(project_id).strip() in UNTITLED:
             self.store.rename(project_id, series.title)
         self._drop_placeholder(project_id)
+        knowledge.seed_series(self.store.session(project_id), series)
         return self.view(project_id)  # type: ignore[return-value]
 
     def _drop_placeholder(self, project_id: str) -> None:
@@ -192,6 +194,7 @@ class SourceLinks:
         link.chapters = system.chapters(link.source, link.series.id)
         link.refreshed_at = time.time()
         self._save(project_id, link, self._cover(link))
+        knowledge.seed_series(self.store.session(project_id), link.series)
         return self.view(project_id)  # type: ignore[return-value]
 
     def _require(self, project_id: str) -> SourceLink:

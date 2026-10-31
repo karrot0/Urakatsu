@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from urakatsu.core.progress import ProgressKind
 from urakatsu.core.stage import Operation, Stage
+from urakatsu.pipeline import knowledge
+from urakatsu.providers.translation.language import Language
 
 from .image_edit import QUALITIES, Box, edit_region
 from .tools import Tool, ToolContext, tool
@@ -138,6 +140,68 @@ def search_text(context: ToolContext, args: dict[str, Any]) -> Any:
                 if len(hits) >= limit:
                     return {"hits": hits, "truncated": True}
     return {"hits": hits, "truncated": False}
+
+
+@tool(
+    "get_knowledge",
+    "The open project's knowledge base, which the translator draws on: glossary entries (source name, aliases, "
+    "translation, notes) and free notes. Filter with query.",
+    {"query": {"type": "string", "description": "Keep entries containing this phrase."}},
+)
+def get_knowledge(context: ToolContext, args: dict[str, Any]) -> Any:
+    stored = knowledge.read(context.workspace.session(context.project()).snapshot())
+    needle = str(args.get("query") or "").lower()
+    entries = [
+        entry.model_dump(exclude={"origin", "language"})
+        for entry in stored.entries
+        if needle in " ".join((entry.source, *entry.aliases, entry.translation, entry.text)).lower()
+    ]
+    return {"enabled": stored.enabled, "entries": entries}
+
+
+@tool(
+    "save_knowledge",
+    "Add entries to the project's knowledge base, used by every later translation. Use for character and place "
+    "names, recurring terms, and facts a translator needs (gender, how someone speaks, who is related to whom). "
+    "`source` is the name exactly as the source text writes it; an existing `source` is updated. Notes with "
+    "pinned true go with every page, so keep those short. Check get_knowledge first.",
+    {
+        "entries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["character", "place", "term", "note"]},
+                    "source": {"type": "string"},
+                    "aliases": {"type": "array", "items": {"type": "string"}},
+                    "translation": {"type": "string"},
+                    "text": {"type": "string"},
+                    "pinned": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+        }
+    },
+    required=("entries",),
+    mutates=True,
+)
+def save_knowledge(context: ToolContext, args: dict[str, Any]) -> Any:
+    entries = [knowledge.EntryInput.model_validate(entry) for entry in args["entries"]]
+    language = Language.coerce(context.workspace.config.translation.target_language).tag
+    stored = knowledge.add(context.workspace.session(context.project()), entries, language)
+    return {"saved": len(entries), "total": len(stored.entries)}
+
+
+@tool(
+    "delete_knowledge",
+    "Remove entries from the project's knowledge base.",
+    {"ids": {"type": "array", "items": {"type": "string"}, "description": "Entry ids from get_knowledge."}},
+    required=("ids",),
+    mutates=True,
+)
+def delete_knowledge(context: ToolContext, args: dict[str, Any]) -> Any:
+    stored = knowledge.remove(context.workspace.session(context.project()), [str(i) for i in args["ids"]])
+    return {"total": len(stored.entries)}
 
 
 @tool("get_translation_settings", "The translation provider and model, target language, and custom instructions.")
@@ -493,8 +557,8 @@ async def run_pipeline(context: ToolContext, args: dict[str, Any]) -> Any:
 @tool(
     "configure_translation",
     "Change translation settings: target language (a BCP 47 tag from get_translation_settings), custom "
-    "instructions for the translator (style, glossary, honorifics; empty string clears them), or the "
-    "provider and model (from list_translation_models).",
+    "instructions for the translator (style, honorifics; they apply to every project, so a series' names "
+    "belong in save_knowledge; empty string clears them), or the provider and model (from list_translation_models).",
     {
         "target_language": {"type": "string"},
         "instructions": {"type": "string"},
@@ -533,6 +597,9 @@ APP_TOOLS: list[Tool] = [
     get_project,
     get_page,
     search_text,
+    get_knowledge,
+    save_knowledge,
+    delete_knowledge,
     get_translation_settings,
     list_translation_models,
     list_fonts,

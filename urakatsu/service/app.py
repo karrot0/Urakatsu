@@ -25,6 +25,7 @@ from .catalog_api import catalog_router
 from .gen import urakatsu_pb2_grpc as rpc
 from .grpc_web import GrpcWebBridge
 from .http_api import api_router
+from .knowledge_api import knowledge_router
 from .komga_api import komga_router
 from .network import NetworkServer, network_router
 from .servicer import UrakatsuServicer
@@ -67,6 +68,7 @@ def build_app(
     app.include_router(updates_router(), prefix="/api/v1")
     app.include_router(automations_router(workspace), prefix="/api/v1")
     app.include_router(komga_router(workspace), prefix="/api/v1")
+    app.include_router(knowledge_router(workspace), prefix="/api/v1")
     app.include_router(workers_router(), prefix="/api/v1")
     app.state.agents = AgentService(workspace)
     app.include_router(agent_router(app.state.agents), prefix="/api/v1")

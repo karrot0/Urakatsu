@@ -15,6 +15,8 @@ from .components import (
     Generation,
     Geometry,
     Group,
+    Knowledge,
+    KnowledgeEntry,
     OcrAnalysis,
     Page,
     Point,

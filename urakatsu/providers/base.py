@@ -422,6 +422,8 @@ class TranslationProvider(Provider):
     """Translates segments."""
 
     stage = Stage.TRANSLATION
+    # Estimated tokens of glossary, notes and context a request may carry (pipeline/knowledge.py).
+    context_budget: ClassVar[int] = 6000
 
     async def translate(self, request) -> list[str]:  # pragma: no cover - interface
         raise NotImplementedError

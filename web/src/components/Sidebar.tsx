@@ -59,6 +59,7 @@ import { AutomationsButton } from "./Automations";
 import { KomgaButton } from "./Komga";
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
+import { KnowledgeButton } from "./Knowledge";
 import { ProjectFormatButton } from "./ProjectFormat";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
@@ -448,6 +449,7 @@ function ProjectHead() {
         </span>
       )}
       <ProjectFormatButton />
+      <KnowledgeButton />
       <KomgaButton />
       <AutomationsButton />
     </div>

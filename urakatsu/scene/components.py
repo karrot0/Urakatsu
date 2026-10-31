@@ -144,6 +144,30 @@ class Chapters(Component):
     chapters: list[Chapter] = Field(default_factory=list)
 
 
+class KnowledgeEntry(BaseModel):
+    id: str
+    kind: str = "term"  # character | place | term | note
+    # The name as the source text writes it, and other spellings: naming one on a page retrieves the entry.
+    source: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    translation: str = ""
+    # The language of ``translation``; a run in another language keeps only ``text``.
+    language: Optional[str] = None
+    # What to know about it: gender, voice, relationships, or free notes.
+    text: str = ""
+    # Sent with every page instead of being ranked against it.
+    pinned: bool = False
+    origin: Origin = Field(default_factory=UserOrigin)
+
+
+class Knowledge(Component):
+    """Urakatsu extension: the project's glossary and notes (``urakatsu/pipeline/knowledge.py``)."""
+
+    KIND: ClassVar[str] = "dev.urakatsu.knowledge"
+    enabled: bool = True
+    entries: list[KnowledgeEntry] = Field(default_factory=list)
+
+
 class Page(Component):
     KIND: ClassVar[str] = "dev.koharu.page"
     STRUCTURAL: ClassVar[bool] = True
@@ -463,6 +487,7 @@ COMPONENTS: dict[str, type[Component]] = {
         Visibility,
         Project,
         Chapters,
+        Knowledge,
         Page,
         EntityOrigin,
         OcrAnalysis,
