@@ -16,10 +16,12 @@ Koharu's layout detector finds onomatopoeia but nothing downstream uses them. Wi
   (a trail of ドスススス across a fighter, two 쾅 either side of a door).
 - The sound effects stage (``SoundEffectsStage``, redraw mode only) sends each translated sound
   effect, with context around it, to an inpainting provider that follows prompts, with an
-  instruction to re-letter it in the target language in the same style. Only the pieces' boxes are
-  kept. The results form one generated raster layer per page above the Cleanup layer; like the
-  Cleanup layer, it is not redone while it exists (delete it to redraw), so a re-run never paints
-  over it.
+  instruction to re-letter it in the target language in the same style. The pieces' boxes are kept,
+  and so is lettering that an edit model drew past them into a band around the box
+  (``redraw_reach``, ``redraw_alpha``): a translation rarely has the original's shape. The results
+  form one generated raster layer per page above the Cleanup layer. Like the Cleanup layer, it is
+  not redone while it exists, so a re-run never paints over it; a forced run (Redo) draws it again
+  in place, unless the user edited the layer.
 
 Readings with no letters (art, speed lines and punctuation the detector boxed) are not redrawn.
 """
@@ -33,7 +35,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
+from scipy import ndimage
 
 from urakatsu.core.results import LayoutDetection
 from urakatsu.providers.base import Provider
@@ -42,7 +45,7 @@ from urakatsu.scene import At, Edit, Patch
 from urakatsu.scene import components as c
 
 from .base import StageInput, StageProcessor, finish, generation
-from .inpainting import fill_region
+from .inpainting import FILL_CONTEXT, fill_region
 from .watermarks import page_image
 
 PRODUCER = "dev.urakatsu.pipeline.sound-effects"
@@ -55,6 +58,24 @@ LAYER_NAME = "Sound effects"
 MERGE_GAP = 0.35
 # Pixels around a sound effect's box that the redraw may repaint (outlines reach past the box).
 REDRAW_PADDING = 4
+# How far past the box an edit model may letter, as a share of the box's short side (a letter's
+# height, near enough), at least REDRAW_REACH_MIN pixels. The sampler pins the latents outside the
+# mask it gets, so this has to go to the model: widening the paste alone would keep the same clip.
+REDRAW_REACH = 0.5
+REDRAW_REACH_MIN = 16
+# Context around that wider mask, as a share of its longer side: the crop stays about what the box
+# alone gets at FILL_CONTEXT, so the lettering is not scaled down further.
+REDRAW_CONTEXT = 0.3
+# Past the box, what counts as lettering: the model moved a pixel by more than SPILL_THRESHOLD once
+# both images are blurred by SPILL_BLUR, in a patch of SPILL_PATCH pixels (FLUX.2 Klein reproduces
+# screentone closely, so this drops its noise, yet keeps the thin outlines of outlined lettering).
+# SPILL_REGROW gives back the edge that patch shaves off.
+SPILL_BLUR = 1.5
+SPILL_THRESHOLD = 64
+SPILL_PATCH = 3
+SPILL_REGROW = 2
+# Blur of the fade from what is kept into the art around it, so no seam shows at the box.
+REDRAW_FEATHER = 2.0
 
 
 # ---- detection ------------------------------------------------------------------------------------
@@ -212,6 +233,7 @@ def _padded(bbox, width: int, height: int) -> tuple[int, int, int, int]:
 @dataclass
 class _Target:
     content: str
+    region: str
     box: tuple[int, int, int, int]  # left, top, right, bottom (exclusive), padded and clamped
     source: str
     translation: str
@@ -248,8 +270,56 @@ def redraw_targets(input: StageInput, width: int, height: int) -> list[_Target]:
         box = _padded(geometry.bounds(), width, height)
         if box[2] <= box[0] or box[3] <= box[1]:
             continue
-        targets.append(_Target(content, box, source.text.value.strip(), translation.text.value.strip(), translation.language))
+        targets.append(_Target(content, region, box, source.text.value.strip(), translation.text.value.strip(), translation.language))
     return targets
+
+
+def other_regions(scene, page: str, own: str, width: int, height: int) -> np.ndarray:
+    """The page's bubbles and text but ``own``, which a redraw never reaches into. Not panels: lettering crosses those."""
+    canvas = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(canvas)
+    for entity in scene.descendants(page):
+        region = scene.component(entity, c.Region)
+        geometry = scene.component(entity, c.Geometry)
+        if entity != own and region is not None and region.kind in (c.RegionKinds.BUBBLE, c.RegionKinds.TEXT) and geometry is not None and len(geometry.points) >= 3:
+            draw.polygon([(point.x, point.y) for point in geometry.points], fill=255)
+    return np.asarray(canvas) > 0
+
+
+def redraw_reach(box: tuple[int, int, int, int], pieces: np.ndarray, others: np.ndarray) -> np.ndarray:
+    """Where the model may paint: the pieces, and a band around the box that leaves ``others``
+    alone. The art between merged pieces stays out, as it always has."""
+    left, top, right, bottom = box
+    reach = max(round(min(right - left, bottom - top) * REDRAW_REACH), REDRAW_REACH_MIN)
+    room = np.zeros(pieces.shape, dtype=bool)
+    room[max(top - reach, 0) : bottom + reach, max(left - reach, 0) : right + reach] = True
+    room[top:bottom, left:right] = False
+    return (room & ~others) | pieces
+
+
+def _spilled(source: np.ndarray, redrawn: np.ndarray, pieces: np.ndarray, room: np.ndarray) -> np.ndarray:
+    """What the model lettered past the pieces: changes in ``room`` that join up with them."""
+    blur = (SPILL_BLUR, SPILL_BLUR, 0)
+    moved = np.abs(ndimage.gaussian_filter(source.astype(np.float32), blur) - ndimage.gaussian_filter(redrawn.astype(np.float32), blur)).max(axis=2) > SPILL_THRESHOLD
+    solid = ndimage.binary_opening(moved, np.ones((SPILL_PATCH, SPILL_PATCH), dtype=bool))
+    eight = np.ones((3, 3), dtype=bool)
+    labels, _ = ndimage.label(solid & room & ~pieces, structure=eight)
+    joined = np.unique(labels[ndimage.binary_dilation(pieces, structure=eight, iterations=SPILL_REGROW)])
+    return ndimage.binary_dilation(np.isin(labels, joined[joined != 0]), structure=eight, iterations=SPILL_REGROW)
+
+
+def redraw_alpha(source: np.ndarray, redrawn: np.ndarray, pieces: np.ndarray, room: np.ndarray) -> np.ndarray:
+    """The redraw's alpha on the page: opaque over the pieces and the lettering past them (with the
+    insides of outlined letters), fading out over the art around that, and nothing outside ``room``."""
+    alpha = np.zeros(pieces.shape, dtype=np.uint8)
+    ys, xs = np.nonzero(room)
+    if xs.size == 0:
+        return alpha
+    window = (slice(int(ys.min()), int(ys.max()) + 1), slice(int(xs.min()), int(xs.max()) + 1))
+    kept = ndimage.binary_fill_holes(pieces[window] | _spilled(source[window], redrawn[window], pieces[window], room[window]))
+    fade = np.clip(ndimage.gaussian_filter(kept.astype(np.float32), REDRAW_FEATHER) * 2.0, 0.0, 1.0)
+    alpha[window] = np.where(room[window], np.where(kept, 255, np.round(fade * 255.0)), 0).astype(np.uint8)
+    return alpha
 
 
 def redraw_layer(scene, page: str) -> Optional[str]:
@@ -282,10 +352,19 @@ def _instructed(provider: Provider) -> bool:
 
 class SoundEffectsStage(StageProcessor):
     def skip(self, input: StageInput, provider: Provider) -> bool:
-        if input.sound_effects != "redraw" or redraw_layer(input.scene, input.page) is not None:
+        if input.sound_effects != "redraw":
             return True
+        layer = redraw_layer(input.scene, input.page)
+        # A forced run (Redo) draws the lettering again, but never over a layer the user edited.
+        if layer is not None and (not input.force or input.scene.user_authored(layer)):
+            return True
+        if layer is not None:  # the forced run redraws the layer, or drops it when nothing is left to letter
+            return False
         meta = input.scene.page(input.page)
         return not redraw_targets(input, int(meta.width), int(meta.height))
+
+    def done(self, input: StageInput) -> bool:
+        return redraw_layer(input.scene, input.page) is not None
 
     async def process(self, input: StageInput, provider: Provider) -> Patch:
         if not getattr(provider, "prompted", False):
@@ -303,6 +382,7 @@ class SoundEffectsStage(StageProcessor):
         if pieces_mask is not None and pieces_mask.shape != (source.height, source.width):
             pieces_mask = None
         instructed = _instructed(provider)
+        pixels = np.asarray(source)
         overlay = np.zeros((source.height, source.width, 4), dtype=np.uint8)
         for target in targets:
             left, top, right, bottom = target.box
@@ -310,11 +390,17 @@ class SoundEffectsStage(StageProcessor):
             # Only the pieces' own boxes: a merged box can span art between them.
             window = pieces_mask[top:bottom, left:right] if pieces_mask is not None else None
             mask[top:bottom, left:right] = window if window is not None and window.any() else 255
+            box = mask >= 127
+            # A model that describes what belongs here would fill a band with new art; an edit
+            # model leaves it as it is but for the lettering.
+            room = redraw_reach(target.box, box, other_regions(input.scene, input.page, target.region, source.width, source.height)) if instructed else box
             fill = functools.partial(provider._fill, prompt=instruction(target, instructed))
-            redrawn = np.asarray((await asyncio.to_thread(fill_region, source, mask, fill)).convert("RGB"))
-            keep = mask >= 127
+            reach = np.where(room, 255, 0).astype(np.uint8)
+            redrawn = np.asarray((await asyncio.to_thread(fill_region, source, reach, fill, REDRAW_CONTEXT if instructed else FILL_CONTEXT)).convert("RGB"))
+            alpha = redraw_alpha(pixels, redrawn, box, room)
+            keep = alpha > 0
             overlay[keep, :3] = redrawn[keep]
-            overlay[keep, 3] = 255
+            overlay[keep, 3] = np.maximum(overlay[keep, 3], alpha[keep])
         return commit(input, provider, overlay, [t.content for t in targets])
 
 
@@ -326,11 +412,18 @@ def commit(input: StageInput, provider: Provider, overlay: np.ndarray, contents:
     for content in contents:
         edit.observe(content, c.SourceText)
         edit.observe(content, c.Translation)
+    entity = redraw_layer(input.scene, page)
     if not overlay[..., 3].any():
+        if entity is not None:  # a forced run with nothing left to letter drops the old layer
+            edit.remove_entity(entity)
         return finish(edit)
-    rasters = input.scene.raster_layers(page)
-    entity = edit.add_entity(page, At.after(rasters[-1]) if rasters else At.START)
-    edit.set(entity, c.RasterLayer(origin=c.generated(gen), name=LAYER_NAME, kind=c.RasterLayerKind.EDIT))
+    if entity is None:
+        rasters = input.scene.raster_layers(page)
+        entity = edit.add_entity(page, At.after(rasters[-1]) if rasters else At.START)
+        edit.set(entity, c.RasterLayer(origin=c.generated(gen), name=LAYER_NAME, kind=c.RasterLayerKind.EDIT))
+    else:
+        edit.observe(entity, c.RasterLayer)
+        edit.observe_assets(entity)
     buffer = io.BytesIO()
     Image.fromarray(overlay, "RGBA").save(buffer, format="PNG")
     height, width = overlay.shape[:2]

@@ -636,9 +636,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         options.pageIds ??
         (options.scope === "selection" ? selectedPages(state) : options.scope === "page" && state.pageId ? [state.pageId] : options.scope === "chapter" ? chapterPages : []);
       if ((options.scope === "chapter" || options.scope === "selection") && pageIds.length === 0) return;
-      const job: JobState = { id: "", status: "running", events: [], completed: 0, total: 0 };
+      // A redo adds to the run it was started from, so the Activity trace keeps that run in one place.
+      const earlier = options.force ? jobRef.current : undefined;
+      const base = { completed: earlier?.completed ?? 0, total: earlier?.total ?? 0 };
+      const job: JobState = earlier
+        ? { ...earlier, id: "", status: "running", events: [...earlier.events], current: undefined, message: undefined }
+        : { id: "", status: "running", events: [], completed: 0, total: 0 };
       jobRef.current = job;
-      setState((s) => ({ ...s, job: { ...job } }));
+      setState((s) => ({ ...s, job: { ...job, events: [...job.events] } }));
       try {
         const stream = client.run({
           projectId: project.id,
@@ -657,8 +662,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           }
           if (event.pageId && event.kind !== "loading" && event.kind !== "running") clearPreviews(job, event.pageId);
           job.events.push(event);
-          if (event.total) job.total = event.total;
-          if (event.completed) job.completed = event.completed;
+          if (event.total) job.total = base.total + event.total;
+          if (event.completed) job.completed = base.completed + event.completed;
           if (event.kind === "loading" || event.kind === "running") {
             job.current = { page: event.pageId, stage: event.stage, model: event.model, kind: event.kind };
           }

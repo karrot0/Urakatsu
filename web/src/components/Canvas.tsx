@@ -806,14 +806,20 @@ export function Canvas() {
       }
       if (mod || event.altKey) return;
       const key = event.key.toLowerCase();
-      if ((event.key === "Delete" || event.key === "Backspace") && ws.blockId) void ws.deleteBlock(ws.blockId);
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (ws.blockId) void ws.deleteBlock(ws.blockId);
+        else if (ws.rasterId) void ws.deleteLayer(ws.rasterId);
+      }
       if (event.key === "Enter" && ws.blockId) {
         event.preventDefault();
         setEditing(ws.blockId);
       }
       if (event.key === "Escape") {
         if (selection) setSelection(null);
-        else ws.selectBlock(undefined);
+        else {
+          ws.selectBlock(undefined);
+          ws.selectRaster(undefined);
+        }
       }
       if (key === "1") ws.setView("source");
       if (key === "2") ws.setView("cleanup");

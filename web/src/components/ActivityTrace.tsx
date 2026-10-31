@@ -3,8 +3,9 @@
 // (loading, running, then finished, skipped or failed) into one row per stage.
 //
 // A stage skipped because the page already had its results ("done") can be redone: Redo on the
-// page, or Redo on the run for every such page, runs the same stages again forced. Stages replace
-// their own results there and keep what the user edited.
+// page, or Redo on the run for every such page, runs the same stages again forced. The circle on
+// any settled step redoes that one stage on that page, skipped or not. Stages replace their own
+// results there and keep what the user edited.
 
 import { ChevronRight, CircleCheck, CircleDashed, CircleMinus, CircleX, LoaderCircle, RotateCw } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -32,7 +33,7 @@ function buildTrace(events: ProgressEvent[]): Trace {
   const steps = new Map<string, Step>();
   let elapsedMs: number | undefined;
   for (const event of events) {
-    if (!event.pageId && (event.kind === "completed" || event.kind === "stopped") && event.elapsedMs) elapsedMs = event.elapsedMs;
+    if (!event.pageId && (event.kind === "completed" || event.kind === "stopped") && event.elapsedMs) elapsedMs = (elapsedMs ?? 0) + event.elapsedMs;
     if (!event.pageId || !event.stage) continue;
     if (!pages.includes(event.pageId)) pages.push(event.pageId);
     if (!stages.includes(event.stage)) stages.push(event.stage);
@@ -71,6 +72,8 @@ export function ActivityPanel() {
   const redoable = running ? [] : trace.pages.filter((page) => trace.stages.some((stage) => doneBefore(trace.steps.get(key(page, stage)) ?? { state: "queued" })));
   /** The run's stages again on ``pages``, forced. */
   const redo = (pages: string[]) => void ws.run({ kind: "stages", stages: trace.stages as StageName[], scope: "page", pageIds: pages, force: true });
+  /** One stage again on one page, forced: the circle on a step. */
+  const redoStep = (page: string, stage: string) => void ws.run({ kind: "stages", stages: [stage as StageName], scope: "page", pageIds: [page], force: true });
 
   return (
     <div className="flex flex-col gap-3">
@@ -119,6 +122,7 @@ export function ActivityPanel() {
               steps={trace.stages.map((stage) => trace.steps.get(key(page, stage)) ?? { state: "queued" })}
               job={job}
               onRedo={redoable.includes(page) ? () => redo([page]) : undefined}
+              onRedoStep={(stage) => redoStep(page, stage)}
             />
           ))}
         </ol>
@@ -128,7 +132,7 @@ export function ActivityPanel() {
 }
 
 /** One page: a summary line (stage dots, count, time) that opens to its stages. Open by default while it is active or has failed. */
-function PageTrace({ name, stages, steps, job, onRedo }: { name: string; stages: string[]; steps: Step[]; job: JobState; onRedo?: () => void }) {
+function PageTrace({ name, stages, steps, job, onRedo, onRedoStep }: { name: string; stages: string[]; steps: Step[]; job: JobState; onRedo?: () => void; onRedoStep: (stage: string) => void }) {
   const active = steps.some((s) => s.state === "loading" || s.state === "running");
   const failed = steps.some((s) => s.state === "failed");
   const [open, setOpen] = useState<boolean>();
@@ -168,7 +172,7 @@ function PageTrace({ name, stages, steps, job, onRedo }: { name: string; stages:
       {expanded && (
         <ol className="mb-1.5 ml-[22px] flex flex-col border-l border-line-soft pl-2">
           {stages.map((stage, i) => (
-            <StepRow key={stage} stage={stage} step={steps[i]} runOver={job.status !== "running"} />
+            <StepRow key={stage} stage={stage} step={steps[i]} runOver={job.status !== "running"} onRedo={() => onRedoStep(stage)} />
           ))}
         </ol>
       )}
@@ -185,7 +189,7 @@ const DOT: Record<StepState, string> = {
   failed: "bg-danger",
 };
 
-function StepRow({ stage, step, runOver }: { stage: string; step: Step; runOver: boolean }) {
+function StepRow({ stage, step, runOver, onRedo }: { stage: string; step: Step; runOver: boolean; onRedo: () => void }) {
   const label = STAGE_LABEL[stage] ?? stage;
   const status =
     step.state === "finished"
@@ -210,7 +214,19 @@ function StepRow({ stage, step, runOver }: { stage: string; step: Step; runOver:
   return (
     <li className="flex flex-col gap-0.5 py-1">
       <div className="flex min-w-0 items-center gap-2">
-        <StepIcon state={step.state} />
+        {runOver && step.state !== "loading" && step.state !== "running" ? (
+          <button
+            type="button"
+            className="flex-none cursor-pointer rounded-full transition-opacity duration-[20ms] ease-in hover:opacity-70"
+            title={`Redo ${label} on this page; what you edited is kept`}
+            aria-label={`Redo ${label}`}
+            onClick={onRedo}
+          >
+            <StepIcon state={step.state} />
+          </button>
+        ) : (
+          <StepIcon state={step.state} />
+        )}
         <span className={cn("flex-none", step.state === "queued" || step.state === "skipped" ? "text-fg-2" : "text-fg")}>{label}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs leading-4 text-fg-3" title={step.model}>
           {step.model}

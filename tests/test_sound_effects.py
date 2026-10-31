@@ -242,6 +242,48 @@ def test_redraw_skips_outside_redraw_mode_and_refuses_models_that_only_remove(tm
         asyncio.run(stage.process(StageInput(snapshot, page, None, None, ImageCache(), None, "redraw"), Remover()))
 
 
+def _sfx_input(snapshot, page, force: bool = False) -> StageInput:
+    return StageInput(snapshot, page, None, None, ImageCache(), None, "redraw", force)
+
+
+def test_a_forced_run_redraws_its_layer_in_place_but_not_over_the_users_edits(tmp_path):
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect(session, snapshot, page, "redraw")
+    snapshot = _read_and_translate(session, snapshot, page, [("달칵", "CLICK"), ("!", "!")])
+    stage, provider = SoundEffectsStage(), _Fill()
+    snapshot = session.commit(asyncio.run(stage.process(_sfx_input(snapshot, page), provider)))
+    layer = sfx.redraw_layer(snapshot, page)
+
+    assert stage.done(_sfx_input(snapshot, page)) and stage.skip(_sfx_input(snapshot, page), provider)
+    assert not stage.skip(_sfx_input(snapshot, page, force=True), provider)
+    snapshot = session.commit(asyncio.run(stage.process(_sfx_input(snapshot, page, force=True), provider)))
+    assert len(provider.prompts) == 2
+    assert sfx.redraw_layer(snapshot, page) == layer and len(snapshot.raster_layers(page)) == 1
+
+    edit = snapshot.edit()
+    edit.set(layer, c.Visibility(origin=c.user(), visible=False))
+    snapshot = session.commit(edit.finish())
+    assert stage.skip(_sfx_input(snapshot, page, force=True), provider)
+    assert stage.done(_sfx_input(snapshot, page, force=True))
+
+
+def test_a_forced_run_drops_its_layer_when_no_lettering_is_left(tmp_path):
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect(session, snapshot, page, "redraw")
+    snapshot = _read_and_translate(session, snapshot, page, [("달칵", "CLICK"), ("!", "!")])
+    stage, provider = SoundEffectsStage(), _Fill()
+    snapshot = session.commit(asyncio.run(stage.process(_sfx_input(snapshot, page), provider)))
+
+    edit = snapshot.edit_as(generation("test", "test"))
+    content = snapshot.layer_content(_sound_effect_layers(snapshot, page)[0])
+    edit.set(content, c.Translation(text=c.Authored.generated("", generation("test", "test")), language="en-US"))
+    snapshot = session.commit(edit.finish())
+    snapshot = session.commit(asyncio.run(stage.process(_sfx_input(snapshot, page, force=True), provider)))
+    assert sfx.redraw_layer(snapshot, page) is None
+
+
 def test_the_stage_joins_a_run_only_while_sound_effects_are_redrawn():
     assert Stage.SOUND_EFFECTS in Operation.full().resolve()
     config = PipelineConfig()
@@ -264,3 +306,76 @@ def test_redraw_leaves_the_art_between_merged_pieces(tmp_path):
     pixels = np.asarray(Image.open(io.BytesIO(snapshot.asset_bytes(sfx.redraw_layer(snapshot, page), "source"))).convert("RGBA"))
     assert pixels[35, 30, 3] == 255 and pixels[35, 75, 3] == 255  # both pieces redrawn
     assert pixels[35, 55, 3] == 0  # the gap between them keeps the art
+
+
+def _redraw_masks(monkeypatch, tmp_path, provider):
+    """The mask and context ``fill_region`` got for each sound effect, from a model that changes nothing."""
+    seen = []
+    monkeypatch.setattr(sfx, "fill_region", lambda image, mask, fill, *context: seen.append((mask.copy(), context)) or image)
+    session = Session(tmp_path)
+    snapshot, page = _page(session)
+    snapshot = _detect(session, snapshot, page, "redraw")
+    snapshot = _read_and_translate(session, snapshot, page, [("달칵", "CLICK"), ("!", "!")])
+    snapshot = session.commit(asyncio.run(SoundEffectsStage().process(StageInput(snapshot, page, None, None, ImageCache(), None, "redraw"), provider)))
+    pixels = np.asarray(Image.open(io.BytesIO(snapshot.asset_bytes(sfx.redraw_layer(snapshot, page), "source"))).convert("RGBA"))
+    return seen, pixels
+
+
+def test_an_edit_model_may_letter_past_the_box_but_not_into_other_text(tmp_path, monkeypatch):
+    seen, pixels = _redraw_masks(monkeypatch, tmp_path, _Fill())
+    [(mask, context)] = seen
+    assert context == (sfx.REDRAW_CONTEXT,)
+    # The merged box ends at 86 (82 + padding) and 54 down; half its 38 px short side reaches 19 more.
+    assert mask[35, 90] == 255 and mask[60, 50] == 255
+    assert mask[35, 110] == 0 and mask[80, 50] == 0  # the band's edge
+    assert mask[30, 100] == 0  # the dialogue beside it
+    # Nothing changed past the box, so only the box is opaque and the band keeps the page's art.
+    assert pixels[35, 50, 3] == 255 and pixels[35, 95, 3] == 0
+
+
+def test_a_model_that_describes_the_page_stays_inside_the_box(tmp_path, monkeypatch):
+    class Describer(_Fill):
+        instructed = False
+
+    [(mask, context)], _ = _redraw_masks(monkeypatch, tmp_path, Describer())
+    assert context == (sfx.FILL_CONTEXT,)
+    assert mask[35, 50] == 255 and mask[35, 90] == 0
+
+
+def _spill_scene():
+    source = np.full((100, 200, 3), 255, dtype=np.uint8)
+    box = np.zeros((100, 200), dtype=bool)
+    box[30:70, 40:100] = True
+    room = np.zeros((100, 200), dtype=bool)
+    room[5:95, 15:145] = True
+    return source, source.copy(), box, room
+
+
+def test_lettering_past_the_box_is_kept_and_the_rest_of_the_band_is_not():
+    source, redrawn, box, room = _spill_scene()
+    redrawn[room] = 225  # a faint redraw of the background
+    redrawn[40:60, 50:130] = 0  # a stroke running out of the box
+    redrawn[8:14, 130:140] = 0  # something the model drew apart from the lettering
+    alpha = sfx.redraw_alpha(source, redrawn, box, room)
+    assert alpha[50, 70] == 255 and alpha[50, 125] == 255
+    assert alpha[10, 135] == 0
+    assert alpha[50, 140] == 0  # the band's art past the stroke
+    assert 0 < alpha[29, 70] < 255 and alpha[15, 70] == 0  # the box's edge fades out
+
+
+def test_an_outlined_letter_past_the_box_keeps_its_inside():
+    source, redrawn, box, room = _spill_scene()
+    redrawn[40:43, 90:130] = redrawn[57:60, 90:130] = 0  # a 3 px outline; the inside stays the same
+    redrawn[40:60, 127:130] = 0
+    alpha = sfx.redraw_alpha(source, redrawn, box, room)
+    assert alpha[41, 120] == 255 and alpha[50, 128] == 255
+    assert alpha[50, 115] == 255  # inside the outline
+
+
+def test_the_lettering_never_leaves_the_band():
+    source, redrawn, box, room = _spill_scene()
+    room[:, 120:] = False  # text starts here
+    redrawn[40:60, 50:119] = 0
+    redrawn[40:60, 120:160] = 0
+    alpha = sfx.redraw_alpha(source, redrawn, box, room)
+    assert alpha[50, 115] == 255 and alpha[50, 120:].max() == 0
