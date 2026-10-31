@@ -111,3 +111,32 @@ def test_claiming_the_instance_records_when_this_process_started(monkeypatch, tm
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record["port"] == 1234
     assert abs(record["started"] - psutil.Process().create_time()) < 1
+
+
+def test_the_webview_cache_is_emptied_once_per_ui_build(monkeypatch, tmp_path):
+    from urakatsu.service import app as service_app
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("<script src='/assets/index-old.js'></script>")
+    monkeypatch.setattr(service_app, "DEFAULT_UI_DIR", ui)
+    storage = tmp_path / "webview"
+    cache = storage / "EBWebView" / "Default" / "Cache" / "Cache_Data"
+    kept = storage / "EBWebView" / "Default" / "Local Storage" / "leveldb"
+
+    def fill():
+        for folder in (cache, kept):
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "data").write_text("x")
+
+    fill()
+    app.drop_stale_cache(storage)  # first start with a stamp: the cache from before goes
+    assert not cache.exists() and (kept / "data").exists()
+
+    fill()
+    app.drop_stale_cache(storage)  # same build: kept
+    assert (cache / "data").exists()
+
+    (ui / "index.html").write_text("<script src='/assets/index-new.js'></script>")
+    app.drop_stale_cache(storage)  # updated: emptied again
+    assert not cache.exists() and (kept / "data").exists()

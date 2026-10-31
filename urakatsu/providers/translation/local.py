@@ -18,6 +18,8 @@ Divergences, all in the inference plumbing:
 - The image is sent as PNG (lossless) instead of raw pixels.
 - The context window is fixed at ``N_CTX`` tokens when the model loads, instead of being
   sized per request; a prompt that does not fit fails the request.
+- Chat templates also get ``strftime_now``, as in Transformers and llama.cpp; Mistral-style
+  templates call it to date their default system prompt, and upstream does not define it.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import io
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Optional
 
@@ -277,14 +280,17 @@ class LocalTranslator(TranslatorProvider):
 
     def _render(self, messages: list[dict], enable_thinking: bool) -> str:
         """The GGUF chat template with ``add_generation_prompt`` and ``enable_thinking`` (``ChatTemplate::render``)."""
-        import jinja2
+        from jinja2.ext import loopcontrols
         from jinja2.sandbox import ImmutableSandboxedEnvironment
 
         # minijinja's ``Environment::new()`` defaults: no trim_blocks / lstrip_blocks.
-        environment = ImmutableSandboxedEnvironment(extensions=[jinja2.ext.loopcontrols])
+        environment = ImmutableSandboxedEnvironment(extensions=[loopcontrols])
 
         def raise_exception(message: str) -> None:
             raise ValueError(message)
+
+        def strftime_now(format: str) -> str:
+            return datetime.now().strftime(format)
 
         return environment.from_string(self._template).render(
             messages=messages,
@@ -295,4 +301,5 @@ class LocalTranslator(TranslatorProvider):
             tools=[],
             documents=[],
             raise_exception=raise_exception,
+            strftime_now=strftime_now,
         )
