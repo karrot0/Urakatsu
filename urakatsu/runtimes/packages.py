@@ -52,6 +52,7 @@ CHECK_INTERVAL = 6 * 3600  # seconds between update checks
 RELEASES_PER_PAGE = 30
 KEEP_INSTALLS = 2  # current plus the previous one
 CUDA13_MIN_DRIVER = 580  # NVIDIA driver branch that supports CUDA 13
+PTX_ONLY_GPUS = (75, 80, 90)
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,8 @@ def preferred_variants(devices: list[Device]) -> list[str]:
         if driver >= CUDA13_MIN_DRIVER:
             order.append(f"{prefix}-cuda-13")
         order.append(f"{prefix}-cuda-12")
+        if any(d.compute_capability in PTX_ONLY_GPUS for d in accelerators):
+            order.reverse()  # CUDA 13 stays second: Urakatsu's own sd-server build has real code for these
     elif first is not None and first.backend is Backend.ROCM and rocm.available():
         order.append(f"{prefix}-rocm")
     if first is not None and first.backend is not Backend.DIRECTML:

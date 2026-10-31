@@ -63,6 +63,14 @@ def test_variants_follow_the_driver():
     assert preferred_variants([Device.cpu()])[-1].endswith(("cpu", "macos-arm64", "macos-x64"))
 
 
+def test_a_gpu_with_only_ptx_takes_the_cuda_12_build_first(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    t4 = Device.gpu(Backend.CUDA, 0, "Tesla T4", compute_capability=75, driver_version="580.178.04")
+    rtx = Device.gpu(Backend.CUDA, 0, "RTX 4090", compute_capability=89, driver_version="580.178.04")
+    assert preferred_variants([t4])[:2] == ["linux-cuda-12", "linux-cuda-13"]  # sd-server is only on 13
+    assert preferred_variants([rtx])[:2] == ["linux-cuda-13", "linux-cuda-12"]
+
+
 @pytest.mark.parametrize("package", [BUN, SUWAYOMI], ids=lambda package: package.id)
 def test_on_demand_runtimes_install_on_both_mac_processors(package, monkeypatch):
     """Bun (Mana) and Suwayomi Server publish Apple silicon and Intel builds; both are picked up."""
