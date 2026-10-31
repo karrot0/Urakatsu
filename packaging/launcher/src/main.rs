@@ -852,7 +852,8 @@ fn prepare(paths: &Paths, tracker: &Tracker, first: usize) -> Res<()> {
     tracker.finish(uv_step);
 
     tracker.start(python_step, &format!("Python {PYTHON}"));
-    if !paths.python().exists() {
+    if !runs(&paths.python()) {
+        remove(&paths.env);
         let env_dir = paths.env.display().to_string();
         run_uv(
             paths,
@@ -921,6 +922,18 @@ fn prepare(paths: &Paths, tracker: &Tracker, first: usize) -> Res<()> {
     tracker.finish(libraries_step);
     log(paths, &format!("environment ready for {VERSION}"));
     Ok(())
+}
+
+/// Whether this Python starts.
+fn runs(python: &Path) -> bool {
+    platform::background(
+        Command::new(python)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .status()
+    .is_ok_and(|status| status.success())
 }
 
 /// The newest uv release, checked against the SHA-256 file published beside it.
@@ -1129,5 +1142,23 @@ fn app_running(paths: &Paths) -> bool {
     match (record["started"].as_f64(), platform::started(pid)) {
         (Some(recorded), Some(actual)) => (actual - recorded).abs() < START_TOLERANCE,
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_python_that_starts_counts() {
+        assert!(runs(Path::new(env!("CARGO"))));
+
+        let folder = env::temp_dir().join(format!("urakatsu-runs-{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        let python = folder.join(if cfg!(windows) { "python.exe" } else { "python" });
+        assert!(!runs(&python));
+        fs::write(&python, "not a program").unwrap();
+        assert!(!runs(&python));
+        let _ = fs::remove_dir_all(&folder);
     }
 }
