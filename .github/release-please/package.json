@@ -5,5 +5,8 @@
   "devDependencies": {
     "git-cliff": "2.14.2",
     "release-please": "17.11.2"
+  },
+  "overrides": {
+    "minimatch": "11.0.3"
   }
 }

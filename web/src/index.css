@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./styles/shadcn.css";
 @import "./styles/theme.css";
 @import "./styles/base.css" layer(base);
 

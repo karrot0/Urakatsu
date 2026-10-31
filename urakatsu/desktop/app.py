@@ -77,7 +77,9 @@ class Server:
 
     def _run(self) -> None:
         try:
-            asyncio.run(self._main())
+            from urakatsu.service.event_loop import run_server
+
+            run_server(self._main())
         except BaseException as error:  # noqa: BLE001 - reported in the window
             log.exception("server stopped")
             self.error = error
@@ -101,7 +103,8 @@ class Server:
             if self.error is not None:
                 raise RuntimeError(f"The server stopped: {self.error}")
             try:
-                if httpx.get(f"{self.url}/api/health", timeout=1.0).status_code == 200:
+                # trust_env=False: a system proxy must not stand between the app and its own server.
+                if httpx.get(f"{self.url}/api/health", timeout=1.0, trust_env=False).status_code == 200:
                     return
             except httpx.HTTPError:
                 pass

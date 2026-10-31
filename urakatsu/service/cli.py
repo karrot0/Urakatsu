@@ -93,6 +93,7 @@ def _configure_logging(level: str) -> None:
 
 def cmd_serve(args: argparse.Namespace, serve_ui: bool) -> int:
     from urakatsu.service.app import serve
+    from urakatsu.service.event_loop import run_server
     from urakatsu.service.workspace import Workspace
 
     from urakatsu.runtimes.packages import start_updater
@@ -102,7 +103,7 @@ def cmd_serve(args: argparse.Namespace, serve_ui: bool) -> int:
     workspace = Workspace(device=args.device)
     ui_dir = getattr(args, "ui_dir", None)
     try:
-        asyncio.run(
+        run_server(
             serve(
                 workspace,
                 host=args.host,
@@ -134,6 +135,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
     from urakatsu.remote.worker import LoadRequest, Worker, create_app
     from urakatsu.runtimes.manager import RuntimeManager
     from urakatsu.runtimes.packages import start_updater
+    from urakatsu.service.event_loop import run_server
 
     _configure_logging(args.log_level)
     try:
@@ -183,7 +185,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
         threading.Thread(target=watch_idle, name="idle-exit", daemon=True).start()
     try:
-        server.run()
+        run_server(server.serve())
     except KeyboardInterrupt:
         pass
     finally:
