@@ -173,6 +173,7 @@ class Step:
     id: str
     title: str
     command: list[str]
+    weight: float = 1.0  # this step's share of the setup's progress, by download size
 
 
 def plan(build: TorchBuild, uv: Optional[str] = None) -> list[Step]:
@@ -180,9 +181,37 @@ def plan(build: TorchBuild, uv: Optional[str] = None) -> list[Step]:
     base = [uv, "pip", "install", "--python", sys.executable]
     libraries = extra_requirements("torch", exclude=("torch", "torchvision")) + extra_requirements(build.onnx_extra)
     return [
-        Step("torch", f"PyTorch ({build.label})", base + [*build.packages, "--index-url", build.url]),
-        Step("libraries", "Model libraries", base + libraries),
+        Step("torch", f"PyTorch ({build.label})", base + [*build.packages, "--index-url", build.url], weight=3.0),
+        Step("libraries", "Model libraries", base + libraries, weight=1.0),
     ]
+
+
+class StepProgress:
+    """How far one uv step has got, read from uv's output lines: uv prints no byte counts when it
+    is not on a terminal, but it counts the packages it resolves, downloads and installs."""
+
+    PREPARED = 0.9  # the share done once every package is downloaded and prepared
+
+    def __init__(self) -> None:
+        self.resolved = 0
+        self.downloaded = 0
+        self.fraction = 0.0
+
+    def feed(self, line: str) -> float:
+        """Takes one output line and returns the step's share done, from 0 to 1."""
+        word, _, rest = line.strip().partition(" ")
+        count = rest.split(" ", 1)[0]
+        if word == "Resolved" and count.isdigit():
+            self.resolved = int(count)
+        elif word in ("Downloaded", "Built"):
+            self.downloaded += 1
+            if self.resolved:
+                self.fraction = max(self.fraction, min(self.downloaded / self.resolved, 1.0) * self.PREPARED)
+        elif word == "Prepared":
+            self.fraction = max(self.fraction, self.PREPARED)
+        elif word == "Installed":
+            self.fraction = 1.0
+        return self.fraction
 
 
 def run_step(step: Step, on_line: Callable[[str], None]) -> None:

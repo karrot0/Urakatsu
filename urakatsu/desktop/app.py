@@ -38,6 +38,7 @@ TITLE = "Urakatsu"
 PREFERRED_PORT = 47811  # fixed, so the window's origin (and its saved theme and shortcuts) stays the same
 APP_ID = "Urakatsu.Desktop"
 START_TOLERANCE = 2.0  # seconds a process's start time may differ from its record (the launcher reads it from FILETIME)
+GPU_SHARE = 90.0  # the startup bar's share (in percent) for GPU setup; loading the workspace fills the rest
 
 
 # ---- the server ---------------------------------------------------------------------------------
@@ -308,6 +309,33 @@ class Bridge:
         self.choice.set()
 
 
+def format_bytes(count: float) -> str:
+    for unit, size in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+        if count >= size:
+            return f"{count / size:.1f} {unit}"
+    return f"{count:.0f} B"
+
+
+class NetworkMeter:
+    """The bytes this machine has received since the meter started, and the rate over the last
+    second or so. Counted for the whole machine (psutil has no per-download count), which during
+    setup is the downloads themselves."""
+
+    def __init__(self) -> None:
+        self.start = psutil.net_io_counters().bytes_recv
+        self.mark = self.start
+        self.at = time.monotonic()
+        self.rate = 0.0
+
+    def reading(self) -> str:
+        now = time.monotonic()
+        received = psutil.net_io_counters().bytes_recv
+        if now - self.at >= 1.0:
+            self.rate = (received - self.mark) / (now - self.at)
+            self.mark, self.at = received, now
+        return f"{format_bytes(self.rate)}/s · {format_bytes(received - self.start)} received"
+
+
 class Desktop:
     def __init__(self) -> None:
         self.bridge = Bridge()
@@ -337,7 +365,7 @@ class Desktop:
         try:
             if gpu_setup.needs_setup():
                 self.setup_gpu()
-            self.render(title="Starting Urakatsu", message="Loading the workspace.")
+            self.render(title="Starting Urakatsu", message="Loading the workspace.", percent=GPU_SHARE)
             port = pick_port()
             self.server = Server(port)
             self.server.start()
@@ -348,6 +376,7 @@ class Desktop:
 
                 updater.installer = self.run_installer
             log.info("workspace ready at %s", self.server.url)
+            self.render(title="Starting Urakatsu", message="Loading the workspace.", percent=100)
             self.window.load_url(f"{self.server.url}/?shell={chrome.SHELL}")
         except Exception as error:  # noqa: BLE001 - shown in the window
             log.exception("startup failed")
@@ -355,18 +384,24 @@ class Desktop:
 
     def setup_gpu(self) -> None:
         while True:
-            self.render(title="Setting up GPU support", message="Checking your graphics driver.")
+            self.render(title="Setting up GPU support", message="Checking your graphics driver.", percent=0)
             try:
                 build = gpu_setup.choose_build(gpu_setup.driver_cuda(), device=gpu_setup.primary_device())
                 steps = gpu_setup.plan(build)
                 size = "about 3 GB" if build.tag != "cpu" else "about 300 MB"
                 message = f"Downloading PyTorch for {build.label} ({size}). This happens once."
                 status = {step.id: "pending" for step in steps}
+                fractions = {step.id: 0.0 for step in steps}
+                weight = sum(step.weight for step in steps)
+                meter = NetworkMeter()
 
                 def show(line: str = "") -> None:
+                    done = sum(step.weight * (1.0 if status[step.id] == "done" else fractions[step.id]) for step in steps)
                     self.render(
                         title="Setting up GPU support",
                         message=message,
+                        percent=GPU_SHARE * done / weight,
+                        network=meter.reading(),
                         steps=[{"title": s.title, "status": status[s.id]} for s in steps],
                         line=line,
                     )
@@ -374,8 +409,14 @@ class Desktop:
                 for step in steps:
                     status[step.id] = "active"
                     show()
+                    progress = gpu_setup.StepProgress()
+
+                    def on_line(line: str, step: gpu_setup.Step = step, progress: gpu_setup.StepProgress = progress) -> None:
+                        fractions[step.id] = progress.feed(line)
+                        show(line)
+
                     try:
-                        gpu_setup.run_step(step, show)
+                        gpu_setup.run_step(step, on_line)
                     except Exception:
                         status[step.id] = "failed"
                         raise

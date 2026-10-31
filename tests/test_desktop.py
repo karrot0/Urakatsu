@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import httpx
 import psutil
@@ -57,6 +58,34 @@ def test_the_plan_installs_torch_from_its_index_then_the_libraries():
     assert " torch>=" not in names  # already installed from the CUDA index
     cpu = gpu_setup.plan(gpu_setup.TorchBuild("cpu", "https://download.pytorch.org/whl/cpu"), uv="uv")[1]
     assert any(arg.startswith("onnxruntime>=") for arg in cpu.command)
+    assert torch_step.weight > libraries.weight  # the wheels are most of the download
+
+
+def test_the_network_meter_reports_the_rate_and_the_total_received(monkeypatch):
+    received = iter([1_000, 1_000 + 5 * 1024**2, 1_000 + 9 * 1024**2])
+    clock = iter([0.0, 2.0, 2.5])
+    monkeypatch.setattr(app.psutil, "net_io_counters", lambda: SimpleNamespace(bytes_recv=next(received)))
+    monkeypatch.setattr(app.time, "monotonic", lambda: next(clock))
+    meter = app.NetworkMeter()
+    assert meter.reading() == "2.5 MB/s · 5.0 MB received"  # 5 MB in the 2 s since the start
+    assert meter.reading() == "2.5 MB/s · 9.0 MB received"  # under a second later: the rate holds
+
+
+def test_byte_counts_read_in_the_largest_unit():
+    assert app.format_bytes(12) == "12 B"
+    assert app.format_bytes(1536) == "1.5 KB"
+    assert app.format_bytes(3 * 1024**3) == "3.0 GB"
+
+
+def test_a_step_reads_its_share_from_uv_output():
+    progress = gpu_setup.StepProgress()
+    assert progress.feed("Using Python 3.12.4 environment") == 0.0  # no count yet: the bar stays put
+    assert progress.feed("Resolved 4 packages in 1.2s") == 0.0
+    assert progress.feed("Downloaded torch==2.14.0") == pytest.approx(0.9 / 4)
+    assert progress.feed("Built pkg==1.0") == pytest.approx(0.9 / 2)
+    assert progress.feed("Downloaded a==1.0") == pytest.approx(0.9 * 3 / 4)
+    assert progress.feed("Prepared 4 packages in 3s") == pytest.approx(0.9)
+    assert progress.feed("Installed 4 packages in 1s") == 1.0
 
 
 @pytest.fixture

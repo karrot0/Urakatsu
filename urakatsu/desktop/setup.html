@@ -111,30 +111,26 @@
       background: var(--track);
     }
 
+    .network {
+      margin-top: 8px;
+      color: var(--text-3);
+      font-size: 12px;
+      line-height: 16px;
+      font-variant-numeric: tabular-nums;
+    }
+
     .bar span {
       position: absolute;
       inset: 0 auto 0 0;
-      width: 30%;
+      width: 0;
       border-radius: inherit;
       background: var(--accent);
-      animation: slide 1.1s ease-in-out infinite;
-    }
-
-    @keyframes slide {
-      from {
-        transform: translateX(-100%);
-      }
-
-      to {
-        transform: translateX(340%);
-      }
+      transition: width 300ms ease;
     }
 
     @media (prefers-reduced-motion: reduce) {
       .bar span {
-        width: 100%;
-        animation: none;
-        opacity: 0.5;
+        transition: none;
       }
     }
 
@@ -368,7 +364,8 @@
         alt="" /><span>Urakatsu</span></div>
     <h1 id="title">Starting Urakatsu</h1>
     <p class="message" id="message"></p>
-    <div class="bar" id="bar"><span></span></div>
+    <div class="bar" id="bar" role="progressbar" aria-label="Startup progress" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+    <p class="network" id="network" hidden></p>
     <ol id="steps" hidden></ol>
     <p class="line" id="line"></p>
     <div class="error" id="error" role="alert" hidden>
@@ -430,6 +427,11 @@
       $("title").textContent = state.title || "Starting Urakatsu";
       $("message").textContent = state.message || "";
       $("bar").hidden = !!state.error;
+      const percent = Math.max(0, Math.min(100, state.percent || 0));
+      $("bar").firstElementChild.style.width = `${percent}%`;
+      $("bar").setAttribute("aria-valuenow", Math.round(percent));
+      $("network").textContent = state.network || "";
+      $("network").hidden = !state.network;
       $("line").textContent = state.error ? "" : state.line || "";
       const steps = state.steps || [];
       $("steps").hidden = steps.length === 0;

@@ -172,10 +172,12 @@ function InferenceControl() {
           className="relative h-1 w-24 overflow-hidden rounded-full bg-surface-fill"
           role="progressbar"
           aria-label="Run progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
           aria-valuenow={progress}
         >
           <span
-            className={cn("absolute inset-y-0 left-0 rounded-[inherit] bg-brand transition-[width] duration-200 ease-settle", !ws.job?.total && "w-[30%]! animate-[slide_1.1s_ease-in-out_infinite]")}
+            className="absolute inset-y-0 left-0 rounded-[inherit] bg-brand transition-[width] duration-200 ease-settle"
             style={{ width: `${progress}%` }}
           />
         </div>
