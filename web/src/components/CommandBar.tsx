@@ -142,6 +142,7 @@ function InferenceControl() {
   };
 
   const censorship = config?.censorship || "off";
+  const colorization = config?.colorization || "off";
   const runAlone = (stage: RunStage) => {
     setOpen(false);
     void ws.run({ kind: "only", stage, scope });
@@ -268,6 +269,12 @@ function InferenceControl() {
                 <hr />
                 <SelectorOption label="Run Censor detection" detail="Mark censor bars for review" selected={false} onClick={() => runAlone("censor_detection")} />
                 <SelectorOption label="Run Decensor" detail="Reconstruct the marked bars" selected={false} onClick={() => runAlone("decensor")} />
+              </>
+            )}
+            {colorization !== "off" && (
+              <>
+                <hr />
+                <SelectorOption label="Run Colorization" detail="Paint black-and-white pages in color" selected={false} onClick={() => runAlone("colorization")} />
               </>
             )}
           </SelectorPanel>

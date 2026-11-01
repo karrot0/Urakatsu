@@ -195,7 +195,7 @@ def catalog(tmp_path, monkeypatch):
 def test_a_gguf_only_repo_gets_its_companions_from_the_doc(catalog):
     info = catalog.hub.model("leejet/Qwen-Image-2.1-GGUF")
     facts = catalog.facts("diffusion", info)
-    assert facts.recipe is QWEN_21 and [u["provider"] for u in catalog.usable_by(facts)] == ["diffusion-model"]
+    assert facts.recipe is QWEN_21 and [u["provider"] for u in catalog.usable_by(facts)] == ["diffusion-model", "diffusion-colorizer"]
     plan = catalog.components(info, facts)
     assert not plan.missing
     assert (plan.files["vae"].repo, plan.files["llm"].repo) == ("Comfy-Org/Qwen-Image-2.1", "Qwen/Qwen3-VL-8B-Instruct-GGUF")
@@ -222,7 +222,7 @@ def test_any_flux2_model_runs_on_flux2_klein_with_its_own_text_encoder(catalog, 
     monkeypatch.setattr(catalog, "_latest_support", lambda runtime: support)
     monkeypatch.setattr(catalog.support, "doc", lambda package, tag, doc: FLUX2_DOC)
     facts = catalog.facts("diffusion", nine)
-    assert facts.recipe is KLEIN_9B and [u["provider"] for u in catalog.usable_by(facts)] == ["flux2-klein", "diffusion-model", "flux2-klein-decensor"]
+    assert facts.recipe is KLEIN_9B and [u["provider"] for u in catalog.usable_by(facts)] == ["flux2-klein", "diffusion-model", "flux2-klein-decensor", "diffusion-colorizer"]
     plan = catalog.components(nine, facts)
     assert plan.files["llm"].repo == "unsloth/Qwen3-8B-GGUF" and plan.files["llm"].path == "Qwen3-8B-Q4_K_M.gguf"
 

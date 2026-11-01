@@ -47,6 +47,8 @@ BUILTIN_MODULES = (
     # censor bars (the censor detection and decensor stages; not in Koharu)
     "urakatsu.providers.censor.er0mangaseg",
     "urakatsu.providers.censor.flux2_klein_decensor",
+    # colorization (not in Koharu)
+    "urakatsu.providers.colorization.diffusion_colorizer",
 )
 
 # config.rs: the first entry of each list is the stage default.
@@ -58,6 +60,7 @@ DEFAULTS: dict[Stage, str] = {
     Stage.WATERMARKS: "yolo26-watermark",
     Stage.CENSOR_DETECTION: "er0mangaseg",
     Stage.DECENSOR: "flux2-klein-decensor",
+    Stage.COLORIZATION: "diffusion-colorizer",
 }
 
 

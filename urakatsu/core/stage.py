@@ -42,7 +42,7 @@ class Stage(str, Enum):
 
     @classmethod
     def all(cls) -> list["Stage"]:
-        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.SOUND_EFFECTS]
+        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.COLORIZATION, cls.SOUND_EFFECTS]
 
     @classmethod
     def parse(cls, value: "str | Stage") -> "Stage":

@@ -27,6 +27,7 @@ class ModelFacts:
     architectures: list[str] = field(default_factory=list)  # config.json architectures
     family: Optional[Family] = None  # stable-diffusion.cpp family
     recipe: Optional["Recipe"] = None  # stable-diffusion.cpp sd-server recipe
+    edit_recipe: Optional["Recipe"] = None  # the recipe that runs it as an image editor (recipes.edit_recipe)
     # A diffusion-runtime repo that is a language model (its GGUF architecture is one llama.cpp
     # runs): a text encoder stable-diffusion.cpp reads prompts with (--llm), not an image model.
     text_encoder: bool = False

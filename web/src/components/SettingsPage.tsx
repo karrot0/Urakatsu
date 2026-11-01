@@ -16,6 +16,7 @@ import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
 import { CensorshipPreview, type CensorshipMode } from "./CensorshipPreview";
+import { ColorizationPreview, type ColorizationMode } from "./ColorizationPreview";
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
 import { WatermarkPreview, type WatermarkMode } from "./WatermarkPreview";
 import { SourcesSettings } from "./SourcesSettings";
@@ -626,6 +627,71 @@ function CensorshipOptions({ detectors, models, draft, update }: { detectors: Pr
   );
 }
 
+const COLORIZATION_MODES: { mode: ColorizationMode; title: string; description: string }[] = [
+  { mode: "off", title: "Leave as drawn", description: "Pages stay in black and white." },
+  { mode: "colorize", title: "Colorize", description: "Black-and-white pages are painted in color, on a layer of their own." },
+];
+
+/** Black-and-white pages painted in color (not a Koharu setting). The model and LoRA are the user's: see `diffusion_colorizer.py`. */
+function ColorizationSection({ providers, draft, update }: { providers: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const mode = (draft.colorization || "off") as ColorizationMode;
+  const provider = providers.find((p) => p.id === draft.colorizationModel) ?? providers[0];
+  const settings = provider ? parseJson(draft.processorJson[provider.id]) : {};
+  const setModel = (model: string) => {
+    if (!provider) return;
+    const next: Record<string, unknown> = { ...settings, model };
+    if (!model) delete next.model;
+    update({ processorJson: { ...draft.processorJson, [provider.id]: JSON.stringify(next) } });
+  };
+  return (
+    <PreferenceSection title="Colorization" description="Paints black-and-white pages after they are cleaned. Use a model that edits images, with a colorizer LoRA if it needs one.">
+      <div role="radiogroup" aria-label="Colorization" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
+        {COLORIZATION_MODES.map((option) => {
+          const active = mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update({ colorization: option.mode })}
+              className={cn(
+                "flex min-w-0 cursor-pointer flex-col gap-2 rounded-card bg-surface p-2 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:shadow-focus",
+                active ? "shadow-[inset_0_0_0_2px_var(--brand)]" : "hover:bg-hover-faint",
+              )}
+            >
+              <ColorizationPreview mode={option.mode} className="block w-full overflow-hidden rounded-control" />
+              <span className="px-0.5">
+                <span className="block font-medium">{option.title}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-fg-2">{option.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {mode !== "off" && providers.length > 1 && (
+        <PreferenceRow title="Colorizer" description="How the page is painted.">
+          <div className={CONTROL_PAIR}>
+            <Select label="Colorizer" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(colorizationModel) => update({ colorizationModel })} />
+            <RuntimeSelect provider={provider} draft={draft} update={update} />
+          </div>
+        </PreferenceRow>
+      )}
+      {mode !== "off" && provider && (
+        <PreferenceRow title="Model" description="Paints the page. Lists the installed models that edit images.">
+          <InstalledModelSelect providerId={provider.id} builtIn={provider.weights.length > 0} value={typeof settings.model === "string" ? settings.model : ""} onChange={setModel} />
+        </PreferenceRow>
+      )}
+    </PreferenceSection>
+  );
+}
+
+function ColorizationOptions({ providers, draft, update }: { providers: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  if ((draft.colorization || "off") === "off") return null;
+  const provider = providers.find((p) => p.id === draft.colorizationModel) ?? providers[0];
+  return provider ? <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title="Colorization options" omit={["model"]} /> : null;
+}
+
 function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const caps = ws.capabilities;
@@ -634,6 +700,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
   const watermarkers = forStage("watermarks");
   const censorDetectors = forStage("censor_detection");
   const decensors = forStage("decensor");
+  const colorizers = forStage("colorization");
   const devices: Option[] = [
     { value: "auto", label: `Automatic (${caps?.device?.description ?? "best available"})` },
     ...(caps?.devices ?? []).map((d) => ({
@@ -679,6 +746,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
       <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
       <WatermarksSection providers={watermarkers} draft={draft} update={update} />
       <CensorshipSection detectors={censorDetectors} models={decensors} draft={draft} update={update} />
+      <ColorizationSection providers={colorizers} draft={draft} update={update} />
       {VISION.map(({ stage }) => {
         const provider = byStage(stage).find((p) => p.id === draft[stage]);
         if (!provider) return null;
@@ -696,6 +764,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
       <CensorshipOptions detectors={censorDetectors} models={decensors} draft={draft} update={update} />
+      <ColorizationOptions providers={colorizers} draft={draft} update={update} />
       <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">
         <ModelsFolderRow />
         <PreferenceRow

@@ -156,6 +156,17 @@ def match_recipe(recipes: Iterable[Recipe], repo: str, base_models: Iterable[str
     return None
 
 
+def edit_recipe(recipes: Iterable[Recipe], recipe: Recipe) -> Optional[Recipe]:
+    """The recipe that runs ``recipe``'s model as an image editor: its own, or a recipe for the same
+    author repo that takes reference images (``anima-edit`` for ``anima``: a community LoRA does
+    the editing on the same weights, so a repo matches the plain recipe)."""
+    if recipe.edits:
+        return recipe
+    if not recipe.model_url:
+        return None
+    return next((r for r in recipes if r.edits and r.model_url == recipe.model_url), None)
+
+
 def family_for(families: Iterable[Family], recipe: Recipe) -> Optional[Family]:
     """The README family (and so the ``docs/`` page) documenting a recipe."""
     target = {normalize(recipe.name), normalize(recipe.id)}

@@ -31,7 +31,7 @@ from .diskcache import DiskCache
 from .facts import ModelFacts
 from .hf import HubClient, RepoInfo
 from .installed import Downloader, InstalledFile, InstalledModel, InstalledModels
-from .recipes import UNSUPPORTED, Plan, family_for, match_recipe, parse_sources, pick, slot_candidates
+from .recipes import UNSUPPORTED, Plan, edit_recipe, family_for, match_recipe, parse_sources, pick, slot_candidates
 from .support import SupportIndex, match_family
 
 RUNTIME_PACKAGE = {"llama": LLAMA_CPP, "diffusion": STABLE_DIFFUSION_CPP}
@@ -91,6 +91,7 @@ class Catalog:
         files = [f.path for f in repo.files]
         family = None
         recipe = None
+        editor = None
         text_encoder = False
         if runtime == "diffusion":
             latest = self._latest_support(runtime)
@@ -105,6 +106,8 @@ class Catalog:
             text_encoder = self.is_language_model(repo.gguf.get("architecture"))
             if text_encoder:
                 recipe = None
+            if recipe is not None and latest is not None:
+                editor = edit_recipe(latest.recipes, recipe)
         return ModelFacts(
             runtime=runtime,
             repo=repo.id,
@@ -120,6 +123,7 @@ class Catalog:
             architectures=list((repo.config or {}).get("architectures") or []),
             family=family,
             recipe=recipe,
+            edit_recipe=editor,
             text_encoder=text_encoder,
         )
 
@@ -638,6 +642,11 @@ class Catalog:
                 support = self.support.installed(STABLE_DIFFUSION_CPP) or self._latest_support("diffusion")
                 recipe = support.recipe(model.recipe) if support else None
                 entry["edits"] = bool(recipe and recipe.edits)
+                # ``usable_by`` was saved at install: a provider added since can still use the model.
+                facts.recipe = recipe
+                facts.edit_recipe = edit_recipe(support.recipes, recipe) if recipe else None
+                known = {usage["provider"] for usage in entry["usable_by"]}
+                entry["usable_by"] += [usage for usage in self.usable_by(facts) if usage["provider"] not in known]
             result.append(entry)
         return sorted(result, key=lambda m: m["installed_at"], reverse=True)
 
