@@ -12,6 +12,11 @@ Urakatsu also flat-fills text that is in no bubble when the background around it
 the model, and a generative model with a crop of almost nothing but lettering on one colour
 paints a scene into it.
 
+Urakatsu also fills text on a smooth gradient without the model, where the flat fill finds no one
+colour (a chapter title on a banner that fades from white to black). The same model paints a pale
+blob over such a gradient. ``fill_smooth_background`` carries the pixels around the text across it
+when they show nothing but the gradient; anything else there, art or screentone, goes to the model.
+
 Generative fill is a user mask with ``generative`` set, run by the fill
 model. A model that follows prompts gets the whole selection as one crop with its
 surroundings (``fill_region``), so a sound effect is painted as one piece rather than in
@@ -32,7 +37,8 @@ from typing import Callable, Iterator, Optional
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage
+from scipy import ndimage, sparse
+from scipy.sparse import linalg as sparse_linalg
 
 from urakatsu.core.progress import StepPreview, reporting_steps, step_sink
 from urakatsu.pipeline.images import ImageCache
@@ -69,6 +75,18 @@ UNIFORM_BACKGROUND_MIN_PIXELS = 16
 FLAT_FILL_EDGE_MARGIN = 3.0
 # Pixels around a free text region's box sampled for its background, beyond the edge margin.
 TEXT_FLAT_FILL_PAD = 8
+# fill_smooth_background: pixels around the text that must show nothing but the background.
+SMOOTH_RIM = 3
+# Below these, neighbouring rim pixels differ by a gradient's slope and JPEG noise; a line or
+# screentone exceeds the first, a faint tone the second.
+SMOOTH_MAX_STEP = 32
+SMOOTH_MAX_MEAN_STEP = 4.0
+# Share of the text's outline that must have known background beside it.
+SMOOTH_MIN_ANCHORED = 0.5
+# Mask beyond the text's box: at most this share of what is filled, or it is not a stray spill. It
+# ran onto art the fill must not erase, so the rim keeps this far from it.
+SMOOTH_MAX_OVERFLOW = 0.1
+SMOOTH_OVERFLOW_CLEARANCE = 8
 # Context around a generative fill selection, as a share of its longer side (at least TILE_CONTEXT).
 FILL_CONTEXT = 0.5
 # The same for a model that edits the whole crop it sees from an instruction (Qwen Image, FLUX.2
@@ -79,11 +97,15 @@ EDIT_CONTEXT_MIN = 48
 
 Inference = Callable[[Image.Image, np.ndarray], Image.Image]
 
+SQUARE = np.ones((3, 3), dtype=bool)
+PixelBounds = tuple[int, int, int, int]  # left, top, right, bottom (exclusive)
+
 
 @dataclass
 class FlatFillRegion:
-    bounds: tuple[int, int, int, int]  # left, top, right, bottom (exclusive)
+    bounds: PixelBounds
     polygon: np.ndarray  # (N, 2) float32
+    texts: list[PixelBounds] = field(default_factory=list)  # the text in it, widened by TEXT_FLAT_FILL_PAD
 
 
 @dataclass
@@ -222,11 +244,24 @@ def _clear_outside(mask: np.ndarray, text_mask: np.ndarray, bounds: Bounds) -> N
     text_mask[outside] = 0
 
 
+def _pixel_bounds(polygon: np.ndarray, width: int, height: int) -> PixelBounds:
+    left, top = polygon.min(axis=0)
+    right, bottom = polygon.max(axis=0)
+    return (
+        int(np.clip(np.floor(left), 0, width)),
+        int(np.clip(np.floor(top), 0, height)),
+        int(np.clip(np.ceil(right), 0, width)),
+        int(np.clip(np.ceil(bottom), 0, height)),
+    )
+
+
 def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> list[FlatFillRegion]:
     """Bubbles, then text in no bubble (its box widened by TEXT_FLAT_FILL_PAD): each is filled
-    flat when the unmasked pixels in it share one colour (``fill_uniform_regions``)."""
-    regions: list[FlatFillRegion] = []
+    without the model when the unmasked pixels in it share one colour (``fill_uniform_regions``)
+    or show a smooth gradient (``fill_smooth_background``)."""
+    bubbles: list[tuple[str, np.ndarray]] = []
     free_text: list[np.ndarray] = []
+    texts: dict[str, list[PixelBounds]] = {}
     for entity in scene.descendants(page):
         region = scene.component(entity, Region)
         if region is None or region.kind not in (RegionKinds.BUBBLE, RegionKinds.TEXT):
@@ -238,29 +273,24 @@ def flat_fill_regions(scene: Snapshot, page: str, width: int, height: int) -> li
         if len(polygon) < 3:
             continue
         if region.kind == RegionKinds.TEXT:
-            if not scene.relations_from(entity, Relations.INSIDE):
-                (left, top), (right, bottom) = polygon.min(axis=0) - TEXT_FLAT_FILL_PAD, polygon.max(axis=0) + TEXT_FLAT_FILL_PAD
-                free_text.append(np.array([(left, top), (right, top), (right, bottom), (left, bottom)], dtype=np.float32))
+            (left, top), (right, bottom) = polygon.min(axis=0) - TEXT_FLAT_FILL_PAD, polygon.max(axis=0) + TEXT_FLAT_FILL_PAD
+            box = np.array([(left, top), (right, top), (right, bottom), (left, bottom)], dtype=np.float32)
+            containers = scene.relations_from(entity, Relations.INSIDE)
+            if not containers:
+                free_text.append(box)
+            for relation in containers:
+                texts.setdefault(relation.target, []).append(_pixel_bounds(box, width, height))
             continue
-        left, top = polygon.min(axis=0)
-        right, bottom = polygon.max(axis=0)
-        bounds = (
-            int(np.clip(np.floor(left), 0, width)),
-            int(np.clip(np.floor(top), 0, height)),
-            int(np.clip(np.ceil(right), 0, width)),
-            int(np.clip(np.ceil(bottom), 0, height)),
-        )
+        bubbles.append((entity, polygon))
+    regions: list[FlatFillRegion] = []
+    for entity, polygon in bubbles:
+        bounds = _pixel_bounds(polygon, width, height)
         if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
-            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
+            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon, texts=texts.get(entity, [])))
     for polygon in free_text:
-        bounds = (
-            int(np.clip(np.floor(polygon[0, 0]), 0, width)),
-            int(np.clip(np.floor(polygon[0, 1]), 0, height)),
-            int(np.clip(np.ceil(polygon[2, 0]), 0, width)),
-            int(np.clip(np.ceil(polygon[2, 1]), 0, height)),
-        )
+        bounds = _pixel_bounds(polygon, width, height)
         if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
-            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon))
+            regions.append(FlatFillRegion(bounds=bounds, polygon=polygon, texts=[bounds]))
     return regions
 
 
@@ -407,6 +437,10 @@ def placed_previews(crop: Image.Image, mask: np.ndarray, origin: tuple[int, int]
 
 
 def fill_uniform_regions(output: np.ndarray, pending: np.ndarray, text_mask: np.ndarray, regions: list[FlatFillRegion]) -> None:
+    text_area = np.zeros(pending.shape, dtype=bool)
+    for region in regions:
+        for left, top, right, bottom in region.texts:
+            text_area[top:bottom, left:right] = True
     for region in regions:
         left, top, right, bottom = region.bounds
         pending_view = pending[top:bottom, left:right]
@@ -418,9 +452,101 @@ def fill_uniform_regions(output: np.ndarray, pending: np.ndarray, text_mask: np.
             continue
         color = uniform_region_color(output, pending, region)
         if color is None:
+            fill_smooth_background(output, pending, targets, region, text_area)
             continue
         output[top:bottom, left:right][targets] = color
         pending_view[targets] = 0
+
+
+def fill_smooth_background(output: np.ndarray, pending: np.ndarray, targets: np.ndarray, region: FlatFillRegion, text_area: np.ndarray) -> None:
+    """Text on a smooth gradient: the pixels around it are carried across it (``harmonic_fill``).
+
+    ``targets`` (the region's window) is what the flat fill would have painted. Only what lies in
+    the region's text boxes is filled; the page stays as it is where the same patch of mask spills
+    past them onto art. The rest of the mask, and a region with anything but a gradient around its
+    text, is left to the model.
+    """
+    left, top, right, bottom = region.bounds
+    boxes = np.zeros(pending.shape, dtype=bool)
+    for box_left, box_top, box_right, box_bottom in region.texts:
+        boxes[box_top:box_bottom, box_left:box_right] = True
+    targets = targets & boxes[top:bottom, left:right]
+    if not targets.any():
+        return
+    mask = pending >= 127
+    labels, _ = ndimage.label(mask, structure=SQUARE)
+    filled = np.zeros(pending.shape, dtype=bool)
+    filled[top:bottom, left:right] = targets
+    overflow = np.isin(labels, np.unique(labels[filled])) & ~filled & ~text_area
+    if np.count_nonzero(overflow) > np.count_nonzero(targets) * SMOOTH_MAX_OVERFLOW:
+        return
+
+    view = output[top:bottom, left:right]
+    rim = smooth_rim(view, mask[top:bottom, left:right], targets, overflow[top:bottom, left:right], region)
+    if rim is None:
+        return
+    solved, values = harmonic_fill(view, targets, rim)
+    view[solved] = values
+    pending[top:bottom, left:right][solved] = 0
+    pending[overflow] = 0
+
+
+def smooth_rim(image: np.ndarray, mask: np.ndarray, targets: np.ndarray, overflow: np.ndarray, region: FlatFillRegion) -> Optional[np.ndarray]:
+    """The unmasked pixels around ``targets``, or None unless they show only a smooth background."""
+    left, top, right, bottom = region.bounds
+    ys, xs = np.mgrid[top:bottom, left:right]
+    px = xs.astype(np.float32) + np.float32(0.5)
+    py = ys.astype(np.float32) + np.float32(0.5)
+    rim = (
+        ndimage.binary_dilation(targets, SQUARE, iterations=SMOOTH_RIM)
+        & ~mask
+        & point_in_polygon(px, py, region.polygon)
+        & (polygon_edge_distance_squared(px, py, region.polygon) >= np.float32(FLAT_FILL_EDGE_MARGIN * FLAT_FILL_EDGE_MARGIN))
+    )
+    if overflow.any():
+        rim &= ~ndimage.binary_dilation(overflow, SQUARE, iterations=SMOOTH_OVERFLOW_CLEARANCE)
+    outline = targets & ndimage.binary_dilation(~targets)
+    if np.count_nonzero(outline & ndimage.binary_dilation(rim)) < np.count_nonzero(outline) * SMOOTH_MIN_ANCHORED:
+        return None
+    values = image.astype(np.int16)
+    steps = np.concatenate(
+        [
+            np.abs(values[:, 1:] - values[:, :-1])[rim[:, 1:] & rim[:, :-1]],
+            np.abs(values[1:] - values[:-1])[rim[1:] & rim[:-1]],
+        ]
+    )
+    if steps.size < UNIFORM_BACKGROUND_MIN_PIXELS or steps.max() >= SMOOTH_MAX_STEP or steps.mean() >= SMOOTH_MAX_MEAN_STEP:
+        return None
+    return rim
+
+
+def harmonic_fill(image: np.ndarray, targets: np.ndarray, known: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Solves Laplace's equation over ``targets`` with the pixels of ``known`` held fixed; a target
+    pixel with neither beside it has no neighbour there. Returns the pixels solved, which are the
+    targets connected to ``known``, and their colours."""
+    labels, _ = ndimage.label(targets)
+    anchored = np.unique(labels[targets & ndimage.binary_dilation(known)])
+    solved = np.isin(labels, anchored[anchored > 0])
+    ys, xs = np.nonzero(solved)
+    index = np.full(targets.shape, -1, dtype=np.int64)
+    index[ys, xs] = np.arange(len(ys))
+    height, width = targets.shape
+    degree = np.zeros(len(ys))
+    sides = np.zeros((len(ys), 3))
+    rows, columns = [], []
+    for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+        beside = (ys + dy >= 0) & (ys + dy < height) & (xs + dx >= 0) & (xs + dx < width)
+        here, near_y, near_x = np.nonzero(beside)[0], ys[beside] + dy, xs[beside] + dx
+        open_side = index[near_y, near_x] >= 0
+        rows.append(here[open_side])
+        columns.append(index[near_y, near_x][open_side])
+        fixed = known[near_y, near_x]
+        np.add.at(sides, here[fixed], image[near_y[fixed], near_x[fixed]].astype(np.float64))
+        np.add.at(degree, here[open_side | fixed], 1.0)
+    row, column = np.concatenate(rows), np.concatenate(columns)
+    laplacian = sparse.coo_matrix((-np.ones(len(row)), (row, column)), shape=(len(ys), len(ys))) + sparse.diags(degree)
+    values = sparse_linalg.splu(laplacian.tocsc()).solve(sides)
+    return solved, np.clip(np.rint(values), 0, 255).astype(np.uint8)
 
 
 def inpaint_tiles(mask: np.ndarray) -> tuple[np.ndarray, list[_Tile]]:

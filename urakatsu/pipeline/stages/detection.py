@@ -12,6 +12,12 @@ the stroke shows only where the text crosses art or screentone, came back as uns
 ``infer_background_halo`` (no Rust counterpart) runs when no outline is found and recognises that
 stroke by its rim: the art around the glyphs stops at one constant distance from them.
 
+Difference from Koharu: ``infer_outline`` compares the fill and the stroke with one background
+colour, the median of the window's border. On a background that fades from one to the other (black
+lettering with a white stroke on a banner fading from white to black) that median matches one of
+them and Rust rejects the outline, then reads the stroke as white lettering. ``fades_between`` (no
+Rust counterpart) lets such an outline stand.
+
 Difference from Koharu: ``measured_stroke_width`` takes the median rim distance in Rust. When the
 stroke colour joins larger areas of the same colour in the window (white clothes, a white text
 box), their far edges outnumber the true rim and pull the median to two or three times the real
@@ -84,6 +90,17 @@ HALO_RIM_CONCENTRATION = 0.5
 # A wider "stroke" than this many glyph depths (distance from glyph centre line to its edge) is
 # plain paper between unstroked text and nearby art.
 HALO_MAX_WIDTH_PER_GLYPH_DEPTH = 5
+# fades_between: the background is read this far past the stroke's rim. Up to GRADIENT_MAX_ROUGH of
+# its neighbouring pixels may differ by GRADIENT_ROUGH_STEP, as art does, and it reaches a colour
+# when GRADIENT_MIN_END_SHARE of it lies within GRADIENT_END_DISTANCE of that colour on each channel.
+# GRADIENT_MIN_MIDDLE_SHARE must lie between the two: a hard edge between them (a black bubble on
+# white paper, speed lines) has both ends and no fade.
+GRADIENT_RIM_MARGIN = 2
+GRADIENT_ROUGH_STEP = 32
+GRADIENT_MAX_ROUGH = 0.05
+GRADIENT_END_DISTANCE = 48
+GRADIENT_MIN_END_SHARE = 0.05
+GRADIENT_MIN_MIDDLE_SHARE = 0.25
 DIALOGUE_MASK_CONTAINMENT_THRESHOLD = np.float32(0.9)
 NON_MAXIMUM_SUPPRESSION_THRESHOLD = np.float32(0.5)
 F32_ZERO = np.float32(0.0)
@@ -911,14 +928,14 @@ def infer_outline(
             fill_color = median_color(pixels.color[enclosed])
             stroke_color = median_color(pixels.color[stroke])
             contrast = color_distance_squared(fill_color, stroke_color)
-            if (
-                contrast < COLOR_CLUSTER_MIN_DISTANCE_SQUARED
-                or color_distance_squared(fill_color, background) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED
-                or color_distance_squared(stroke_color, background) < COLOR_CLUSTER_MIN_DISTANCE_SQUARED
-                or color_lies_between(stroke_color, fill_color, background)
-                or color_lies_between(fill_color, stroke_color, background)
-            ):
+            if contrast < COLOR_CLUSTER_MIN_DISTANCE_SQUARED:
                 continue
+            against_background = (
+                color_distance_squared(fill_color, background) >= COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+                and color_distance_squared(stroke_color, background) >= COLOR_CLUSTER_MIN_DISTANCE_SQUARED
+                and not color_lies_between(stroke_color, fill_color, background)
+                and not color_lies_between(fill_color, stroke_color, background)
+            )
             normalized_fill = normalize_text_color(fill_color)
             normalized_stroke = normalize_text_color(stroke_color)
             if normalized_fill == normalized_stroke:
@@ -927,11 +944,45 @@ def infer_outline(
             stroke_width = measured_stroke_width(pixels, stroke, enclosed, outside, width, height)
             if stroke_width is None:
                 continue
+            if not against_background and not fades_between(pixels, enclosed, fill_color, stroke_color, stroke_width, width, height):
+                continue
             evidence = len(enclosed) + inside_fill
             score = contrast * min(evidence, 4096)
             if best is None or score > best.score:
                 best = _Outline(fill=normalized_fill, stroke=normalized_stroke, width=stroke_width, score=score)
     return best
+
+
+def fades_between(pixels: _Pixels, fill: np.ndarray, fill_color, stroke_color, stroke_width: float, width: int, height: int) -> bool:
+    """Whether what lies past the stroke is a smooth gradient reaching both text colours (no Rust
+    counterpart). Light lettering with dark counters on a darker background looks like an outline
+    as well, but a gradient that reached the lettering's colour would swallow it, so no letterer
+    puts text without a stroke on one."""
+    valid = np.zeros((height, width), dtype=bool)
+    valid[pixels.ly, pixels.lx] = True
+    fill_grid = np.zeros((height, width), dtype=bool)
+    fill_grid[pixels.ly[fill], pixels.lx[fill]] = True
+    colors = np.zeros((height, width, 3), dtype=np.int64)
+    colors[pixels.ly, pixels.lx] = pixels.color
+    far = valid & (_distance_from_sites(fill_grid) > stroke_width + GRADIENT_RIM_MARGIN)
+    across = far[:, 1:] & far[:, :-1]
+    down = far[1:] & far[:-1]
+    steps = np.concatenate(
+        [
+            np.abs(colors[:, 1:] - colors[:, :-1]).max(axis=2)[across],
+            np.abs(colors[1:] - colors[:-1]).max(axis=2)[down],
+        ]
+    )
+    if steps.size == 0 or np.count_nonzero(steps >= GRADIENT_ROUGH_STEP) > steps.size * GRADIENT_MAX_ROUGH:
+        return False
+    background = colors[far]
+    at_fill = np.abs(background - np.array(fill_color)).max(axis=1) <= GRADIENT_END_DISTANCE
+    at_stroke = np.abs(background - np.array(stroke_color)).max(axis=1) <= GRADIENT_END_DISTANCE
+    return (
+        np.mean(at_fill) >= GRADIENT_MIN_END_SHARE
+        and np.mean(at_stroke) >= GRADIENT_MIN_END_SHARE
+        and np.mean(~at_fill & ~at_stroke) >= GRADIENT_MIN_MIDDLE_SHARE
+    )
 
 
 def infer_background_halo(

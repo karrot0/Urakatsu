@@ -640,6 +640,60 @@ def test_text_on_a_band_is_judged_against_the_band_not_the_page_beside_it():
     assert inferred.stroke_color is None
 
 
+def _stacked_outlined_glyphs(background):
+    """A column of black bars with a white stroke, the mask over the whole column, on ``background``."""
+    height, width = background.shape[:2]
+    image = np.repeat(background[..., None], 3, axis=2)
+    pixels = np.zeros((height, width), dtype=np.uint8)
+    left, right = 20, 40
+    pixels[16:224, 8:52] = 255
+    for top in range(20, 200, 44):
+        bottom = top + 28
+        image[top:bottom, left:right] = 255
+        image[top + 4 : bottom - 4, left + 4 : right - 4] = 0
+    detection = LayoutDetection(
+        label_id=0,
+        label="text",
+        score=1.0,
+        bbox=(8.0, 16.0, 52.0, 224.0),
+        area=int(np.count_nonzero(pixels)),
+        mask=_mask(0, 0, pixels),
+    )
+    return image, detection
+
+
+def test_outline_on_a_gradient_through_both_its_colours_stands():
+    # Black lettering with a white stroke on a title banner fading from white to black.
+    fade = np.clip(np.interp(np.arange(240), (20, 130), (255, 0)), 0, 255).astype(np.uint8)
+    background = np.repeat(fade[:, None], 60, axis=1)
+
+    inferred = det.infer_typography(*_stacked_outlined_glyphs(background))
+
+    assert inferred.color == (0, 0, 0)
+    assert inferred.stroke_color == (255, 255, 255)
+    assert inferred.stroke_width == 4.0
+
+
+def test_a_hard_edge_between_the_text_colours_is_not_a_gradient():
+    # White lettering with black counters in a black bubble on white paper, not a white outline.
+    background = np.zeros((240, 60), dtype=np.uint8)
+    background[:60] = 255
+
+    inferred = det.infer_typography(*_stacked_outlined_glyphs(background))
+
+    assert inferred.stroke_color is None
+
+
+def test_a_gradient_short_of_the_lettering_colour_keeps_the_lettering():
+    # White lettering with black counters on a background that never reaches white.
+    fade = np.interp(np.arange(240), (0, 240), (24, 0)).astype(np.uint8)
+    background = np.repeat(fade[:, None], 60, axis=1)
+
+    inferred = det.infer_typography(*_stacked_outlined_glyphs(background))
+
+    assert inferred.stroke_color is None
+
+
 def test_counters_of_a_neighbouring_glyph_are_not_an_outlined_fill():
     image, detection = _plain_text_beside_a_neighbouring_glyph()
 

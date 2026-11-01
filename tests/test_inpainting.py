@@ -544,6 +544,109 @@ def test_text_in_a_bubble_is_filled_as_the_bubble_not_on_its_own(tmp_path):
     assert len(flat_fill_regions(snapshot, page, 96, 96)) == 1
 
 
+def _gradient_page():
+    """A background fading down the page, and the mask of a line of text on it."""
+    fade = np.linspace(255, 0, 96).astype(np.uint8)
+    background = np.repeat(np.repeat(fade[:, None, None], 96, axis=1), 3, axis=2)
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    mask[42:54, 32:64] = 255
+    return background, mask
+
+
+def _with_lettering(background, mask):
+    image = background.copy()
+    image[mask >= 127] = 255
+    return image
+
+
+def test_text_on_a_gradient_bubble_is_carried_across_without_inference(tmp_path):
+    # A title on a fading banner: the model paints a pale blob over the gradient.
+    background, mask = _gradient_page()
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    calls = []
+
+    output = np.asarray(
+        inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+    )
+
+    assert calls == []
+    assert np.abs(output.astype(int) - background.astype(int)).max() <= 3
+
+
+def test_free_text_on_a_gradient_is_carried_across_without_inference(tmp_path):
+    background, mask = _gradient_page()
+    snapshot, page = _free_text_session(tmp_path, background)
+    calls = []
+
+    output = np.asarray(
+        inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+    )
+
+    assert calls == []
+    assert np.abs(output.astype(int) - background.astype(int)).max() <= 3
+
+
+def test_a_line_crossing_text_on_a_gradient_goes_to_the_model(tmp_path):
+    background, mask = _gradient_page()
+    background[:, 47:49] = 0
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    calls = []
+
+    inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("contrast", [20, 80])
+def test_screentone_around_text_goes_to_the_model(tmp_path, contrast):
+    _, mask = _gradient_page()
+    yy, xx = np.mgrid[0:96, 0:96]
+    tone = (128 + ((xx + yy) % 2) * contrast).astype(np.uint8)
+    background = np.repeat(tone[..., None], 3, axis=2)
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    calls = []
+
+    inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+
+    assert len(calls) == 1
+
+
+def test_mask_spilling_onto_an_ornament_leaves_the_ornament(tmp_path):
+    background, mask = _gradient_page()
+    background[44:52, 78:90] = 0
+    mask[47:49, 64:84] = 255
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    calls = []
+
+    output = np.asarray(
+        inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+    )
+
+    assert calls == []
+    assert np.abs(output[42:54, 32:64].astype(int) - background[42:54, 32:64].astype(int)).max() <= 3
+    assert (output[44:47, 78:90] == 0).all() and (output[49:52, 78:90] == 0).all()
+
+
+def test_a_large_spill_past_the_text_goes_to_the_model(tmp_path):
+    background, mask = _gradient_page()
+    mask[42:54, 64:94] = 255  # lettering the detector's box missed
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
+    calls = []
+
+    inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+
+    assert len(calls) == 1
+
+
+def test_a_bubble_with_no_text_of_its_own_is_not_carried_across():
+    background, mask = _gradient_page()
+    calls = []
+
+    inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, [rectangle_region((0, 0, 96, 96))], noop_inference(calls))
+
+    assert len(calls) == 1
+
+
 def test_a_forced_run_paints_a_generated_cleanup_again_but_not_the_users(tmp_path):
     from urakatsu.pipeline.stages.base import generation
 
