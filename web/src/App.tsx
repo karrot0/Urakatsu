@@ -7,6 +7,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Canvas } from "./components/Canvas";
 import { ModelsPage } from "./components/ModelsPage";
 import { CommandBar } from "./components/CommandBar";
+import { ConfirmHost } from "./components/ConfirmDialog";
 import { TooltipProvider } from "./components/primitives";
 import { RightPanel } from "./components/RightPanel";
 import { SettingsPage } from "./components/SettingsPage";
@@ -40,6 +41,7 @@ export function App() {
         <Start />
       )}
       <UpdatePopup />
+      <ConfirmHost />
       {ws.browser && <BrowserPanel key={`${ws.browser.system}:${ws.browser.url}`} />}
       <WindowControls />
       {ws.error && (

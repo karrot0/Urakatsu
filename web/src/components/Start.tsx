@@ -7,6 +7,7 @@ import { sources } from "../api/sources";
 import { formatDay, formatTimestamp, plural } from "../format";
 import { useWorkspace } from "../state/workspace";
 import { ThemeSwitch } from "./CommandBar";
+import { confirm } from "./ConfirmDialog";
 import { TitleBarInset } from "./WindowControls";
 import { Select } from "./primitives";
 import { Badge } from "./ui";
@@ -158,8 +159,8 @@ export function Start() {
                         className="absolute top-2 right-2 opacity-0 shadow-raised transition-opacity duration-100 ease-out group-hover:opacity-100 hover:bg-danger-weak hover:text-danger focus-visible:opacity-100 active:bg-danger-weak [@media(hover:none)]:opacity-100"
                         title="Delete project"
                         aria-label={`Delete ${project.name}`}
-                        onClick={() => {
-                          if (window.confirm(`Delete ${project.name}? This removes its chapters, pages and renders.`)) void ws.deleteProject(project.id);
+                        onClick={async () => {
+                          if (await confirm({ title: `Delete ${project.name}?`, description: "This removes its chapters, pages and renders.", action: "Delete", danger: true })) void ws.deleteProject(project.id);
                         }}
                       >
                         <Trash2 size={14} />

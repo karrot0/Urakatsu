@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { describeError } from "../api/client";
 import { workers, type Quota, type Worker, type WorkerList, type WorkerState } from "../api/workers";
 import { useWorkspace } from "../state/workspace";
+import { confirm } from "./ConfirmDialog";
 import { ActionMenu, Switch } from "./primitives";
 import { PreferencePage, PreferenceRow, PreferenceSection } from "./SettingsPage";
 import { Badge, type Tone } from "./ui";
@@ -142,7 +143,9 @@ function WorkerSection({
               {
                 label: "Remove worker",
                 danger: true,
-                onSelect: () => window.confirm(`Remove ${worker.name}? A running notebook keeps running until it stops itself.`) && void act(() => workers.remove(worker.id)),
+                onSelect: async () => {
+                  if (await confirm({ title: `Remove ${worker.name}?`, description: "A running notebook keeps running until it stops itself.", action: "Remove", danger: true })) void act(() => workers.remove(worker.id));
+                },
               },
             ]}
           />

@@ -56,6 +56,7 @@ import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../ap
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
 import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
 import { AutomationsButton } from "./Automations";
+import { confirm } from "./ConfirmDialog";
 import { KomgaButton } from "./Komga";
 import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, Tooltip } from "./primitives";
@@ -500,8 +501,8 @@ function SourceBar() {
           {
             label: `Download all ${pending.length} remaining`,
             disabled: pending.length === 0,
-            onSelect: () => {
-              if (window.confirm(`Download ${pending.length} chapters of ${link.series.title}?`)) void ws.downloadChapters(pending.map((c) => c.id));
+            onSelect: async () => {
+              if (await confirm({ title: `Download ${pending.length} chapters of ${link.series.title}?`, action: "Download" })) void ws.downloadChapters(pending.map((c) => c.id));
             },
           },
           { label: "Change series", onSelect: () => ws.setSourcesOpen(true) },
@@ -509,8 +510,8 @@ function SourceBar() {
           {
             label: "Unlink series",
             danger: true,
-            onSelect: () => {
-              if (window.confirm(`Unlink ${link.series.title}? Downloaded chapters stay in the project.`)) void ws.unlinkSource();
+            onSelect: async () => {
+              if (await confirm({ title: `Unlink ${link.series.title}?`, description: "Downloaded chapters stay in the project.", action: "Unlink", danger: true })) void ws.unlinkSource();
             },
           },
         ]}
@@ -662,7 +663,7 @@ function ChapterItem({
   const restitch = async () => {
     const worked = items.filter((id) => STAGES.some((stage) => stageDone(pages.get(id)!, stage))).length;
     const loss = worked ? ` Work on ${worked} of its pages (text, cleanup) is discarded.` : "";
-    if (!window.confirm(`Restitch ${name}? Its ${items.length} pages are joined into one strip and cut again where no text is cut.${loss} You can undo this.`)) return;
+    if (!(await confirm({ title: `Restitch ${name}?`, description: `Its ${items.length} pages are joined into one strip and cut again where no text is cut.${loss} You can undo this.`, action: "Restitch", danger: !!worked }))) return;
     setRestitching(true);
     try {
       await ws.restitchChapter(chapter.id);
@@ -686,10 +687,10 @@ function ChapterItem({
     }
   };
 
-  const remove = () => {
+  const remove = async () => {
     const count = items.length;
     const detail = count ? ` and its ${count} page${count === 1 ? "" : "s"}` : "";
-    if (window.confirm(`Delete ${name}${detail}? You can undo this.`)) void ws.deleteChapter(chapter.id);
+    if (await confirm({ title: `Delete ${name}${detail}?`, description: "You can undo this.", action: "Delete", danger: true })) void ws.deleteChapter(chapter.id);
   };
 
   return (
@@ -944,9 +945,9 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
             title="Remove page"
             aria-label={`Remove ${page.name}`}
             disabled={disabled}
-            onClick={(event) => {
+            onClick={async (event) => {
               event.stopPropagation();
-              if (window.confirm(`Remove ${page.name}? You can undo this.`)) void ws.removePage(page.id);
+              if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
             }}
           >
             <X size={14} />

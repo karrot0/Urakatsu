@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { describeError } from "../api/client";
 import { languageName, sources, type Extension, type Repository, type SystemStatus } from "../api/sources";
 import { useWorkspace } from "../state/workspace";
+import { confirm } from "./ConfirmDialog";
 import { KomgaSettings } from "./KomgaSettings";
 import { Switch } from "./primitives";
 import { PreferencePage, PreferenceRow, PreferenceSection } from "./SettingsPage";
@@ -178,7 +179,9 @@ function Repositories({ system }: { system: SystemStatus }) {
                 aria-label={`Remove ${repo.name}`}
                 title="Remove repository"
                 disabled={busy}
-                onClick={() => window.confirm(`Remove ${repo.name}? Installed sources stay installed.`) && void change(() => sources.removeRepository(system.id, repo.url))}
+                onClick={async () => {
+                  if (await confirm({ title: `Remove ${repo.name}?`, description: "Installed sources stay installed.", action: "Remove", danger: true })) void change(() => sources.removeRepository(system.id, repo.url));
+                }}
               >
                 <Trash2 size={14} />
               </Button>

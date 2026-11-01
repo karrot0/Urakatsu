@@ -12,6 +12,7 @@ import { sources, type LinkedChapter } from "../../api/sources";
 import { plural } from "../../format";
 import type { Page } from "../../gen/urakatsu/v1/urakatsu_pb";
 import { STAGES, pageComplete, stageDone, useWorkspace } from "../../state/workspace";
+import { confirm } from "../ConfirmDialog";
 import { ModelsPage } from "../ModelsPage";
 import { SourcesPage } from "../SourcesPage";
 import { ProjectCover } from "../Start";
@@ -380,9 +381,9 @@ function ProjectScreen({ enter, onBack, onOpenChapter }: { enter: Enter; onBack:
                   icon: Trash2,
                   destructive: true,
                   disabled: busy,
-                  onSelect: () => {
+                  onSelect: async () => {
                     setMenu(undefined);
-                    if (window.confirm(`Delete ${target.name} and its ${plural(target.pageIds.length, "page")}?`)) void ws.deleteChapter(target.id);
+                    if (await confirm({ title: `Delete ${target.name} and its ${plural(target.pageIds.length, "page")}?`, action: "Delete", danger: true })) void ws.deleteChapter(target.id);
                   },
                 },
               ]}
