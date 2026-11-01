@@ -17,6 +17,8 @@
   on an NVIDIA, AMD or Intel GPU, or on your CPU.
 - **Edit everything.** Text blocks, rich text, typography, layers, cleanup brushes and generative
   fill. A re-run never overwrites your edits.
+- **Uncensoring.** Optionally finds censor bars and reconstructs the art under them, on a layer
+  of its own, on your computer. For works whose characters are all adults.
 - **Chapters from the sites you read.** Download series from Suwayomi (Tachiyomi and Mihon
   extensions) and Mana sources straight into a project.
 - **Webtoons, manhwa and manhua.** A webtoon project joins each chapter into one strip and

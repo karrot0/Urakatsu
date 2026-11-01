@@ -3,7 +3,7 @@
 
 import { memo } from "react";
 
-import { Brush, Eraser, Hand, Lasso, MousePointer2, Pipette, Sparkles, SquareDashed, Type, WandSparkles, type LucideIcon } from "lucide-react";
+import { Blend, Brush, Eraser, Hand, Lasso, MousePointer2, Pipette, Sparkles, SquareDashed, Type, WandSparkles, type LucideIcon } from "lucide-react";
 
 import { cn } from "cn";
 
@@ -18,11 +18,12 @@ export const TOOL_INFO: Record<Tool, { label: string; icon: LucideIcon }> = {
   eraser: { label: "Eraser", icon: Eraser },
   color_picker: { label: "Color picker", icon: Pipette },
   remove: { label: "Remove text", icon: Sparkles },
+  decensor: { label: "Decensor", icon: Blend },
   fill: { label: "Generative fill", icon: WandSparkles },
   pan: { label: "Hand", icon: Hand },
 };
 
-const ORDER: Tool[] = ["select", "text", "draw", "eraser", "color_picker", "remove", "fill", "pan"];
+const ORDER: Tool[] = ["select", "text", "draw", "eraser", "color_picker", "remove", "decensor", "fill", "pan"];
 
 const FILL_SHAPES: { shape: FillShape; label: string; icon: LucideIcon }[] = [
   { shape: "rect", label: "Rectangle selection", icon: SquareDashed },
@@ -32,7 +33,7 @@ const FILL_SHAPES: { shape: FillShape; label: string; icon: LucideIcon }[] = [
 const TOOL_BUTTON =
   "my-px grid cursor-pointer place-items-center rounded-[10px] bg-transparent [transition:background-color_20ms_ease-in,color_100ms_ease-out] focus-visible:shadow-focus focus-visible:outline-none disabled:pointer-events-none disabled:opacity-30";
 
-export const isBrushTool = (tool: Tool) => tool === "draw" || tool === "eraser" || tool === "remove";
+export const isBrushTool = (tool: Tool) => tool === "draw" || tool === "eraser" || tool === "remove" || tool === "decensor";
 
 export function maxBrush(width: number, height: number): number {
   return Math.max(128, Math.round(Math.max(width, height) / 8));
@@ -42,6 +43,8 @@ export function maxBrush(width: number, height: number): number {
 export const ToolBelt = memo(function ToolBelt() {
   const ws = useWorkspace();
   const page = currentPage(ws);
+  const censoring = (ws.config?.censorship || "off") !== "off";
+  const tools = ORDER.filter((tool) => tool !== "decensor" || censoring);
   return (
     <aside
       className="absolute top-3 left-3 z-20 flex w-11 flex-col items-center rounded-[14px] bg-surface-over p-0.5 shadow-floating max-md:hidden"
@@ -49,12 +52,12 @@ export const ToolBelt = memo(function ToolBelt() {
       role="toolbar"
       aria-orientation="vertical"
     >
-      {ORDER.map((tool, index) => {
+      {tools.map((tool, index) => {
         const { label, icon: Icon } = TOOL_INFO[tool];
         const active = ws.tool === tool;
         return (
           <div key={tool} className="contents">
-            {index === ORDER.length - 1 && <span className="my-0.5 h-px w-5 bg-line" />}
+            {index === tools.length - 1 && <span className="my-0.5 h-px w-5 bg-line" />}
             <Tooltip
               side="right"
               content={

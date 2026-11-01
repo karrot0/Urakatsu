@@ -4,7 +4,7 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { client, describeError, forgetAssets, uploadPageSource } from "../api/client";
-import { challengeOf, type Challenge } from "../api/catalog";
+import { challengeOf, type CatalogRuntime, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
 import type { RichStyle } from "../richText";
 import { applyPalette, loadPalette, type Palette } from "../theme";
@@ -29,7 +29,7 @@ export type ProjectFormatInit = MessageInitShape<typeof ProjectFormatSchema>;
 export type Theme = "light" | "dark" | "system";
 export type ViewMode = "source" | "cleanup" | "render";
 // Canvas tools, in tool-belt order, plus generative fill (Urakatsu's own).
-export const TOOLS = ["select", "text", "draw", "eraser", "color_picker", "remove", "fill", "pan"] as const;
+export const TOOLS = ["select", "text", "draw", "eraser", "color_picker", "remove", "decensor", "fill", "pan"] as const;
 export type Tool = (typeof TOOLS)[number];
 // Keyboard shortcuts (src/shortcuts.ts has the format: "v", "arrowleft", "mod+shift+z").
 export const NUDGES = ["nudge_left", "nudge_right", "nudge_up", "nudge_down"] as const;
@@ -42,6 +42,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   eraser: "e",
   color_picker: "i",
   remove: "j",
+  decensor: "u",
   fill: "g",
   pan: "h",
   fit: "0",
@@ -121,7 +122,7 @@ export interface RunOptions {
   stages?: StageName[];
   /** "selection" runs the sidebar's multi-selection (the Run button, when one is active). */
   scope: RunScope | "selection";
-  /** Remove-tool strokes: a page-sized PNG, white where the inpainter should repaint. */
+  /** Remove or Decensor strokes: a page-sized PNG, white where the model should repaint. */
   mask?: Uint8Array;
   /** Generative fill of `mask` by the fill model; empty removes what is selected. */
   fillPrompt?: string;
@@ -169,6 +170,8 @@ interface State {
   /** Settings was opened from the source browser, so closing it goes back there. */
   settingsFromSources?: boolean;
   modelsOpen: boolean;
+  /** What the Models page searches for when it opens, when something sent the user there for a model. */
+  modelsSearch?: { runtime: CatalogRuntime; query: string };
   /** The source browser, linking a series to the open project or to a new one. */
   sourcesOpen: boolean;
   /** The open project's source link; null when it has none, undefined while loading. */
@@ -225,7 +228,7 @@ interface Actions {
   setFillShape(shape: FillShape): void;
   setShortcut(action: ShortcutAction, key: string): void;
   setSettingsOpen(open: boolean, tab?: string): void;
-  setModelsOpen(open: boolean): void;
+  setModelsOpen(open: boolean, search?: { runtime: CatalogRuntime; query: string }): void;
   setSourcesOpen(open: boolean): void;
   openBrowser(challenge: Challenge, resume?: () => void): void;
   closeBrowser(resumed: boolean): void;
@@ -992,7 +995,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             ? { ...s, settingsOpen, settingsTab, settingsFromModels: s.modelsOpen, modelsOpen: false, settingsFromSources: s.sourcesOpen, sourcesOpen: false }
             : { ...s, settingsOpen, modelsOpen: !!s.settingsFromModels, settingsFromModels: false, sourcesOpen: !!s.settingsFromSources, settingsFromSources: false },
         ),
-      setModelsOpen: (modelsOpen) => setState((s) => ({ ...s, modelsOpen, settingsOpen: false })),
+      setModelsOpen: (modelsOpen, modelsSearch) => setState((s) => ({ ...s, modelsOpen, modelsSearch, settingsOpen: false })),
       setSourcesOpen: (sourcesOpen) => setState((s) => ({ ...s, sourcesOpen, settingsOpen: false, modelsOpen: false })),
       openBrowser: (challenge, resume) => setState((s) => ({ ...s, browser: { ...challenge, resume } })),
       closeBrowser: (resumed) =>

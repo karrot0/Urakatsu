@@ -8,6 +8,7 @@ from .base import InpaintingMask, StageInput, StageProcessor, finish, generation
 
 
 def processors() -> dict[Stage, StageProcessor]:
+    from .censorship import CensorDetectionStage, DecensorStage
     from .detection import DetectionStage
     from .inpainting import InpaintingStage
     from .ocr import OcrStage
@@ -17,10 +18,12 @@ def processors() -> dict[Stage, StageProcessor]:
 
     return {
         Stage.WATERMARKS: WatermarksStage(),
+        Stage.CENSOR_DETECTION: CensorDetectionStage(),
         Stage.DETECTION: DetectionStage(),
         Stage.OCR: OcrStage(),
         Stage.TRANSLATION: TranslationStage(),
         Stage.INPAINTING: InpaintingStage(),
+        Stage.DECENSOR: DecensorStage(),
         Stage.SOUND_EFFECTS: SoundEffectsStage(),
     }
 

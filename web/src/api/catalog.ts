@@ -37,6 +37,8 @@ export interface SearchResult {
   usable_by: Usage[];
   estimate: Fit | null;
   installed: boolean;
+  /** A model Urakatsu runs out of the box. */
+  default: boolean;
 }
 
 export interface Variant {
@@ -230,6 +232,18 @@ export type Storage = { models_dir: string; default_dir: string; size: number; i
  */
 export type StorageItem = { id: string | null; kind: "installed" | "builtin" | "partial" | "other"; name: string; detail: string | null; size: number };
 
+export interface PendingDownload {
+  label: string;
+  /** The Models page could supply this instead. */
+  model: boolean;
+}
+
+export interface LocalLora {
+  path: string;
+  name: string;
+  size: number;
+}
+
 export const catalog = {
   hardware: () => call<Hardware>("/catalog/hardware"),
   memory: () => call<MemoryUsage>("/memory"),
@@ -249,6 +263,8 @@ export const catalog = {
   move: (id: string, position: number) =>
     call<Download[]>(`/catalog/downloads/${id}/move`, { method: "POST", body: JSON.stringify({ position }) }),
   installed: () => call<InstalledModel[]>("/catalog/installed"),
+  loras: () => call<LocalLora[]>("/catalog/loras"),
+  pendingDownloads: (settings: Record<string, unknown>) => call<PendingDownload[]>("/catalog/pending-downloads", { method: "POST", body: JSON.stringify(settings) }),
   remove: (id: string) => call<void>(`/catalog/installed/${id}`, { method: "DELETE" }),
   runtimes: () => call<Runtimes>("/runtimes"),
   releases: (id: string) => call<Release[]>(`/runtimes/${id}/releases`),

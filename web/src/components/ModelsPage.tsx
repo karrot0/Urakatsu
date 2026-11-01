@@ -316,8 +316,9 @@ function HardwareSummary({ hardware }: { hardware: Hardware }) {
 // ---- discover -----------------------------------------------------------------------------------
 
 function Discover({ state }: { state: CatalogState }) {
-  const [runtime, setRuntime] = useState<CatalogRuntime>("llama");
-  const [query, setQuery] = useState("");
+  const { modelsSearch } = useWorkspace();
+  const [runtime, setRuntime] = useState<CatalogRuntime>(modelsSearch?.runtime ?? "llama");
+  const [query, setQuery] = useState(modelsSearch?.query ?? "");
   const [sort, setSort] = useState("downloads");
   const [usable, setUsable] = useState(true);
   const [results, setResults] = useState<SearchResult[]>();
@@ -461,6 +462,7 @@ function ResultRow({ result, active, onSelect }: { result: SearchResult; active:
       </span>
       <span className="flex flex-wrap gap-1 empty:hidden">
         {result.installed && <Badge tone="success">Installed</Badge>}
+        {result.default && <Badge>Default</Badge>}
         {uniqueStages(result.usable_by).map((stage) => (
           <Badge key={stage}>{STAGE_LABEL[stage] ?? stage}</Badge>
         ))}

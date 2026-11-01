@@ -42,8 +42,9 @@ SLOT_FOLDERS: dict[str, tuple[str, ...]] = {
 WEIGHT_SUFFIXES = (".gguf", ".safetensors", ".sft", ".ckpt", ".pt", ".pth", ".bin")
 # Formats sd.cpp does not read (Apple MLX, GPTQ/AWQ packs, ComfyUI's FP4 safetensors such as
 # ``qwen_3_8b_fp4mixed``: of ComfyUI's quantizations it loads only ``int8_tensorwise`` and
-# scaled FP8) and files that are not whole models.
-UNSUPPORTED = re.compile(r"(?i)(mlx|gptq|awq|w4a8|nvfp4|fp4[\w.-]*\.safetensors$|lora|-of-\d{5}|\.index\.json$)")
+# scaled FP8; its mixed FP8 such as ``qwen_3_8b_fp8mixed`` stops sd-server on a ``weight_scale``
+# assertion while the model loads) and files that are not whole models.
+UNSUPPORTED = re.compile(r"(?i)(mlx|gptq|awq|w4a8|nvfp4|fp4[\w.-]*\.safetensors$|fp8mixed|lora|-of-\d{5}|\.index\.json$)")
 # For large companions (text encoders): smaller formats that keep quality come first.
 QUANT_PREFERENCE = ("q4_k_m", "q5_k_m", "q6_k", "q8_0", "int8", "fp8", "q4_k_s", "q4_0", "q5_0", "fp16", "f16", "bf16", "fp32", "f32")
 

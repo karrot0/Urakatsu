@@ -118,6 +118,14 @@ def catalog_router() -> APIRouter:
         _guard(catalog().downloads.move, download_id, body.position)
         return catalog().list_downloads()
 
+    @router.post("/catalog/pending-downloads")
+    def pending_downloads(settings: dict[str, dict]):
+        return _guard(catalog().pending_downloads, settings)
+
+    @router.get("/catalog/loras")
+    def loras():
+        return _guard(catalog().loras)
+
     @router.get("/catalog/installed")
     def installed():
         return _guard(catalog().list_installed)

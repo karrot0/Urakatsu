@@ -8,8 +8,13 @@ complete one.
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import os
 import shutil
+import tarfile
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Protocol
@@ -103,6 +108,82 @@ class GitHubReleaseFile:
         return target
 
 
+class _Progressing(io.RawIOBase):
+    """Reads ``response``, reporting the bytes read so far: ``tarfile`` only sees a stream."""
+
+    def __init__(self, response, report: Callable[[int], None]):
+        self.response = response
+        self.report = report
+        self.done = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self.response.read(size)
+        self.done += len(chunk)
+        self.report(self.done)
+        return chunk
+
+
+@dataclass(frozen=True)
+class ContainerLayerFile:
+    """One file inside a layer of a public Docker Hub image, pinned by layer digest and file hash.
+
+    For weights published nowhere else. The layer is streamed and only ``member`` is saved, under
+    its own name: nothing in the image runs, and no path from the archive is used. A file whose
+    hash is not ``sha256`` is discarded.
+    """
+
+    repository: str
+    digest: str
+    member: str
+    sha256: str
+    size: int = 0  # of the layer, for progress
+
+    def describe(self) -> str:
+        return f"docker://{self.repository}@{self.digest}/{self.member}"
+
+    def local_path(self, store: "ModelStore") -> Path:
+        return store.root / "docker" / self.repository / self.digest.removeprefix("sha256:") / Path(self.member).name
+
+    def resolve(self, store: "ModelStore", progress: Optional[DownloadProgress] = None) -> Path:
+        target = self.local_path(store)
+        if target.exists():
+            return target
+        if store.offline:
+            raise ModelLoadError(f"{self.describe()} is not cached and the store is offline")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_suffix(target.suffix + ".part")
+        report = (lambda done: progress(self.describe(), done, self.size)) if progress else (lambda done: None)
+        try:
+            self._extract(partial, report)
+            shutil.move(str(partial), str(target))
+        except (OSError, tarfile.TarError, ValueError, KeyError) as error:
+            partial.unlink(missing_ok=True)
+            raise ModelLoadError(f"failed to download {self.describe()}: {error}") from error
+        return target
+
+    def _extract(self, partial: Path, report: Callable[[int], None]) -> None:
+        scope = f"repository:{self.repository}:pull"
+        with urllib.request.urlopen(f"https://auth.docker.io/token?service=registry.docker.io&scope={scope}", timeout=60) as response:
+            token = json.load(response)["token"]
+        request = urllib.request.Request(f"https://registry-1.docker.io/v2/{self.repository}/blobs/{self.digest}", headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(request, timeout=120) as response, tarfile.open(fileobj=_Progressing(response, report), mode="r|gz") as layer:
+            for member in layer:
+                if member.isfile() and member.name == self.member:
+                    digest = hashlib.sha256()
+                    source = layer.extractfile(member)
+                    with partial.open("wb") as handle:
+                        while chunk := source.read(1 << 20):
+                            digest.update(chunk)
+                            handle.write(chunk)
+                    if digest.hexdigest() != self.sha256:
+                        raise ValueError(f"unexpected SHA-256 {digest.hexdigest()}")
+                    return
+        raise ValueError(f"{self.member} is not in the layer")
+
+
 class ModelStore:
     def __init__(self, root: Path | None = None, offline: bool | None = None):
         self._root = Path(root) if root else None
@@ -115,7 +196,7 @@ class ModelStore:
         return self._root or models_root()
 
     def cached(self, source: WeightSource) -> bool:
-        if isinstance(source, (HuggingFaceFile, GitHubReleaseFile)):
+        if isinstance(source, (HuggingFaceFile, GitHubReleaseFile, ContainerLayerFile)):
             return source.local_path(self).exists()
         if isinstance(source, LocalFile):
             return Path(source.path).expanduser().exists()

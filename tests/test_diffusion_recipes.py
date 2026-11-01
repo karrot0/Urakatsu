@@ -1,14 +1,17 @@
 """stable-diffusion.cpp recipes: matching repos, finding companions, the generic inpainter."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from PIL import Image
 
 from urakatsu.catalog import fit as fitting
 from urakatsu.catalog.hf import RepoFile, RepoInfo
-from urakatsu.catalog.recipes import match_recipe, parse_recipe, parse_sources, pick, slot_candidates
+from urakatsu.catalog.recipes import UNSUPPORTED, Candidate, match_recipe, parse_recipe, parse_sources, pick, slot_candidates
 from urakatsu.catalog.support import Family, RuntimeSupport
 from urakatsu.providers.inpainting.diffusion_recipe import DiffusionRecipeSettings, RecipeProcessor, flag_for, sample_params, working_size
+from urakatsu.providers.inpainting.diffusion_recipe import COMPUTE_RESERVE, offload_to_cpu, vram_budget
 from urakatsu.runtimes.device import Backend, Device
 from urakatsu.runtimes.hardware import SystemProfile
 
@@ -219,9 +222,62 @@ def test_any_flux2_model_runs_on_flux2_klein_with_its_own_text_encoder(catalog, 
     monkeypatch.setattr(catalog, "_latest_support", lambda runtime: support)
     monkeypatch.setattr(catalog.support, "doc", lambda package, tag, doc: FLUX2_DOC)
     facts = catalog.facts("diffusion", nine)
-    assert facts.recipe is KLEIN_9B and [u["provider"] for u in catalog.usable_by(facts)] == ["flux2-klein", "diffusion-model"]
+    assert facts.recipe is KLEIN_9B and [u["provider"] for u in catalog.usable_by(facts)] == ["flux2-klein", "diffusion-model", "flux2-klein-decensor"]
     plan = catalog.components(nine, facts)
     assert plan.files["llm"].repo == "unsloth/Qwen3-8B-GGUF" and plan.files["llm"].path == "Qwen3-8B-Q4_K_M.gguf"
+
+
+def _klein_plan(catalog, monkeypatch, vae):
+    nine = repo("unsloth/FLUX.2-klein-9B-GGUF", [("flux-2-klein-9b-Q8_0.gguf", 10 * GB)], ["black-forest-labs/FLUX.2-klein-9B"])
+    comfy = repo("Comfy-Org/flux2-klein-9B", [("split_files/text_encoders/qwen_3_8b.safetensors", 16 * GB), ("split_files/vae/flux2-vae.safetensors", GB // 3)])
+    qwen = repo("unsloth/Qwen3-8B-GGUF", [("Qwen3-8B-Q4_K_M.gguf", 5 * GB), ("Qwen3-8B-BF16.gguf", 16 * GB)])
+    catalog.hub.repos.update({r.id: r for r in (nine, comfy, qwen, vae)})
+    support = RuntimeSupport("stable-diffusion.cpp", "master-1", families=(Family("FLUX.2-dev/FLUX.2-klein", "flux2", ("flux2dev", "flux2klein")),), recipes=(KLEIN_4B, KLEIN_9B, FLUX2_DEV))
+    monkeypatch.setattr(catalog, "_latest_support", lambda runtime: support)
+    # The doc links ComfyUI's text encoders beside the GGUF ones.
+    linked = FLUX2_DOC.replace("- Download Qwen3 8B\n", "- Download Qwen3 8B\n    - safetensors: https://huggingface.co/Comfy-Org/flux2-klein-9B/tree/main/split_files/text_encoders\n")
+    monkeypatch.setattr(catalog.support, "doc", lambda package, tag, doc: linked)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    return nine, catalog.components
+
+
+def test_a_gated_companion_is_passed_over_for_a_public_file(catalog, monkeypatch):
+    gated = repo("black-forest-labs/FLUX.2-dev", [("ae.safetensors", GB // 3)])
+    gated.gated = True
+    nine, components = _klein_plan(catalog, monkeypatch, gated)
+    plan = components(nine, catalog.facts("diffusion", nine))
+    assert (plan.files["vae"].repo, plan.files["vae"].path) == ("Comfy-Org/flux2-klein-9B", "split_files/vae/flux2-vae.safetensors")
+    assert (plan.files["llm"].repo, plan.files["llm"].path) == ("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf")
+
+
+def test_a_repo_linked_for_another_slot_never_fills_a_slot_with_the_wrong_weights(catalog, monkeypatch):
+    gated = repo("black-forest-labs/FLUX.2-dev", [("ae.safetensors", GB // 3)])
+    gated.gated = True
+    nine, components = _klein_plan(catalog, monkeypatch, gated)
+    del catalog.hub.repos["Comfy-Org/flux2-klein-9B"]
+    plan = components(nine, catalog.facts("diffusion", nine))
+    assert plan.files["vae"].repo == gated.id  # the gated file, not a text encoder from the GGUF repo
+
+
+def test_the_mixed_fp8_encoder_that_stops_sd_server_is_never_chosen():
+    assert UNSUPPORTED.search("split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors")
+    assert not UNSUPPORTED.search("split_files/text_encoders/qwen_3_8b.safetensors")
+
+
+def test_the_smallest_good_text_encoder_is_chosen_across_every_linked_source():
+    full = Candidate("Comfy-Org/flux2-klein-9B", "split_files/text_encoders/qwen_3_8b.safetensors", 16 * GB, "sha")
+    small = Candidate("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf", 5 * GB, "sha")
+    assert pick("llm", [full, small]) is small
+
+
+def test_a_gated_companion_is_used_with_a_token(catalog, monkeypatch):
+    gated = repo("black-forest-labs/FLUX.2-dev", [("ae.safetensors", GB // 3)])
+    gated.gated = True
+    nine, components = _klein_plan(catalog, monkeypatch, gated)
+    monkeypatch.setenv("HF_TOKEN", "token")
+    plan = components(nine, catalog.facts("diffusion", nine))
+    assert plan.files["vae"].repo == gated.id
 
 
 def test_flux2_klein_runs_its_defaults_or_an_installed_flux2_model(tmp_path, monkeypatch):
@@ -327,3 +383,47 @@ def test_slots_map_to_the_servers_own_flags():
 
     with pytest.raises(ProviderUnavailable):
         flag_for("audio_vae", flags)
+
+
+@pytest.mark.parametrize(
+    "sizes, free, ram, expected",
+    [
+        ([10 * GB, 5 * GB, GB // 3], 10 * GB, 20 * GB, False),  # the diffusion model leaves no room to compute: auto-fit streams it
+        ([4 * GB, 5 * GB, GB // 3], 10 * GB, 20 * GB, True),  # each part fits while it runs
+        ([4 * GB, 5 * GB, GB // 3], 10 * GB, 8 * GB, False),  # RAM cannot hold them
+        ([2 * GB, 2 * GB], 12 * GB, 20 * GB, False),  # they fit the GPU together
+    ],
+)
+def test_offload_needs_each_part_to_fit_the_gpu_with_room_to_compute(sizes, free, ram, expected):
+    assert offload_to_cpu(sizes, free, ram) is expected
+
+
+def test_a_model_too_big_to_compute_whole_gets_a_budget_that_segments_it():
+    assert vram_budget([10 * GB, 5 * GB], 10 * GB) == round((10 * GB - COMPUTE_RESERVE) / 1024**3, 1)
+    assert vram_budget([4 * GB, 5 * GB], 10 * GB) is None
+    assert vram_budget([10 * GB], 2 * GB) == 1.0
+
+
+def test_the_loras_folder_is_what_the_lora_setting_offers(catalog):
+    assert catalog.loras() == []
+    folder = catalog.store.root / "loras" / "bars"
+    folder.mkdir(parents=True)
+    (folder / "uncensor.safetensors").write_bytes(b"12345")
+    (folder / "notes.txt").write_text("not a LoRA")
+    assert catalog.loras() == [{"path": str(folder / "uncensor.safetensors"), "name": "uncensor", "size": 5}]
+
+
+def test_downloaded_and_default_models_lead_the_search_even_outside_its_results(catalog, monkeypatch):
+    popular, rest = repo("someone/popular", []), repo("someone/rest", [])
+    popular.downloads, rest.downloads = 900, 800
+    catalog.hub.repos |= {"me/downloaded": repo("me/downloaded", []), "built/in": repo("built/in", [])}
+    monkeypatch.setattr(catalog.hub, "search", lambda *args, **kwargs: [popular, rest], raising=False)
+    monkeypatch.setattr(catalog.installed, "all", lambda: [SimpleNamespace(repo="me/downloaded", runtime="diffusion"), SimpleNamespace(repo="me/other-runtime", runtime="llama")])
+    monkeypatch.setattr(catalog, "_default_repos", lambda runtime: {"built/in", "gone/from-the-hub"})
+
+    found = catalog.search("diffusion")
+    assert [r["repo"] for r in found] == ["me/downloaded", "built/in", "someone/popular", "someone/rest"]
+    assert [(r["installed"], r["default"]) for r in found[:3]] == [(True, False), (False, True), (False, False)]
+
+    assert [r["repo"] for r in catalog.search("diffusion", "popular")] == ["someone/popular", "someone/rest"]  # neither fits the search
+    assert [r["repo"] for r in catalog.search("diffusion", "built in")][0] == "built/in"

@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, chapterOf, currentPage, selectedPages, useWorkspace, type RunScope, type StageName, type Theme, type ViewMode } from "../state/workspace";
+import { STAGES, chapterOf, currentPage, selectedPages, useWorkspace, type RunScope, type RunStage, type StageName, type Theme, type ViewMode } from "../state/workspace";
 import { Popover, Tooltip } from "./primitives";
 import { Segmented } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -93,8 +93,8 @@ export function CommandBar() {
                 {ws.showBlocks ? <Eye size={16} /> : <EyeOff size={16} />}
               </Button>
             </Tooltip>
-            <Tooltip content={ws.showRegions ? "Hide balloons and panels" : "Show balloons and panels"} side="bottom">
-              <Button variant="ghost" size="icon-sm" aria-pressed={ws.showRegions} aria-label="Balloons and panels" onClick={() => ws.toggleOverlay("regions")}>
+            <Tooltip content={ws.showRegions ? "Hide balloons, panels and censor bars" : "Show balloons, panels and censor bars"} side="bottom">
+              <Button variant="ghost" size="icon-sm" aria-pressed={ws.showRegions} aria-label="Balloons, panels and censor bars" onClick={() => ws.toggleOverlay("regions")}>
                 <Layers size={16} />
               </Button>
             </Tooltip>
@@ -139,6 +139,12 @@ function InferenceControl() {
     if (stages.length === STAGES.length) void ws.run({ kind: "full", scope });
     else if (stages.length === 1) void ws.run({ kind: "only", stage: stages[0], scope });
     else void ws.run({ kind: "stages", stages, scope });
+  };
+
+  const censorship = config?.censorship || "off";
+  const runAlone = (stage: RunStage) => {
+    setOpen(false);
+    void ws.run({ kind: "only", stage, scope });
   };
 
   const toggleStage = (stage: StageName) => {
@@ -257,6 +263,13 @@ function InferenceControl() {
             {STAGES.map((stage) => (
               <SelectorOption key={stage} label={STAGE_LABEL[stage]} detail={STAGE_DETAIL[stage]} selected={ws.runStages.includes(stage)} onClick={() => toggleStage(stage)} />
             ))}
+            {censorship !== "off" && (
+              <>
+                <hr />
+                <SelectorOption label="Run Censor detection" detail="Mark censor bars for review" selected={false} onClick={() => runAlone("censor_detection")} />
+                <SelectorOption label="Run Decensor" detail="Reconstruct the marked bars" selected={false} onClick={() => runAlone("decensor")} />
+              </>
+            )}
           </SelectorPanel>
         )}
       </Popover>

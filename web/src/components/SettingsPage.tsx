@@ -1,10 +1,10 @@
 // Settings: a left nav of sections and rows of label + control. Changes save
 // automatically a moment after you stop editing.
 
-import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cloud, Cpu, Eye, EyeOff, Info, KeyRound, Keyboard, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, Type, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cloud, Cpu, Download, Eye, EyeOff, Info, Keyboard, KeyRound, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, TriangleAlert, Type, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { catalog, RUNTIME_LABEL, type InstalledModel, type Release, type Runtimes as RuntimeList } from "../api/catalog";
+import { catalog, formatBytes, RUNTIME_LABEL, type InstalledModel, type LocalLora, type PendingDownload, type Release, type Runtimes as RuntimeList } from "../api/catalog";
 import { workers as workersApi, type Worker } from "../api/workers";
 import { describeError } from "../api/client";
 import { formatDate, formatTimestamp } from "../format";
@@ -15,6 +15,7 @@ import { BRUSH_SIZES, DEFAULT_SHORTCUTS, NUDGES, TOOLS, useWorkspace, type Short
 import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./ModelsStorage";
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
+import { CensorshipPreview, type CensorshipMode } from "./CensorshipPreview";
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
 import { WatermarkPreview, type WatermarkMode } from "./WatermarkPreview";
 import { SourcesSettings } from "./SourcesSettings";
@@ -23,6 +24,7 @@ import { WorkersSettings } from "./WorkersSettings";
 import { TOOL_INFO } from "./ToolBelt";
 import { ACCENTS, NEUTRALS } from "../theme";
 import { Badge, Segmented } from "./ui";
+import { Autocomplete, type AutocompleteOption } from "@/components/ui/autocomplete";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -516,10 +518,122 @@ function WatermarksSection({ providers, draft, update }: { providers: ProviderIn
   );
 }
 
+const CENSORSHIP_MODES: { mode: CensorshipMode; title: string; description: string }[] = [
+  { mode: "off", title: "Leave as drawn", description: "Pages keep their censor bars." },
+  { mode: "detect", title: "Mark for review", description: "Bars are mapped on each page. Reconstruct them when you have checked the marks." },
+  { mode: "remove", title: "Reconstruct", description: "Bars are mapped and reconstructed in every run, on a layer of their own." },
+];
+
+/** "a", "a and b", "a, b and c". */
+const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+
+// The GGUF builds sd.cpp runs, ahead of the repacks a search for "klein" lists first.
+const KLEIN_SEARCH = "FLUX.2-klein-9B-GGUF";
+
+/** Censor bars over the art (not a Koharu setting). Local only: neither model goes to a worker or the cloud. */
+function CensorshipSection({ detectors, models, draft, update }: { detectors: ProviderInfo[]; models: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const ws = useWorkspace();
+  const mode = (draft.censorship || "off") as CensorshipMode;
+  const detector = detectors.find((p) => p.id === draft.censorDetector) ?? detectors[0];
+  const model = models.find((p) => p.id === draft.decensorModel) ?? models[0];
+  // What this setup still has to download: nothing once it is on disk, so no warning.
+  const [pending, setPending] = useState<PendingDownload[]>([]);
+  const detectorSettings = detector ? draft.processorJson[detector.id] : undefined;
+  const modelSettings = model ? draft.processorJson[model.id] : undefined;
+  useEffect(() => {
+    if (mode === "off" || !detector || !model) return;
+    let current = true;
+    catalog.pendingDownloads({ [detector.id]: parseJson(detectorSettings), [model.id]: parseJson(modelSettings) }).then(
+      (found) => {
+        if (current) setPending(found);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [mode, detector?.id, model?.id, detectorSettings, modelSettings]);
+  const needsModel = pending.some((item) => item.model);
+  return (
+    <PreferenceSection title="Censorship" description="Bars drawn over adult works. For works whose characters are all adults. Runs on this computer only.">
+      <div role="radiogroup" aria-label="Censorship" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
+        {CENSORSHIP_MODES.map((option) => {
+          const active = mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update({ censorship: option.mode })}
+              className={cn(
+                "flex min-w-0 cursor-pointer flex-col gap-2 rounded-card bg-surface p-2 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:shadow-focus",
+                active ? "shadow-[inset_0_0_0_2px_var(--brand)]" : "hover:bg-hover-faint",
+              )}
+            >
+              <CensorshipPreview mode={option.mode} className="block w-full overflow-hidden rounded-control" />
+              <span className="px-0.5">
+                <span className="block font-medium">{option.title}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-fg-2">{option.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {mode !== "off" && (
+        <>
+          {pending.length > 0 && (
+            <div className="mb-3 flex items-center gap-2 rounded-control bg-warning-weak px-2.5 py-2 text-xs leading-4 text-fg shadow-[inset_0_0_0_1px_var(--warning-line)] max-[640px]:flex-col max-[640px]:items-stretch">
+              <TriangleAlert size={14} aria-hidden className="shrink-0 text-warning max-[640px]:hidden" />
+              <span className="min-w-0 flex-1">
+                The first run downloads {listed(pending.map((item) => item.label))}.
+                {needsModel && " This is not the Klein that cleans text. For a smaller size, install one from Models and pick it below."}
+              </span>
+              {needsModel && (
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => ws.setModelsOpen(true, { runtime: "diffusion", query: KLEIN_SEARCH })}>
+                  <Download size={14} /> Download Klein 9B
+                </Button>
+              )}
+            </div>
+          )}
+          <PreferenceRow title="Bar detector" description="Marks the bars on each page. Check the marks with the Decensor brush, which shows them.">
+            <div className={CONTROL_PAIR}>
+              <Select label="Bar detector" value={detector?.id ?? ""} options={providerOptions(detectors)} onChange={(censorDetector) => update({ censorDetector })} />
+              <RuntimeSelect provider={detector} draft={draft} update={update} />
+            </div>
+          </PreferenceRow>
+          <PreferenceRow title="Reconstruction model" description="Repaints the art under the bars.">
+            <div className={CONTROL_PAIR}>
+              <Select label="Reconstruction model" value={model?.id ?? ""} options={providerOptions(models)} onChange={(decensorModel) => update({ decensorModel })} />
+              <RuntimeSelect provider={model} draft={draft} update={update} />
+            </div>
+          </PreferenceRow>
+        </>
+      )}
+    </PreferenceSection>
+  );
+}
+
+function CensorshipOptions({ detectors, models, draft, update }: { detectors: ProviderInfo[]; models: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
+  if ((draft.censorship || "off") === "off") return null;
+  const detector = detectors.find((p) => p.id === draft.censorDetector) ?? detectors[0];
+  const model = models.find((p) => p.id === draft.decensorModel) ?? models[0];
+  return (
+    <>
+      {detector && <SchemaSection provider={detector} map="processorJson" draft={draft} update={update} title={`${detector.name} options`} />}
+      {model && <SchemaSection provider={model} map="processorJson" draft={draft} update={update} title={`${model.name} reconstruction options`} />}
+    </>
+  );
+}
+
 function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const caps = ws.capabilities;
   const byStage = (stage: StageName) => caps?.providers.filter((p) => p.stage === stage) ?? [];
+  const forStage = (stage: string) => caps?.providers.filter((p) => p.stage === stage) ?? [];
+  const watermarkers = forStage("watermarks");
+  const censorDetectors = forStage("censor_detection");
+  const decensors = forStage("decensor");
   const devices: Option[] = [
     { value: "auto", label: `Automatic (${caps?.device?.description ?? "best available"})` },
     ...(caps?.devices ?? []).map((d) => ({
@@ -562,6 +676,9 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         })}
         <FillModelRow providers={byStage("inpainting")} draft={draft} update={update} />
       </PreferenceSection>
+      <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
+      <WatermarksSection providers={watermarkers} draft={draft} update={update} />
+      <CensorshipSection detectors={censorDetectors} models={decensors} draft={draft} update={update} />
       {VISION.map(({ stage }) => {
         const provider = byStage(stage).find((p) => p.id === draft[stage]);
         if (!provider) return null;
@@ -572,14 +689,13 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         const provider = draft.fill && draft.fill !== draft.inpainting ? byStage("inpainting").find((p) => p.id === draft.fill) : undefined;
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
-      <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
       {(() => {
         // A redraw model of its own has its own options; one shared with inpainting or fill shows them above.
         const id = draft.soundEffects === "redraw" ? draft.soundEffectsModel : "";
         const provider = id && id !== draft.inpainting && id !== draft.fill ? byStage("inpainting").find((p) => p.id === id) : undefined;
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
-      <WatermarksSection providers={caps?.providers.filter((p) => p.stage === "watermarks") ?? []} draft={draft} update={update} />
+      <CensorshipOptions detectors={censorDetectors} models={decensors} draft={draft} update={update} />
       <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">
         <ModelsFolderRow />
         <PreferenceRow
@@ -621,6 +737,7 @@ function SchemaSection({
   title,
   description,
   action,
+  omit = [],
 }: {
   provider: ProviderInfo;
   map: "processorJson" | "providersJson";
@@ -629,6 +746,8 @@ function SchemaSection({
   title: string;
   description?: string;
   action?: ReactNode;
+  /** Fields a section above already shows. */
+  omit?: string[];
 }) {
   const schema = parseJson(provider.settingsSchemaJson) as { properties?: Record<string, SchemaProperty> };
   // Fields for one runtime (a worker's address, an attached server) show only while it is selected.
@@ -638,7 +757,7 @@ function SchemaSection({
   // A model assigned to one of the app's workers needs no address of its own.
   const assigned = map === "processorJson" && runtime === REMOTE && assignedWorker(provider, draft) !== undefined;
   const fields = Object.entries(schema.properties ?? {}).filter(
-    ([key, property]) => key !== "translation" && (!property.runtimes || (property.runtimes.includes(runtime) && !(assigned && property.runtimes.includes(REMOTE)))),
+    ([key, property]) => key !== "translation" && !omit.includes(key) && (!property.runtimes || (property.runtimes.includes(runtime) && !(assigned && property.runtimes.includes(REMOTE)))),
   );
   if (fields.length === 0) return null;
   const values = { ...parseJson(provider.defaultsJson), ...parseJson(draft[map][provider.id]) };
@@ -653,7 +772,9 @@ function SchemaSection({
       {fields.map(([key, property]) => (
         <PreferenceRow key={key} title={FIELD_TITLES[key] ?? property.title ?? key} description={FIELD_DESCRIPTIONS[key] ?? property.description} align={schemaType(property) === "string" && key.includes("prompt") ? "start" : "center"}>
           {key === "model" ? (
-            <InstalledModelSelect providerId={provider.id} value={typeof values.model === "string" ? values.model : ""} onChange={(value) => set("model", value || null)} />
+            <InstalledModelSelect providerId={provider.id} builtIn={provider.weights.length > 0} value={typeof values.model === "string" ? values.model : ""} onChange={(value) => set("model", value || null)} />
+          ) : key === "lora" ? (
+            <LoraField builtIn={provider.stage === "decensor"} value={typeof values.lora === "string" ? values.lora : ""} onChange={(value) => set("lora", value || null)} />
           ) : (
             <SchemaField name={key} property={property} value={values[key]} onChange={(value) => set(key, value)} />
           )}
@@ -663,11 +784,25 @@ function SchemaSection({
   );
 }
 
-function InstalledModelSelect({ providerId, value, onChange }: { providerId: string; value: string; onChange: (value: string) => void }) {
+/** The LoRAs in the models folder, or any path typed in. */
+function LoraField({ builtIn, value, onChange }: { builtIn: boolean; value: string; onChange: (value: string) => void }) {
+  const [loras, setLoras] = useState<LocalLora[]>([]);
+  useEffect(() => {
+    catalog.loras().then(setLoras, () => undefined);
+  }, []);
+  const empty = builtIn ? "Built-in bar LoRA" : "No LoRA";
+  const options: AutocompleteOption[] = [
+    { value: "", label: empty, detail: builtIn ? "Klein 9B" : undefined },
+    ...loras.map((lora) => ({ value: lora.path, label: lora.name, detail: formatBytes(lora.size) })),
+  ];
+  return <Autocomplete label="LoRA" value={value} options={options} placeholder={empty} onChange={onChange} />;
+}
+
+function InstalledModelSelect({ providerId, builtIn, value, onChange }: { providerId: string; builtIn: boolean; value: string; onChange: (value: string) => void }) {
   const ws = useWorkspace();
   const installed = useContext(InstalledContext).filter((m) => m.usable_by.some((u) => u.provider === providerId));
   const options: Option[] = [
-    { value: "", label: "Built-in default" },
+    { value: "", label: builtIn ? "Built-in default" : "Pick an installed model" },
     ...installed.map((m) => ({ value: m.id, label: `${m.repo.split("/").pop()}${m.variant ? ` ${m.variant}` : ""}`, detail: m.compatibility?.status === "needs_update" ? "Needs newer runtime" : RUNTIME_LABEL[m.runtime] })),
   ];
   if (value && !installed.some((m) => m.id === value)) options.push({ value, label: value, detail: "Not installed" });
@@ -683,6 +818,8 @@ function InstalledModelSelect({ providerId, value, onChange }: { providerId: str
 
 // Pydantic titles come from field names ("Api Key"); a few read better spelled out.
 const FIELD_TITLES: Record<string, string> = {
+  lora: "LoRA",
+  lora_strength: "LoRA strength",
   api_key: "API key",
   base_url: "Base URL",
   cfg_scale: "Guidance scale",

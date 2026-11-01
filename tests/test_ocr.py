@@ -35,6 +35,7 @@ from urakatsu.providers.ocr.paddle_ocr_vl import (
     PaddleOcrVlProvider,
     smart_resize,
 )
+from urakatsu.runtimes import models_folder
 from urakatsu.runtimes.store import HuggingFaceFile, ModelStore
 from urakatsu.scene import (
     At,
@@ -398,6 +399,7 @@ def real_home(monkeypatch) -> Path:
     if not home:
         pytest.skip("set URAKATSU_TEST_HOME to a model store that holds the OCR weights")
     monkeypatch.setenv("URAKATSU_HOME", home)
+    monkeypatch.setattr(models_folder, "_root", None)  # an earlier test's home may be remembered
     return Path(home)
 
 

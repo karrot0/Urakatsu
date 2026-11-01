@@ -24,7 +24,7 @@ from urakatsu.core.registry import registry
 from urakatsu.runtimes import models_folder
 from urakatsu.runtimes.hardware import discover, system_profile
 from urakatsu.runtimes.packages import LLAMA_CPP, PACKAGES, STABLE_DIFFUSION_CPP, PackageManager
-from urakatsu.runtimes.store import ModelStore
+from urakatsu.runtimes.store import HuggingFaceFile, ModelStore
 
 from . import fit as fitting
 from .diskcache import DiskCache
@@ -271,6 +271,7 @@ class Catalog:
         hardware = discover().candidates()
         system = system_profile()
         installed_repos = {m.repo for m in self.installed.all()}
+        defaults = self._default_repos(runtime)
         results = []
         repos = self.hub.search(runtime, query, sort=sort, limit=limit)
         if usable_only and not query:
@@ -283,6 +284,7 @@ class Catalog:
                     if repo.id not in seen:
                         seen.add(repo.id)
                         repos.append(repo)
+        repos = [*repos, *self._pinned_repos(runtime, query, defaults, {r.id for r in repos})]
         for repo in repos:
             facts = self.facts(runtime, repo)
             usage = self.usable_by(facts)
@@ -309,11 +311,37 @@ class Catalog:
                     "usable_by": usage,
                     "estimate": estimate,
                     "installed": repo.id in installed_repos,
+                    "default": repo.id in defaults,
                 }
             )
         if sort in ("downloads", "likes"):
             results.sort(key=lambda r: r[sort], reverse=True)
+        results.sort(key=lambda r: 0 if r["installed"] else 1 if r["default"] else 2)
         return results
+
+    def _default_repos(self, runtime: str) -> set[str]:
+        """The repos of the models the providers on ``runtime`` run out of the box. Only the first
+        of each provider's weights: the rest are the encoders and VAEs that go with it."""
+        repos = set()
+        for cls in registry.list():
+            sources = cls.weight_sources(runtime) if runtime in cls.runtimes else ()
+            if sources and isinstance(sources[0], HuggingFaceFile):
+                repos.add(sources[0].repository)
+        return repos
+
+    def _pinned_repos(self, runtime: str, query: str, defaults: set[str], found: set[str]) -> list[RepoInfo]:
+        """Installed and default repos that fit ``query`` but ranked outside the Hub's results."""
+        words = query.lower().split()
+        wanted = {m.repo for m in self.installed.all() if m.runtime == runtime} | defaults
+        repos = []
+        for repo_id in sorted(wanted - found):
+            if not all(word in repo_id.lower() for word in words):
+                continue
+            try:
+                repos.append(self.hub.model(repo_id))
+            except Exception:  # noqa: BLE001 - offline, or the repo is gone: the search still stands
+                continue
+        return repos
 
     # -- details -----------------------------------------------------------------------------------
 
@@ -391,28 +419,32 @@ class Catalog:
 
     def components(self, repo: RepoInfo, facts: ModelFacts) -> Optional[Plan]:
         """One file for every slot the model's recipe needs besides the model itself: from the
-        repo first (ComfyUI repacks bundle them), else from the companions its doc links."""
+        repo first (ComfyUI repacks bundle them), else the best of the companions its doc links,
+        else from the repos used or linked for other slots. A gated repo is a last resort without a
+        token: its download fails with 401 after everything else has downloaded (FLUX.2-dev's
+        VAE, which the doc links for FLUX.2 Klein)."""
         recipe = facts.recipe
         if recipe is None:
             return None
         plan = Plan(recipe)
         files = [(f.path, f.size) for f in repo.files]
         sources: Optional[dict[str, list]] = None
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         for slot in recipe.needed():
             if slot.id == recipe.main_slot:
                 continue
             chosen = pick(slot.id, slot_candidates(slot.id, repo.id, files, revision=repo.sha))
             if chosen is None:
                 sources = self._doc_sources(facts) if sources is None else sources
+                public, gated = [], []
                 for source in sources.get(slot.id, []):
                     try:
                         info = self.hub.model(source.repo)
                     except Exception:  # noqa: BLE001 - try the next source
                         continue
                     found = slot_candidates(slot.id, info.id, [(f.path, f.size) for f in info.files], within=source.folder or source.file, anywhere=True, revision=info.sha)
-                    chosen = pick(slot.id, found)
-                    if chosen is not None:
-                        break
+                    (gated if info.gated and not token else public).extend(found)
+                chosen = pick(slot.id, public) or self._from_linked_repos(slot.id, plan, sources) or pick(slot.id, gated)
             if chosen is not None:
                 plan.files[slot.id] = chosen
             else:
@@ -429,6 +461,21 @@ class Catalog:
             if vision is not None:
                 plan.files["llm_vision"] = vision
         return plan
+
+    def _from_linked_repos(self, slot: str, plan: Plan, sources: dict[str, list]) -> Optional[Any]:
+        """``slot``'s file in a public repo used or linked for another slot (a ComfyUI repack holds
+        them all). Only a file in the slot's folder or named after it counts here: these repos
+        were not linked for this slot, so any other weights in them are something else."""
+        linked = [source.repo for found in sources.values() for source in found]
+        for repository in dict.fromkeys([*(file.repo for file in plan.files.values()), *linked]):
+            try:
+                info = self.hub.model(repository)
+            except Exception:  # noqa: BLE001 - try the next repo
+                continue
+            chosen = pick(slot, slot_candidates(slot, info.id, [(f.path, f.size) for f in info.files], revision=info.sha))
+            if chosen is not None and not info.gated:
+                return chosen
+        return None
 
     def _variants_for(self, runtime, repo: RepoInfo, facts: ModelFacts, devices, system, usage, plan: Optional[Plan] = None) -> list[dict[str, Any]]:
         files = [(f.path, f.size) for f in repo.files]
@@ -560,6 +607,15 @@ class Catalog:
         )
         download = self.downloads.start(model)
         return download.model_dump(mode="json")
+
+    def pending_downloads(self, settings: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        """What the first run of each provider in ``settings`` (id to settings) would download."""
+        return [item for cls in registry.list() if cls.id in settings for item in cls.pending_downloads(settings[cls.id], self.store.cached)]
+
+    def loras(self) -> list[dict[str, Any]]:
+        """The ``.safetensors`` files in the models folder's ``loras`` directory, for a LoRA setting."""
+        found = (self.store.root / "loras").rglob("*.safetensors")
+        return [{"path": str(path), "name": path.stem, "size": path.stat().st_size} for path in sorted(found) if path.is_file()]
 
     def list_installed(self) -> list[dict[str, Any]]:
         """Installed models, each re-checked against the runtime version installed now."""

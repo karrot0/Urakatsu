@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Optional, ClassVar
+from typing import Any, Optional, ClassVar
 
 import numpy as np
 from PIL import Image
@@ -138,12 +138,23 @@ class Flux2KleinProcessor:
 
     edits = True  # the crop always goes in as ``ref_images``
 
-    def __init__(self, server: SdServer, prompt: str, steps: int = INPAINT_STEPS, cfg_scale: float = TEXT_CFG, distilled_guidance: float = DISTILLED_GUIDANCE):
+    def __init__(
+        self,
+        server: SdServer,
+        prompt: str,
+        steps: int = INPAINT_STEPS,
+        cfg_scale: float = TEXT_CFG,
+        distilled_guidance: float = DISTILLED_GUIDANCE,
+        strength: float = INPAINT_STRENGTH,
+        lora: Optional[list[dict[str, Any]]] = None,
+    ):
         self.server = server
         self.prompt = prompt
         self.steps = steps
         self.cfg_scale = cfg_scale
         self.distilled_guidance = distilled_guidance
+        self.strength = strength
+        self.lora = lora or []
 
     def inference(self, image: Image.Image, mask: np.ndarray, prompt: Optional[str] = None) -> Image.Image:
         if image.size != (mask.shape[1], mask.shape[0]):
@@ -160,29 +171,28 @@ class Flux2KleinProcessor:
         mask_array = np.asarray(mask_image)  # kept unbinarized for the overlay
         native_mask = Image.fromarray(_binarize(mask_array), "L")
 
-        strength = inpaint_strength(self.steps, INPAINT_STRENGTH)
         sigmas = flux2_sigmas((height // GRID) * (width // GRID), self.steps)
-        generated = self.server.generate(
-            {
-                "prompt": prompt or self.prompt,
-                "width": width,
-                "height": height,
-                "strength": float(strength),
-                "seed": -1,
-                "batch_count": 1,
-                "init_image": image_b64(init_image),
-                "ref_images": [image_b64(init_image)],
-                "ref_image_args": "resize_before_vae=false",
-                "mask_image": image_b64(native_mask),
-                "sample_params": {
-                    "sample_method": "euler",
-                    "sample_steps": self.steps,
-                    "custom_sigmas": [float(s) for s in sigmas],
-                    "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": float(self.distilled_guidance)},
-                },
-                "output_format": "png",
-            }
-        )
+        request: dict[str, Any] = {
+            "prompt": prompt or self.prompt,
+            "width": width,
+            "height": height,
+            "seed": -1,
+            "batch_count": 1,
+            "ref_images": [image_b64(init_image)],
+            "ref_image_args": "resize_before_vae=false",
+            "sample_params": {
+                "sample_method": "euler",
+                "sample_steps": self.steps,
+                "custom_sigmas": [float(s) for s in sigmas],
+                "guidance": {"txt_cfg": float(self.cfg_scale), "distilled_guidance": float(self.distilled_guidance)},
+            },
+            "output_format": "png",
+        }
+        if self.strength < 1.0:  # at full strength the reference is the only conditioning
+            request.update(strength=float(inpaint_strength(self.steps, self.strength)), init_image=image_b64(init_image), mask_image=image_b64(native_mask))
+        if self.lora:
+            request["lora"] = self.lora
+        generated = self.server.generate(request)
         if not generated:
             raise RuntimeError("FLUX.2 Klein returned no inpainted image")
         result = np.asarray(generated[0].convert("RGB"))

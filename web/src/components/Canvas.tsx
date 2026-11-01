@@ -47,7 +47,7 @@ type Gesture =
   | { kind: "text"; start: Pt; rect: Rect }
   | { kind: "pan"; client: Pt; scroll: Pt }
   // A stroke is not re-rendered per pointer move either: segments go straight onto `target`.
-  | { kind: "stroke"; tool: "draw" | "eraser" | "remove"; target: HTMLCanvasElement; layer?: RasterLayer }
+  | { kind: "stroke"; tool: "draw" | "eraser" | "remove" | "decensor"; target: HTMLCanvasElement; layer?: RasterLayer }
   | { kind: "select"; shape: FillShape; start: Pt; points: Pt[] }
   | { kind: "compare"; bounds: Rect };
 // A generative fill selection: a closed polygon in page pixels.
@@ -945,18 +945,18 @@ export function Canvas() {
 
   // Strokes are stamped as round dabs, so pen pressure can set each dab's size and opacity (Photoshop's
   // Shape Dynamics and Transfer). A mouse presses fully: solid strokes of the set size, as before.
-  const strokeTo = (canvas: HTMLCanvasElement, tool: "draw" | "eraser" | "remove", from: Sample, to: Sample) => {
+  const strokeTo = (canvas: HTMLCanvasElement, tool: "draw" | "eraser" | "remove" | "decensor", from: Sample, to: Sample) => {
     const context = canvas.getContext("2d");
     if (!context) return;
     const { diameter, color, pressureSize, pressureOpacity } = ws.brush;
     // The remove mask marks where to inpaint, so pressure leaves it solid.
-    const pen = tool !== "remove";
+    const pen = tool !== "remove" && tool !== "decensor";
     const sizeAt = (pressure: number) => Math.max(1, diameter * (pen && pressureSize ? pressure : 1));
     const alphaAt = (pressure: number) => dabAlpha(pen && pressureOpacity ? pressure : 1);
     context.save();
     context.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
     // The remove mask is drawn opaque red for display; finishStroke turns its coverage white.
-    context.fillStyle = tool === "draw" ? color : tool === "remove" ? "#e5484d" : "#ffffff";
+    context.fillStyle = tool === "draw" ? color : !pen ? "#e5484d" : "#ffffff";
     let box = strokeBox.current;
     const dab = (x: number, y: number, pressure: number) => {
       const r = sizeAt(pressure) / 2;
@@ -990,7 +990,7 @@ export function Canvas() {
 
   const finishStroke = async (stroke: Extract<Gesture, { kind: "stroke" }>) => {
     if (!page) return;
-    if (stroke.tool === "remove") {
+    if (stroke.tool === "remove" || stroke.tool === "decensor") {
       // White strokes on black, page-sized: the inpainter repaints only where the user painted.
       const out = document.createElement("canvas");
       out.width = page.width;
@@ -1004,7 +1004,7 @@ export function Canvas() {
       context.fillStyle = "#000000";
       context.fillRect(0, 0, out.width, out.height);
       setMaskDirty(true);
-      void ws.run({ kind: "only", stage: "inpainting", scope: "page", mask: await toPng(out) });
+      void ws.run({ kind: "only", stage: stroke.tool === "remove" ? "inpainting" : "decensor", scope: "page", mask: await toPng(out) });
       return;
     }
     const kind = stroke.layer?.kind === "cleanup" ? "cleanup" : "paint";
@@ -1160,12 +1160,13 @@ export function Canvas() {
       setGesture({ kind: "select", shape: ws.fillShape, start, points: [start] });
       return;
     }
-    if (ws.tool === "draw" || ws.tool === "eraser" || ws.tool === "remove") {
+    if (ws.tool === "draw" || ws.tool === "eraser" || ws.tool === "remove" || ws.tool === "decensor") {
+      const masking = ws.tool === "remove" || ws.tool === "decensor";
       let target: HTMLCanvasElement | null | undefined;
       let layer: RasterLayer | undefined;
-      if (ws.tool !== "remove") adoptPending();
+      if (!masking) adoptPending();
       const selectedRaster = rasters.find((r) => r.id === ws.rasterId);
-      if (ws.tool === "remove") target = mask.current;
+      if (masking) target = mask.current;
       else if (ws.tool === "draw" && !selectedRaster) {
         // No layer selected: the newest paint layer, created by the first stroke if there is none.
         layer = paintLayer;
@@ -1186,7 +1187,7 @@ export function Canvas() {
       }
       if (!target) return;
       event.currentTarget.setPointerCapture(event.pointerId);
-      if (ws.tool !== "remove") {
+      if (!masking) {
         const pixels = pixelsOf(target);
         pixels.strokes++;
         pixels.drawing++;
@@ -1322,7 +1323,7 @@ export function Canvas() {
 
   const cancelGesture = () => {
     // A cancelled stroke is not saved; its canvas stops counting it.
-    if (gesture?.kind === "stroke" && gesture.tool !== "remove") {
+    if (gesture?.kind === "stroke" && gesture.tool !== "remove" && gesture.tool !== "decensor") {
       const pixels = pixelsOf(gesture.target);
       pixels.drawing--;
       pixels.busy--;
@@ -1456,6 +1457,18 @@ export function Canvas() {
               ))}
             <canvas ref={pendingPaint} className={layerCanvasClass} width={page.width} height={page.height} />
             <canvas ref={mask} className={cn(layerCanvasClass, "opacity-[0.45]")} width={page.width} height={page.height} />
+            {page.assets.includes("censor-mask") && ws.showRegions && (ws.tool === "decensor" || !rasters.some((layer) => layer.kind === "decensor")) && (
+              // The saved censor mask, in the colour of the brush: what a run would reconstruct. Like
+              // the balloon and panel outlines it shows once detected, until the art is rebuilt.
+              <div
+                className={cn(layerCanvasClass, "bg-[#e5484d] opacity-[0.45]")}
+                style={{
+                  maskImage: `url("${assetHref(ws.project!.id, page.id, "censor-mask", assetVersion(page, "censor-mask"))}")`,
+                  maskMode: "luminance",
+                  maskSize: "100% 100%",
+                }}
+              />
+            )}
             {comparing && (
               // The artwork before the fill, cut off at the divider: before on its left, the result on its right.
               <img
