@@ -393,6 +393,10 @@ class Workspace:
         self.store.remove_page(project_id, page_id)
         return self.project_view(project_id)
 
+    def swap_page_source(self, project_id: str, page_id: str, data: bytes) -> PageView:
+        self._idle(project_id)
+        return self.page(project_id, self.store.swap_page_source(project_id, page_id, data))
+
     def page(self, project_id: str, page_id: str) -> PageView:
         snapshot = self.session(project_id).snapshot()
         snapshot.page(page_id)

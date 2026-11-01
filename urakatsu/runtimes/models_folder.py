@@ -3,6 +3,8 @@
 The folder defaults to ``URAKATSU_HOME/models``; a chosen one is kept in
 ``URAKATSU_HOME/storage.json``. Every ``ModelStore`` without an explicit root reads it live,
 so a change applies to the catalog, the runtimes and every provider at once.
+``URAKATSU_MODELS`` overrides both for one process and saves nothing: a Colab worker uses it to
+keep its weights on Google Drive, since its home is gone with the runtime.
 
 Moving copies first and switches the folder only once every file arrived, so a failed move
 (a full disk, say) leaves the old folder in use and untouched. Files on the same drive are
@@ -53,7 +55,8 @@ def models_root() -> Path:
     global _root
     with _lock:
         if _root is None:
-            _root = _chosen() or default_root()
+            override = os.environ.get("URAKATSU_MODELS")
+            _root = Path(override) if override else _chosen() or default_root()
         return _root
 
 

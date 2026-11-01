@@ -147,7 +147,7 @@ class ModelStore:
                             if progress:
                                 progress(label or url, done, total)
             shutil.move(str(partial), str(target))
-        except httpx.HTTPError as error:
+        except (httpx.HTTPError, OSError) as error:  # OSError: a full disk, or a full Google Drive
             partial.unlink(missing_ok=True)
             raise ModelLoadError(f"failed to download {label or url}: {error}") from error
         return target

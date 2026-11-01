@@ -28,6 +28,38 @@ def test_new_project_has_one_implicit_chapter_that_collects_pages(tmp_path):
     assert store.list()[0].chapters == 1
 
 
+def test_swapping_a_source_keeps_the_place_and_label_and_can_be_undone(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create("p")
+    a = store.import_page(project, "a.png", png())
+    b = store.import_page(project, "b.png", png())
+    second = store.create_chapter(project, "Chapter 2")
+    c = store.import_page(project, "c.png", png(), chapter_id=second)
+    bigger = io.BytesIO()
+    Image.new("RGB", (16, 24), (9, 9, 9)).save(bigger, format="PNG")
+
+    swapped = store.swap_page_source(project, a, bigger.getvalue())
+
+    snapshot = store.session(project).snapshot()
+    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [swapped, b]), (second, [c])]
+    assert snapshot.pages() == [swapped, b, c]
+    page = snapshot.page(swapped)
+    assert (page.label, page.width, page.height) == ("a.png", 16, 24)
+    assert snapshot.blobs.read(snapshot.asset(swapped, "source").blob) == bigger.getvalue()
+
+    store.session(project).undo()
+    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [a, b]), (second, [c])]
+
+
+def test_a_swap_that_cannot_read_the_image_leaves_the_page_alone(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create("p")
+    a = store.import_page(project, "a.png", png())
+    with pytest.raises(OSError):
+        store.swap_page_source(project, a, b"not an image")
+    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [a])]
+
+
 def test_pages_import_into_the_requested_chapter_and_keep_page_order_flat(tmp_path):
     store = ProjectStore(tmp_path)
     project = store.create("p")
@@ -165,3 +197,29 @@ def test_a_chapter_import_writes_every_page_blob(tmp_path):
     assert [source_of(store, project, page)[1] for page in ids] == [data for _, data in pages]
     reopened = ProjectStore(tmp_path)
     assert [source_of(reopened, project, page)[1] for page in ids] == [data for _, data in pages]
+
+
+def test_the_source_route_swaps_a_page_and_waits_for_running_jobs(isolated_home):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from urakatsu.service.http_api import api_router
+    from urakatsu.service.workspace import Workspace
+
+    workspace = Workspace(device="cpu")
+    app = FastAPI()
+    app.include_router(api_router(workspace), prefix="/api/v1")
+    client = TestClient(app)
+    project = workspace.create_project("p").id
+    page = workspace.add_page(project, "a.png", png()).id
+    url = f"/api/v1/projects/{project}/pages/{page}/source"
+    image = {"file": ("new.png", png(255), "image/png")}
+
+    swapped = client.put(url, files=image)
+    assert swapped.status_code == 200
+    assert swapped.json()["name"] == "a.png" and swapped.json()["id"] != page
+    assert [p.id for p in workspace.project_view(project).pages] == [swapped.json()["id"]]
+
+    assert "not found" in client.put(url, files=image).json()["detail"]  # the old page is gone
+    workspace.jobs["running"] = type("Job", (), {"project_id": project, "status": "running"})()
+    assert client.put(f"/api/v1/projects/{project}/pages/{swapped.json()['id']}/source", files=image).status_code == 412

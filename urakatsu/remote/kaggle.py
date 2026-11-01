@@ -61,6 +61,9 @@ def worker_script(token: str, ref: Optional[str] = None, preload: Optional[list[
 import subprocess
 import sys
 
+# Urakatsu does not use it, but transformers imports it when present: a build left behind by the
+# torch upgrade stops every Transformers model from loading.
+subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "--yes", "--quiet", "torchaudio"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", {json.dumps(spec)}])
 subprocess.check_call({json.dumps(command)})
 '''

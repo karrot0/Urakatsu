@@ -8,6 +8,7 @@ import { Check, Minus, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { HexColorPicker } from "react-colorful";
 
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "./ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import { Popover as PopoverRoot, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -316,6 +317,22 @@ export function ActionMenu({ trigger, actions, align = "end" }: { trigger: React
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** A right-click menu over `children`. */
+export function ContextActions({ actions, children }: { actions: MenuAction[]; children: ReactNode }) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        {actions.map((action, index) => (
+          <DropdownMenuItem key={index} variant={action.danger ? "destructive" : "default"} disabled={action.disabled} onClick={action.onSelect}>
+            {action.label}
+          </DropdownMenuItem>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

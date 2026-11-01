@@ -3,7 +3,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { client, describeError, forgetAssets } from "../api/client";
+import { client, describeError, forgetAssets, uploadPageSource } from "../api/client";
 import { challengeOf, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
 import type { RichStyle } from "../richText";
@@ -205,6 +205,8 @@ interface Actions {
   redo(): Promise<void>;
   uploadPages(files: FileList | File[], chapterId?: string): Promise<void>;
   removePage(pageId: string): Promise<void>;
+  /** Replaces a page's source image; the page's text and cleanup go with the old one. */
+  swapPageSource(pageId: string, file: File): Promise<void>;
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
   deleteChapter(chapterId: string): Promise<void>;
@@ -545,6 +547,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           pageId: s.pageId === pageId ? project.pages[0]?.id : s.pageId,
           blockId: s.pageId === pageId ? undefined : s.blockId,
         }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.project, fail],
+  );
+
+  const swapPageSource = useCallback(
+    async (pageId: string, file: File) => {
+      const project = state.project;
+      if (!project) return;
+      try {
+        const swapped = await uploadPageSource(project.id, pageId, file);
+        const next = await client.getProject({ projectId: project.id });
+        forgetAssets(project.id, pageId);
+        setState((s) =>
+          withLiveSelection({
+            ...s,
+            project: next,
+            pageId: s.pageId === pageId ? swapped : s.pageId,
+            blockId: s.pageId === pageId ? undefined : s.blockId,
+          }),
+        );
       } catch (error) {
         fail(error);
       }
@@ -933,6 +958,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       redo: () => history("redo"),
       uploadPages,
       removePage,
+      swapPageSource,
       createChapter,
       renameChapter,
       deleteChapter,
@@ -1016,6 +1042,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       history,
       uploadPages,
       removePage,
+      swapPageSource,
       createChapter,
       renameChapter,
       deleteChapter,

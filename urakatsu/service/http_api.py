@@ -245,6 +245,10 @@ def api_router(ws: Workspace) -> APIRouter:
     def remove_page(project_id: str, page_id: str):
         return guard(ws.remove_page, project_id, page_id)
 
+    @router.put("/projects/{project_id}/pages/{page_id}/source")
+    async def swap_page_source(project_id: str, page_id: str, file: UploadFile = File(...)):
+        return guard(ws.swap_page_source, project_id, page_id, await file.read())
+
     @router.get("/projects/{project_id}/pages/{page_id}/text-layout")
     def text_layout(project_id: str, page_id: str, v: Optional[str] = None):
         return guard(ws.text_layout, project_id, page_id)

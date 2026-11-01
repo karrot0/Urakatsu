@@ -317,6 +317,24 @@ class ProjectStore:
         session.commit(edit.finish())
         self.touch(project_id)
 
+    def swap_page_source(self, project_id: str, page_id: str, data: bytes) -> str:
+        """Replaces a page's source image in one undoable commit and returns the new page: same
+        label, same place. Page work (text, cleanup) is discarded: it belonged to the old image."""
+        data, media_type, width, height = _normalize(data, self.lossless_pages)
+        session = self.session(project_id)
+        snapshot = session.snapshot()
+        label = snapshot.page(page_id).label
+        chapters = chapters_of(snapshot)
+        edit = snapshot.edit()
+        page = _add_page(edit, label, data, media_type, width, height)
+        edit.remove_entity(page_id, RemovePolicy.CASCADE)
+        for chapter in chapters:
+            chapter.pages = [page if p == page_id else p for p in chapter.pages]
+        write_chapters(edit, chapters)
+        session.commit(edit.finish())
+        self.touch(project_id)
+        return page
+
     # -- pages ---------------------------------------------------------------------------------------
 
     def import_page(

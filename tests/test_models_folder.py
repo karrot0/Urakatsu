@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import time
 
+import httpx
 import pytest
 
 from urakatsu.catalog.installed import InstalledModels
+from urakatsu.core.errors import ModelLoadError
 from urakatsu.runtimes import models_folder
+from urakatsu.runtimes import store as store_module
 from urakatsu.runtimes.store import ModelStore
 
 
@@ -37,6 +40,25 @@ def test_default_and_chosen_root_apply_to_every_store(home):
     assert ModelStore().root == home / "elsewhere"
     models_folder.set_models_root(None)
     assert ModelStore().root == home / "home" / "models"
+
+
+def test_the_environment_overrides_the_folder_without_saving_it(home, monkeypatch):
+    models_folder.set_models_root(home / "elsewhere")
+    monkeypatch.setenv("URAKATSU_MODELS", str(home / "drive"))
+    models_folder._root = None  # a new process reads the environment first
+    assert ModelStore().root == home / "drive"
+    assert "drive" not in (home / "home" / models_folder.SETTINGS).read_text(encoding="utf-8")
+
+
+def test_a_full_disk_fails_the_download_and_leaves_no_partial_file(home, monkeypatch):
+    real = store_module.httpx.Client
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"weights"))
+    monkeypatch.setattr(store_module.httpx, "Client", lambda **kwargs: real(transport=transport, **kwargs))
+    monkeypatch.setattr(store_module.shutil, "move", lambda *a: (_ for _ in ()).throw(OSError("no space left")))
+    target = home / "model.bin"
+    with pytest.raises(ModelLoadError, match="no space left"):
+        ModelStore().download("https://example.com/model.bin", target)
+    assert not target.exists() and not target.with_suffix(".bin.part").exists()
 
 
 def test_move_switches_only_after_every_file_arrives(home):

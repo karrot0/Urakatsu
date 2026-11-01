@@ -196,7 +196,9 @@ first page does not wait for weights. A model you installed from the Models page
   after 30 minutes without requests, so it spends no more of the weekly GPU hours than you use.
 - **Colab**: choose Add Colab worker. The notebook (`notebooks/worker.ipynb`) opens in Colab;
   choose Run all and paste the `Connection:` line it prints into the worker's Connection field.
-  If the notebook restarts, paste its new line.
+  If the notebook restarts, paste its new line. Models are saved in your Google Drive, in
+  `Urakatsu/models`, so later sessions skip the download (untick `save_models_to_drive` to
+  download them each session instead).
 - **Another machine**: run `urakatsu worker --port 8100` there and enter its address and the
   token it prints.
 

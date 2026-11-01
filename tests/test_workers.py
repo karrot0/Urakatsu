@@ -10,6 +10,7 @@ import json
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import numpy as np
@@ -52,6 +53,14 @@ def test_connection_lines_carry_the_address_and_token():
 
 
 # ---- the notebook worker -----------------------------------------------------------------------
+
+
+def test_both_notebooks_drop_the_torchaudio_a_torch_upgrade_leaves_behind():
+    # transformers imports torchaudio when it is there, and a build for another torch fails every model.
+    notebook = json.loads((Path(__file__).parent.parent / "notebooks" / "worker.ipynb").read_text(encoding="utf-8"))
+    for script in ("".join(notebook["cells"][1]["source"]), kaggle.worker_script("w0rker-token", ref="main")):
+        assert '"uninstall", "--yes", "--quiet", "torchaudio"' in script
+        assert script.index('"uninstall"') < script.index('"install"')
 
 
 def test_tunnel_reports_each_new_address(tmp_path, monkeypatch):

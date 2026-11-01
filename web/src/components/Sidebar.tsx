@@ -59,9 +59,10 @@ import { AutomationsButton } from "./Automations";
 import { confirm } from "./ConfirmDialog";
 import { KomgaButton } from "./Komga";
 import { MemoryMeter } from "./MemoryMeter";
-import { ActionMenu, Tooltip } from "./primitives";
+import { ActionMenu, ContextActions, Tooltip } from "./primitives";
 import { KnowledgeButton } from "./Knowledge";
 import { ProjectFormatButton } from "./ProjectFormat";
+import { swapSource } from "./swapSource";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
 
@@ -891,70 +892,84 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
   };
   const inSelection = selectedPages(ws).includes(page.id);
   const [exporting, setExporting] = useState(false);
+  const exportPng = async () => {
+    setExporting(true);
+    try {
+      await exportPage(ws.project!.id, page);
+    } catch (error) {
+      ws.reportError(describeError(error));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const remove = async () => {
+    if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
+  };
   return (
     <div ref={sortable.setNodeRef} style={style} role="listitem">
-      <PageRowView
-        page={page}
-        number={number}
-        projectId={ws.project!.id}
-        active={ws.pageId === page.id}
-        selected={inSelection}
-        dragging={sortable.isDragging}
-        activeStage={ws.job?.status === "running" && ws.job.current?.page === page.id ? ws.job.current.stage : undefined}
-        rowProps={{
-          onPointerDown: pointerStart(sortable.listeners),
-          // Shift-click would otherwise select the text between the rows.
-          onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => event.shiftKey && event.preventDefault(),
-          onClick: (event: ReactMouseEvent<HTMLDivElement>) => select(event),
-          onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
-            if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-              event.preventDefault();
-              select();
-            }
-          },
-          tabIndex: 0,
-          role: "button",
-          "aria-current": ws.pageId === page.id ? "page" : undefined,
-        }}
-        gripProps={{ ...sortable.attributes, ...sortable.listeners, ref: sortable.setActivatorNodeRef }}
-        actions={
-          <>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            title={exporting ? "Exporting" : "Export page as PNG"}
-            aria-label={`Export ${page.name}`}
-            disabled={exporting}
-            onClick={async (event) => {
-              event.stopPropagation();
-              setExporting(true);
-              try {
-                await exportPage(ws.project!.id, page);
-              } catch (error) {
-                ws.reportError(describeError(error));
-              } finally {
-                setExporting(false);
+      <ContextActions
+        actions={[
+          { label: "Swap source image", disabled, onSelect: () => swapSource(page, ws.swapPageSource) },
+          { label: "Export as PNG", disabled: exporting, onSelect: () => void exportPng() },
+          { label: "Remove page", danger: true, disabled, onSelect: () => void remove() },
+        ]}
+      >
+        <PageRowView
+          page={page}
+          number={number}
+          projectId={ws.project!.id}
+          active={ws.pageId === page.id}
+          selected={inSelection}
+          dragging={sortable.isDragging}
+          activeStage={ws.job?.status === "running" && ws.job.current?.page === page.id ? ws.job.current.stage : undefined}
+          rowProps={{
+            onPointerDown: pointerStart(sortable.listeners),
+            // Shift-click would otherwise select the text between the rows.
+            onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => event.shiftKey && event.preventDefault(),
+            onClick: (event: ReactMouseEvent<HTMLDivElement>) => select(event),
+            onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+              if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                select();
               }
-            }}
-          >
-            {exporting ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <FileDown size={14} />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            title="Remove page"
-            aria-label={`Remove ${page.name}`}
-            disabled={disabled}
-            onClick={async (event) => {
-              event.stopPropagation();
-              if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
-            }}
-          >
-            <X size={14} />
-          </Button>
-          </>
-        }
-      />
+            },
+            tabIndex: 0,
+            role: "button",
+            "aria-current": ws.pageId === page.id ? "page" : undefined,
+          }}
+          gripProps={{ ...sortable.attributes, ...sortable.listeners, ref: sortable.setActivatorNodeRef }}
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title={exporting ? "Exporting" : "Export page as PNG"}
+                aria-label={`Export ${page.name}`}
+                disabled={exporting}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void exportPng();
+                }}
+              >
+                {exporting ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <FileDown size={14} />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title="Remove page"
+                aria-label={`Remove ${page.name}`}
+                disabled={disabled}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void remove();
+                }}
+              >
+                <X size={14} />
+              </Button>
+            </>
+          }
+        />
+      </ContextActions>
     </div>
   );
 }

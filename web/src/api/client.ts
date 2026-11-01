@@ -105,6 +105,16 @@ export async function exportChapter(projectId: string, chapterId: string, format
   return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format === "strip" ? "png" : format}` };
 }
 
+/** Replaces a page's source image. The server makes a new page in its place; this returns its id. */
+export async function uploadPageSource(projectId: string, pageId: string, file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`/api/v1/projects/${projectId}/pages/${pageId}/source`, { method: "PUT", body: form });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Swap failed: ${response.status} ${response.statusText}`);
+  return body.id;
+}
+
 export function describeError(error: unknown): string {
   if (error instanceof Error) return error.message.replace(/^\[\w+\]\s*/, "");
   return String(error);
