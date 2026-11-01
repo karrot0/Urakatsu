@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import json
+import math
 import os
 
 import numpy as np
@@ -22,6 +23,8 @@ from urakatsu.providers.ocr._common import pillow_grayscale, read_lines
 from urakatsu.catalog.facts import ModelFacts
 from urakatsu.providers.ocr.baberu_ocr import BaberuOcrProvider
 from urakatsu.providers.ocr.charspot_ocr import COMBOS, CharspotOcrProvider, load_vocabulary, pad_grid, preprocess
+from urakatsu.providers.ocr import manga_ocr_cpt
+from urakatsu.providers.ocr.manga_ocr_cpt import MangaOcrCptProvider
 from urakatsu.providers.ocr.hayai_ocr import _image_size_for_max_patches
 from urakatsu.providers.ocr.manga_ocr import (
     MangaOcrProvider,
@@ -368,6 +371,62 @@ def test_charspot_accepts_its_family(runtime, repo, files, expected):
     assert CharspotOcrProvider.accepts(ModelFacts(runtime=runtime, repo=repo, files=files)) == expected
 
 
+@pytest.mark.parametrize("height, width", [(983, 272), (30, 1163), (1, 1), (224, 224), (40, 2000)])
+def test_cpt_grid_fits_the_budget_and_keeps_the_aspect(height, width):
+    scale, grid_height, grid_width = manga_ocr_cpt.grid(height, width)
+    assert grid_height * grid_width <= 196
+    assert grid_height == math.ceil(height * scale / 16) and grid_width == math.ceil(width * scale / 16)
+
+
+def test_cpt_aspect_input_masks_the_padding_with_the_border_median():
+    image = Image.new("RGB", (40, 200), (200, 200, 200))
+    image.paste((10, 10, 10), (10, 80, 30, 120))
+    patches, valid, grid_height, grid_width = manga_ocr_cpt.preprocess(image, "aspect")
+    assert patches.shape == (196, 768) and valid.sum() == grid_height * grid_width
+    assert grid_height > grid_width
+    assert not patches[~valid].any()
+    # Grey channels, normalised to [-1, 1]; the bottom right patch is all padding or all border.
+    assert patches[grid_height * grid_width - 1] == pytest.approx(200 / 127.5 - 1, abs=1e-6)
+
+
+def test_cpt_square_input_uses_every_patch():
+    patches, valid, grid_height, grid_width = manga_ocr_cpt.preprocess(Image.new("RGB", (40, 200), "black"), "square")
+    assert (grid_height, grid_width) == (14, 14)
+    assert valid.all() and patches.shape == (196, 768)
+    assert patches == pytest.approx(-1.0)
+
+
+def test_cpt_rejects_an_unknown_fit():
+    with pytest.raises(ValueError, match="stretch"):
+        manga_ocr_cpt.preprocess(Image.new("RGB", (16, 16)), "stretch")
+
+
+def test_cpt_decode_stops_at_the_end_token_and_widens():
+    characters = ["字", "!", "(", "1"]
+    assert manga_ocr_cpt.decode([5, 6, 7, 8, 3, 5, 5], characters) == "字！（１"
+    assert manga_ocr_cpt.decode([1, 5, 4, 0], characters) == "字"
+
+
+@pytest.mark.parametrize(
+    "runtime, repo, files, expected",
+    [
+        ("torch", "muscgab/manga-ocr-base-CPT-flex", ["config.json", "nar_vocabulary_6817.json", "model.safetensors"], "torch"),
+        ("torch", "muscgab/manga-ocr-base-CPT", ["config.json", "nar_vocabulary_6817.json", "model.safetensors"], "torch"),
+        ("torch", "muscgab/manga-ocr-base-CPT-flex", ["config.json", "model.safetensors"], None),
+        ("torch", "muscgab/manga-ocr-nar-small", ["config.json", "nar_vocabulary_6817.json", "model.safetensors"], None),
+        ("torch", "kha-white/manga-ocr-base", ["config.json", "vocab.txt", "model.safetensors"], None),
+        ("onnx", "hon-lu/manga-ocr-base-CPT-flex-onnx-fp16", ["config.json", "nar_vocabulary_6817.json", "model.onnx"], None),
+    ],
+)
+def test_cpt_accepts_its_family(runtime, repo, files, expected):
+    assert MangaOcrCptProvider.accepts(ModelFacts(runtime=runtime, repo=repo, files=files)) == expected
+
+
+def test_cpt_only_runs_locally():
+    # The weights are non-commercial, so they never reach a worker or Urakatsu Cloud.
+    assert MangaOcrCptProvider.runtimes_declared() == ("torch",)
+
+
 # ---- weight tests (skip when the checkpoint is not cached) --------------------------------------
 
 
@@ -409,7 +468,7 @@ def _require_weights(home: Path, provider_cls, runtime: str) -> None:
         pytest.skip(f"{provider_cls.id} ({runtime}) weights are not cached under {home}")
 
 
-@pytest.mark.parametrize("provider_cls", [MangaOcrProvider, BaberuOcrProvider])
+@pytest.mark.parametrize("provider_cls", [MangaOcrProvider, MangaOcrCptProvider, BaberuOcrProvider])
 def test_torch_ocr_matches_balloons(provider_cls, real_home):
     _require_weights(real_home, provider_cls, "torch")
     from urakatsu.runtimes import RuntimeManager

@@ -30,6 +30,7 @@ BUILTIN_MODULES = (
     # OCR, in display order
     "urakatsu.providers.ocr.paddle_ocr_vl",
     "urakatsu.providers.ocr.manga_ocr",
+    "urakatsu.providers.ocr.manga_ocr_cpt",
     "urakatsu.providers.ocr.baberu_ocr",
     "urakatsu.providers.ocr.hayai_ocr",
     "urakatsu.providers.ocr.charspot_ocr",
