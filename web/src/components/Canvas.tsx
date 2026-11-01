@@ -12,10 +12,13 @@
 // in fixed strip coordinates. The current page is drawn with its layers and overlays at its place
 // in the strip, the others as plain images; scrolling makes the page under the middle of the view
 // the current one, so nothing moves and every page is edited where it is read.
+//
+// Images pasted with Ctrl+V or dropped on the canvas become pages at the end of the chapter on
+// screen, or of the last chapter when no page is open, as the sidebar's Add pages does.
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
-import { CornerDownLeft, GalleryVertical, LoaderCircle, WandSparkles, X } from "lucide-react";
+import { CornerDownLeft, GalleryVertical, LoaderCircle, Upload, WandSparkles, X } from "lucide-react";
 
 import { cn } from "cn";
 
@@ -385,6 +388,8 @@ export function Canvas() {
     setReaderState(on);
   }, []);
   const chapter = page ? chapterOf(ws, page.id) : undefined;
+  const addTo = chapter ?? ws.project?.chapters[ws.project.chapters.length - 1];
+  const [fileOver, setFileOver] = useState(false);
   const strip = useStrip(webtoon && reader ? chapter?.pageIds : undefined, ws.project?.pages);
   const [zoom, setZoom] = useState(1);
   const [fittedFor, setFittedFor] = useState<string | null>(null);
@@ -832,6 +837,19 @@ export function Canvas() {
       window.removeEventListener("keyup", onKey);
     };
   }, [ws, page, fit, nudgeBlock, selection]);
+
+  // Ctrl+V adds the clipboard's images as pages; text fields and dialogs keep their own paste.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("input, textarea, [contenteditable], [role=dialog], [role=alertdialog]")) return;
+      if (!event.clipboardData?.files.length) return;
+      event.preventDefault();
+      void ws.uploadPages(event.clipboardData.files, addTo?.id);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [ws, addTo?.id]);
 
   // Ctrl + wheel zooms at the cursor, Alt + wheel sizes the brush; plain wheel scrolls.
   useEffect(() => {
@@ -1348,7 +1366,31 @@ export function Canvas() {
   const svgCursor = panning ? (gesture?.kind === "pan" ? "grabbing" : "grab") : brushCursor ? (osRing ?? "none") : ws.tool === "text" || ws.tool === "fill" ? "crosshair" : ws.tool === "color_picker" ? "copy" : "default";
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        setFileOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFileOver(false);
+      }}
+      onDrop={(event) => {
+        setFileOver(false);
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        void ws.uploadPages(event.dataTransfer.files, addTo?.id);
+      }}
+    >
+      {fileOver && (
+        <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-card border border-dashed border-brand bg-hover">
+          <span className="inline-flex items-center gap-2 rounded-pill bg-surface-over px-3 py-1.5 text-fg-2 shadow-floating">
+            <Upload size={14} />
+            Add pages{addTo ? ` to ${addTo.name}` : ""}
+          </span>
+        </div>
+      )}
       {page && <ToolBelt />}
       {!page ? (
         <EmptyCanvas />
@@ -2227,7 +2269,7 @@ function EmptyCanvas() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-1 bg-canvas p-8 text-center">
       <p className="text-base leading-6 text-fg">{project.pages.length ? "No page selected." : "No pages yet."}</p>
-      <p className="max-w-[42ch] text-fg-2">{project.pages.length ? "Choose a page in the sidebar to edit it." : "Pages you add to a chapter appear here."}</p>
+      <p className="max-w-[42ch] text-fg-2">{project.pages.length ? "Choose a page in the sidebar to edit it." : "Drop or paste images here to add them as pages."}</p>
       {project.pages.length === 0 && chapter && (
         <>
           <Button variant="outline" className="mt-2" onClick={() => input.current?.click()}>
