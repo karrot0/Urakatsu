@@ -41,9 +41,26 @@ log = logging.getLogger(__name__)
 
 GRID = 64  # a multiple of every model's VAE and patch size
 MAX_UPSCALE = 4.0
+# Room sd.cpp keeps on the GPU for a diffusion model's compute buffers (its ``--auto-fit`` reserve).
+COMPUTE_RESERVE = 2 * 1024**3
 EDIT_PROMPT = "Remove all the text and lettering. Fill those areas with the background and artwork around them, matching its style."
 FILL_PROMPT = "clean manga artwork, seamless background, empty speech bubble, no text"
 FILL_NEGATIVE = "text, letters, words, writing, watermark, signature"
+
+
+def offload_to_cpu(sizes: list[int], gpu_free: int, ram_available: int) -> bool:
+    """Whether components of ``sizes`` bytes should wait in RAM and take turns on the GPU."""
+    total = sum(sizes)
+    return total > 0.8 * gpu_free and total <= 0.9 * ram_available and max(sizes) + COMPUTE_RESERVE <= gpu_free
+
+
+def vram_budget(sizes: list[int], gpu_free: int) -> Optional[float]:
+    """GiB for ``--max-vram`` when the largest component, whole, would leave its compute buffers no
+    room (Klein 9B Q8 on 12 GB fails or runs on a margin of what else holds the GPU). The budget
+    makes sd.cpp cut it into segments that stream through."""
+    if max(sizes) + COMPUTE_RESERVE <= gpu_free:
+        return None
+    return round(max(gpu_free - COMPUTE_RESERVE, 1024**3) / 1024**3, 1)
 
 
 class DiffusionRecipeSettings(ProviderSettings):
@@ -243,10 +260,10 @@ class DiffusionRecipeProvider(InpaintingProvider):
 
         flags = slot_flags(str(package.executable))
         args: list[str] = []
-        total = 0
+        sizes: list[int] = []
         for slot, source in components:
             path: Path = self.resolve(source)
-            total += path.stat().st_size
+            sizes.append(path.stat().st_size)
             args += [flag_for(slot, flags), str(path)]
         device = runtime.device
         args += self._server_args(device)
@@ -255,11 +272,16 @@ class DiffusionRecipeProvider(InpaintingProvider):
         # docs do: the GPU is shared with the other stages' models and other programs, and
         # placement alone leaves no room for the compute buffers. ``--offload-to-cpu`` pins every
         # weight in RAM and turns ``--auto-fit`` off, so when RAM cannot hold them either (Qwen
-        # Image on 16 GB) leave placement to ``--auto-fit``: GPU, then RAM, then disk.
+        # Image on 16 GB), or the largest would fill the GPU while it runs (Klein 9B Q8 on 12 GB),
+        # leave placement to ``--auto-fit``: GPU, then RAM, then disk.
         ram_available = system_profile().ram_available
-        offload = device.is_accelerator and total > 0.8 * (device.memory_free or device.memory_total) and total <= 0.9 * ram_available
+        total = sum(sizes)
+        gpu_free = device.memory_free or device.memory_total
+        offload = device.is_accelerator and offload_to_cpu(sizes, gpu_free, ram_available)
         if offload:
             args.append("--offload-to-cpu")
+        elif device.is_accelerator and (budget := vram_budget(sizes, gpu_free)) is not None:
+            args += ["--max-vram", str(budget)]
         # Memory-mapping only speeds up loading. With offload the weights then live in mapped
         # pages that Windows evicts and re-reads from disk for every image: on a hard drive that
         # was ~5 MB/s and minutes per crop. Read them into RAM once when it fits.

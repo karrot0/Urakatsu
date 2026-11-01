@@ -11,6 +11,16 @@ In any other mode a run leaves it out (``pipeline.py``).
 ``WATERMARKS`` is not in Koharu either: with watermarks set to ``remove`` it removes repeated
 watermarks before detection reads the page (``pipeline/stages/watermarks.py``), and a run that
 detects gets it in front. Otherwise a run leaves it out.
+
+``CENSOR_DETECTION`` and ``DECENSOR`` are not in Koharu either (``pipeline/stages/censorship.py``).
+With censorship set to ``detect`` a run maps the bars into a reviewable mask; with ``remove`` it
+also reconstructs them. Censor detection runs before detection, because both write the page's
+assets; Decensor runs after inpainting, over the cleaned page. With ``detect``, Decensor runs only
+when asked for by itself. With ``off`` a run leaves both out.
+
+``COLORIZATION`` is not in Koharu either (``pipeline/stages/colorization.py``). It runs after
+Decensor, over the cleaned page, and before sound effects, so a redraw sees the colors. With
+colorization ``off`` a run leaves it out.
 """
 
 from __future__ import annotations
@@ -21,10 +31,13 @@ from typing import Iterable
 
 class Stage(str, Enum):
     WATERMARKS = "watermarks"
+    CENSOR_DETECTION = "censor_detection"
     DETECTION = "detection"
     OCR = "ocr"
     TRANSLATION = "translation"
     INPAINTING = "inpainting"
+    DECENSOR = "decensor"
+    COLORIZATION = "colorization"
     SOUND_EFFECTS = "sound_effects"
 
     @classmethod
@@ -46,11 +59,14 @@ class Stage(str, Enum):
 # Detection also waits for the watermarks stage when a run has it.
 PREREQUISITES: dict[Stage, tuple[Stage, ...]] = {
     Stage.WATERMARKS: (),
-    Stage.DETECTION: (Stage.WATERMARKS,),
+    Stage.CENSOR_DETECTION: (Stage.WATERMARKS,),
+    Stage.DETECTION: (Stage.WATERMARKS, Stage.CENSOR_DETECTION),
     Stage.OCR: (Stage.DETECTION,),
     Stage.TRANSLATION: (Stage.OCR,),
     Stage.INPAINTING: (Stage.DETECTION,),
-    Stage.SOUND_EFFECTS: (Stage.TRANSLATION, Stage.INPAINTING),
+    Stage.DECENSOR: (Stage.CENSOR_DETECTION, Stage.INPAINTING),
+    Stage.COLORIZATION: (Stage.INPAINTING, Stage.DECENSOR),
+    Stage.SOUND_EFFECTS: (Stage.TRANSLATION, Stage.INPAINTING, Stage.DECENSOR, Stage.COLORIZATION),
 }
 
 
@@ -86,10 +102,13 @@ class Operation:
         elif self.kind == "through":
             selected = {
                 Stage.WATERMARKS: [Stage.WATERMARKS],
+                Stage.CENSOR_DETECTION: [Stage.CENSOR_DETECTION],
                 Stage.DETECTION: [Stage.DETECTION],
                 Stage.OCR: [Stage.DETECTION, Stage.OCR],
                 Stage.TRANSLATION: [Stage.DETECTION, Stage.OCR, Stage.TRANSLATION],
                 Stage.INPAINTING: [Stage.DETECTION, Stage.INPAINTING],
+                Stage.DECENSOR: [Stage.CENSOR_DETECTION, Stage.DECENSOR],
+                Stage.COLORIZATION: [Stage.DETECTION, Stage.INPAINTING, Stage.COLORIZATION],
                 Stage.SOUND_EFFECTS: Stage.all(),
             }[Stage.parse(self.stage)]  # type: ignore[arg-type]
         elif self.kind == "only":

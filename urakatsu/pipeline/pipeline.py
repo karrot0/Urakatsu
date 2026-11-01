@@ -267,7 +267,7 @@ class Pipeline:
     async def _run_stage(self, stage: Stage, input: StageInput, stop: StopToken, progress: Optional[ProgressSink]):
         started = time.perf_counter()
         processor = self._processors[stage]
-        fill = input.inpainting_mask is not None and input.inpainting_mask.generative
+        fill = stage is Stage.INPAINTING and input.inpainting_mask is not None and input.inpainting_mask.generative
         try:
             provider = self.provider(stage, fill)
         except Exception as error:
@@ -385,6 +385,34 @@ def _emit(sink: Optional[ProgressSink], progress: Progress) -> None:
             log.exception("progress sink raised")
 
 
+# The stages a user-painted mask applies to.
+MASKED_STAGES = frozenset({Stage.INPAINTING, Stage.DECENSOR})
+
+
+def _censorship_stages(stages: list[Stage], mode: str, operation: Operation) -> list[Stage]:
+    """``stages`` without the censorship stages ``mode`` leaves out of this run."""
+    dropped = set()
+    named = operation.stage == Stage.DECENSOR or Stage.DECENSOR in operation.stages
+    if mode != "remove" and not (mode == "detect" and named):
+        dropped.add(Stage.DECENSOR)
+    if mode == "off":
+        dropped.add(Stage.CENSOR_DETECTION)
+    kept = [stage for stage in stages if stage not in dropped]
+    if not kept:
+        raise ValueError("censorship is off (Settings, Pipeline, Censorship)")
+    return kept
+
+
+def _colorization_stages(stages: list[Stage], mode: str) -> list[Stage]:
+    """``stages`` without colorization while ``mode`` is off."""
+    if mode != "off":
+        return stages
+    kept = [stage for stage in stages if stage is not Stage.COLORIZATION]
+    if not kept:
+        raise ValueError("colorization is off (Settings, Pipeline, Colorization)")
+    return kept
+
+
 class _Execution:
     def __init__(self, pipeline: Pipeline, session: Session, request: Request):
         self.started = time.perf_counter()
@@ -410,12 +438,14 @@ class _Execution:
             elif Stage.DETECTION in stages and Stage.WATERMARKS not in stages:
                 # Detection reads the page with its watermarks removed, so a run that detects removes them first.
                 stages = [Stage.WATERMARKS, *stages]
+            stages = _censorship_stages(stages, pipeline.config.censorship.mode, request.operation)
+            stages = _colorization_stages(stages, pipeline.config.colorization.mode)
             self.scope = NormalizedScope(self.scene, request.scope, stages)
         except (ValueError, KeyError) as error:
             raise PipelineError(ErrorKind.INVALID_INPUT, None, str(error)) from error
         pages = list(self.scope.pages)
         mask = request.inpainting_mask
-        if mask is not None and (mask.page not in pages or Stage.INPAINTING not in stages):
+        if mask is not None and (mask.page not in pages or not MASKED_STAGES.intersection(stages)):
             raise PipelineError(
                 ErrorKind.INVALID_INPUT, Stage.INPAINTING, "the inpainting mask page is outside the inpainting scope"
             )
@@ -459,7 +489,7 @@ class _Execution:
         page, stage = job
         self.busy.add(stage)
         images = self.images.setdefault(page, ImageCache())
-        mask = self.inpainting_mask if (stage is Stage.INPAINTING and self.inpainting_mask and self.inpainting_mask.page == page) else None
+        mask = self.inpainting_mask if (stage in MASKED_STAGES and self.inpainting_mask and self.inpainting_mask.page == page) else None
         sound_effects = self.pipeline.config.sound_effects.mode
         return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, self.force)
 

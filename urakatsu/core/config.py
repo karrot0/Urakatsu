@@ -143,6 +143,36 @@ class WatermarksConfig(BaseModel):
     model: str = "yolo26-watermark"
 
 
+CENSORSHIP_MODES = ("off", "detect", "remove")
+
+
+class CensorshipConfig(BaseModel):
+    """Censor bars over the art. Not in Koharu.
+
+    ``off`` keeps Koharu's behaviour. ``detect`` has ``detector`` map the bars into a mask to
+    review, and reconstruction runs only when asked for. ``remove`` also has ``model`` reconstruct
+    them in each run (``pipeline/stages/censorship.py``).
+    """
+
+    mode: Literal["off", "detect", "remove"] = "off"
+    detector: str = "er0mangaseg"
+    model: str = "flux2-klein-decensor"
+
+
+COLORIZATION_MODES = ("off", "colorize")
+
+
+class ColorizationConfig(BaseModel):
+    """Black-and-white pages painted in color. Not in Koharu.
+
+    ``off`` keeps Koharu's behaviour. ``colorize`` has ``model`` paint each black-and-white page
+    of a run onto a layer of its own (``pipeline/stages/colorization.py``).
+    """
+
+    mode: Literal["off", "colorize"] = "off"
+    model: str = "diffusion-colorizer"
+
+
 class PipelineConfig(BaseModel):
     device: str = "auto"  # auto | cpu | cuda | cuda:N | metal
     # Loaded models are unloaded after this many minutes without a run; 0 keeps them loaded.
@@ -159,6 +189,8 @@ class PipelineConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     sound_effects: SoundEffectsConfig = Field(default_factory=SoundEffectsConfig)
     watermarks: WatermarksConfig = Field(default_factory=WatermarksConfig)
+    censorship: CensorshipConfig = Field(default_factory=CensorshipConfig)
+    colorization: ColorizationConfig = Field(default_factory=ColorizationConfig)
 
     def provider_for(self, stage: Stage) -> str:
         if stage is Stage.TRANSLATION:
@@ -167,6 +199,12 @@ class PipelineConfig(BaseModel):
             return self.redraw_provider()
         if stage is Stage.WATERMARKS:
             return self.watermarks.model
+        if stage is Stage.CENSOR_DETECTION:
+            return self.censorship.detector
+        if stage is Stage.DECENSOR:
+            return self.censorship.model
+        if stage is Stage.COLORIZATION:
+            return self.colorization.model
         return {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model
 
     def fill_provider(self) -> str:
@@ -182,6 +220,12 @@ class PipelineConfig(BaseModel):
             self.translation.model.provider = provider
         elif stage is Stage.WATERMARKS:
             self.watermarks.model = provider
+        elif stage is Stage.CENSOR_DETECTION:
+            self.censorship.detector = provider
+        elif stage is Stage.DECENSOR:
+            self.censorship.model = provider
+        elif stage is Stage.COLORIZATION:
+            self.colorization.model = provider
         else:
             {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model = provider
 

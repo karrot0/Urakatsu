@@ -71,6 +71,8 @@ export type SelectMode = "replace" | "toggle" | "range" | "add-range";
 // The four pipeline stages; rendering happens on demand from the scene.
 export const STAGES = ["detection", "ocr", "translation", "inpainting"] as const;
 export type StageName = (typeof STAGES)[number];
+/** Optional stages run on their own, outside the stage picker. */
+export type RunStage = StageName | "censor_detection" | "decensor" | "colorization";
 
 export interface JobState {
   id: string;
@@ -115,7 +117,7 @@ function clearPreviews(job: JobState, page?: string) {
 
 export interface RunOptions {
   kind: "full" | "through" | "only" | "stages";
-  stage?: StageName;
+  stage?: RunStage;
   stages?: StageName[];
   /** "selection" runs the sidebar's multi-selection (the Run button, when one is active). */
   scope: RunScope | "selection";

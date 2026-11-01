@@ -27,7 +27,7 @@ import asyncio
 import importlib.util
 from abc import ABC
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional
 
 import numpy as np
 from PIL import Image
@@ -205,6 +205,12 @@ class Provider(ABC):
                 return availability
             reasons.append(f"{name}: {availability.reason}")
         return Availability.no("; ".join(reasons))
+
+    @classmethod
+    def pending_downloads(cls, settings: dict[str, Any], cached: Callable[[WeightSource], bool]) -> list[dict[str, Any]]:
+        """What the first run with ``settings`` would download, for a provider that warns of it:
+        each a ``label`` for a sentence, and ``model`` when the Models page could supply it instead."""
+        return []
 
     @classmethod
     def weight_sources(cls, runtime: Optional[str] = None) -> tuple[WeightSource, ...]:
@@ -404,6 +410,45 @@ class InpaintingProvider(Provider):
         if prompt and not self.prompted:
             raise ValueError(f"{self.name} cannot follow a prompt; leave it empty to remove, or pick a diffusion model for Generative fill in Settings, Pipeline")
         return self._inpaint(image, mask)
+
+
+class CensorDetectionProvider(Provider):
+    """Maps censor bars on a page: the stage keeps what it returns as the page's mask, for review."""
+
+    stage = Stage.CENSOR_DETECTION
+
+    async def detect_censorship(self, image: Image.Image) -> np.ndarray:
+        return await asyncio.to_thread(self._detect_censorship, image)
+
+    def _detect_censorship(self, image: Image.Image) -> np.ndarray:  # pragma: no cover - interface
+        """HxW uint8, 0 outside the bars; a soft edge is kept as the reconstruction's alpha."""
+        raise NotImplementedError
+
+
+class DecensorProvider(Provider):
+    """Reconstructs the art under one group of censor bars. Local only, so it never goes to a
+    worker or to Urakatsu Cloud."""
+
+    stage = Stage.DECENSOR
+    remotable = False
+
+    def _reconstruct(self, image: Image.Image, mask: np.ndarray, white: bool) -> Image.Image:  # pragma: no cover - interface
+        """``image`` with the bars under ``mask`` removed; ``white`` says they are paper-white."""
+        raise NotImplementedError
+
+
+class ColorizationProvider(Provider):
+    """Paints a black-and-white page in color."""
+
+    stage = Stage.COLORIZATION
+    remotable = False
+
+    async def colorize(self, image: Image.Image) -> Image.Image:
+        return await asyncio.to_thread(self._colorize, image)
+
+    def _colorize(self, image: Image.Image) -> Image.Image:  # pragma: no cover - interface
+        """``image`` in color, at its size."""
+        raise NotImplementedError
 
 
 class WatermarkBox(BaseModel):

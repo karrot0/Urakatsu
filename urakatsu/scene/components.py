@@ -229,6 +229,12 @@ class RasterLayerKind(str, Enum):
     # Not in Koharu: the watermarks stage's result, the page with repeated watermarks unblended
     # (``pipeline/stages/watermarks.py``). It sits right over the source and draws like paint.
     WATERMARK = "watermark"
+    # Not in Koharu: the decensor stage's result (``pipeline/stages/censorship.py``), over the
+    # Cleanup layer so it can be redone or hidden on its own. It draws like paint.
+    DECENSOR = "decensor"
+    # Not in Koharu: the colorization stage's result (``pipeline/stages/colorization.py``), over
+    # the Decensor and Cleanup layers so it can be redone or hidden on its own. It draws like paint.
+    COLOR = "color"
 
 
 class RasterLayer(Component):

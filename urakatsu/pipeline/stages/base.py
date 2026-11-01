@@ -23,6 +23,7 @@ class InpaintingMask:
     png: bytes
     # Generative fill (the canvas's selection + prompt): the fill model repaints one crop
     # around the mask, following ``prompt`` (empty removes). Remove-tool masks are not generative.
+    # A run of the decensor stage reads this mask too, as the bars to reconstruct.
     prompt: Optional[str] = None
     generative: bool = False
 

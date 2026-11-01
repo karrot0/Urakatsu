@@ -299,6 +299,9 @@ export const STAGE_LABEL: Record<string, string> = {
   inpainting: "Inpainting",
   translation: "Translation",
   sound_effects: "Sound effects",
+  censor_detection: "Censor detection",
+  decensor: "Decensor",
+  colorization: "Colorization",
 };
 
 export const RUNTIME_LABEL: Record<CatalogRuntime, string> = {

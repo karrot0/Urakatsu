@@ -135,6 +135,11 @@ message Config {
   optional int32 idle_unload_minutes = 17;  // unload models after this many idle minutes; 0 never (unset keeps it)
   string watermarks = 18;                   // WatermarksConfig.mode: off | remove (empty keeps it)
   string watermarks_model = 19;             // watermark detector; empty keeps it
+  string censorship = 20;                   // CensorshipConfig.mode: off | detect | remove (empty keeps it)
+  string censor_detector = 21;              // censor bar detector; empty keeps it
+  string decensor_model = 22;               // bar reconstruction model; empty keeps it
+  string colorization = 23;                 // ColorizationConfig.mode: off | colorize (empty keeps it)
+  string colorization_model = 24;           // colorizer; empty keeps it
 }
 
 message TranslationModel {

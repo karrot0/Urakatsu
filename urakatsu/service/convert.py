@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import SOUND_EFFECT_MODES, WATERMARK_MODES, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
+from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -244,6 +244,11 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         sound_effects_model=config.sound_effects.model,
         watermarks=config.watermarks.mode,
         watermarks_model=config.watermarks.model,
+        censorship=config.censorship.mode,
+        censor_detector=config.censorship.detector,
+        decensor_model=config.censorship.model,
+        colorization=config.colorization.mode,
+        colorization_model=config.colorization.model,
     )
     for key, value in config.processor.items():
         message.processor_json[key] = json.dumps(value)
@@ -306,6 +311,18 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
         if message.watermarks not in WATERMARK_MODES:
             raise ValueError(f"unknown watermarks mode {message.watermarks!r}; expected one of {list(WATERMARK_MODES)}")
         config.watermarks = WatermarksConfig(mode=message.watermarks, model=message.watermarks_model or config.watermarks.model)
+    if message.censorship:
+        if message.censorship not in CENSORSHIP_MODES:
+            raise ValueError(f"unknown censorship mode {message.censorship!r}; expected one of {list(CENSORSHIP_MODES)}")
+        config.censorship = CensorshipConfig(
+            mode=message.censorship,
+            detector=message.censor_detector or config.censorship.detector,
+            model=message.decensor_model or config.censorship.model,
+        )
+    if message.colorization:
+        if message.colorization not in COLORIZATION_MODES:
+            raise ValueError(f"unknown colorization mode {message.colorization!r}; expected one of {list(COLORIZATION_MODES)}")
+        config.colorization = ColorizationConfig(mode=message.colorization, model=message.colorization_model or config.colorization.model)
     config.processor = _json_map(message.processor_json, "processor")
     config.providers = _json_map(message.providers_json, "provider")
     config.runtimes = dict(message.runtimes)
