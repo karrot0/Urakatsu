@@ -11,7 +11,7 @@ from urakatsu.catalog.hf import RepoFile, RepoInfo
 from urakatsu.catalog.recipes import UNSUPPORTED, Candidate, match_recipe, parse_recipe, parse_sources, pick, slot_candidates
 from urakatsu.catalog.support import Family, RuntimeSupport
 from urakatsu.providers.inpainting.diffusion_recipe import DiffusionRecipeSettings, RecipeProcessor, flag_for, sample_params, working_size
-from urakatsu.providers.inpainting.diffusion_recipe import COMPUTE_RESERVE, offload_to_cpu, vram_budget
+from urakatsu.providers.inpainting.diffusion_recipe import offload_to_cpu, vram_budget
 from urakatsu.runtimes.device import Backend, Device
 from urakatsu.runtimes.hardware import SystemProfile
 
@@ -399,9 +399,12 @@ def test_offload_needs_each_part_to_fit_the_gpu_with_room_to_compute(sizes, free
 
 
 def test_a_model_too_big_to_compute_whole_gets_a_budget_that_segments_it():
-    assert vram_budget([10 * GB, 5 * GB], 10 * GB) == round((10 * GB - COMPUTE_RESERVE) / 1024**3, 1)
     assert vram_budget([4 * GB, 5 * GB], 10 * GB) is None
-    assert vram_budget([10 * GB], 2 * GB) == 1.0
+
+
+@pytest.mark.parametrize("free", [10 * GB, 2 * GB])
+def test_the_budget_follows_the_gpu_rather_than_what_was_free_at_launch(free):
+    assert vram_budget([10 * GB, 5 * GB], free) == -1.0  # negative: sd.cpp measures it as it runs
 
 
 def test_the_loras_folder_is_what_the_lora_setting_offers(catalog):

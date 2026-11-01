@@ -43,6 +43,10 @@ GRID = 64  # a multiple of every model's VAE and patch size
 MAX_UPSCALE = 4.0
 # Room sd.cpp keeps on the GPU for a diffusion model's compute buffers (its ``--auto-fit`` reserve).
 COMPUTE_RESERVE = 2 * 1024**3
+# GiB of free memory sd.cpp leaves alone while it streams a model too big to hold whole. A negative
+# ``--max-vram`` is measured while it runs, so it follows the GPU as other models come and go; a
+# budget fixed at launch stays too small for a segment (about 2.5 GB) if the GPU was busy then.
+VRAM_MARGIN = 1.0
 EDIT_PROMPT = "Remove all the text and lettering. Fill those areas with the background and artwork around them, matching its style."
 FILL_PROMPT = "clean manga artwork, seamless background, empty speech bubble, no text"
 FILL_NEGATIVE = "text, letters, words, writing, watermark, signature"
@@ -55,12 +59,10 @@ def offload_to_cpu(sizes: list[int], gpu_free: int, ram_available: int) -> bool:
 
 
 def vram_budget(sizes: list[int], gpu_free: int) -> Optional[float]:
-    """GiB for ``--max-vram`` when the largest component, whole, would leave its compute buffers no
-    room (Klein 9B Q8 on 12 GB fails or runs on a margin of what else holds the GPU). The budget
-    makes sd.cpp cut it into segments that stream through."""
-    if max(sizes) + COMPUTE_RESERVE <= gpu_free:
-        return None
-    return round(max(gpu_free - COMPUTE_RESERVE, 1024**3) / 1024**3, 1)
+    """``--max-vram`` when the largest component, whole, would leave its compute buffers no room
+    (Klein 9B Q8 on 12 GB fails or runs on a margin of what else holds the GPU): any budget makes
+    sd.cpp cut it into segments that stream through."""
+    return None if max(sizes) + COMPUTE_RESERVE <= gpu_free else -VRAM_MARGIN
 
 
 class DiffusionRecipeSettings(ProviderSettings):
