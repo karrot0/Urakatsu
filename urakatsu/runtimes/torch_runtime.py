@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import logging
 
@@ -85,3 +86,10 @@ def release_cache(device=None) -> None:
         available = backend.is_available() if name != "mps" else torch.backends.mps.is_available()
         if available:
             backend.empty_cache()
+
+
+def release_memory() -> None:
+    """Hands what unloaded models held back to the system. ``Provider.unload`` only drops references:
+    PyTorch keeps the freed memory reserved, where a native server or another program cannot use it."""
+    gc.collect()
+    release_cache()

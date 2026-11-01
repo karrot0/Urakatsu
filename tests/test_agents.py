@@ -6,6 +6,7 @@ import io
 import json
 import time
 import types
+from contextlib import contextmanager
 
 import httpx
 import pytest
@@ -122,6 +123,27 @@ async def test_turn_reads_then_edits_then_answers(workspace, project):
     assert saved["messages"][-1]["content"] == "Done." and saved["messages"][-1]["model"] == "test:model"
     # The instructions name the open project and page.
     assert page_id in backend.seen[0][0] and "edit_text_blocks" in backend.seen[0][2]
+
+
+async def test_a_turn_keeps_its_local_model_loaded_to_the_end(workspace, project):
+    project_id, page_id = project
+    agents = AgentService(workspace)
+    order = []
+
+    @contextmanager
+    def keep_loaded():
+        order.append("held")
+        yield
+        order.append("let go")
+
+    async def step():
+        order.append("model step")
+        return [TextDelta("Hi.")]
+
+    backend = ScriptedBackend([step])
+    backend.keep_loaded = keep_loaded
+    await run(agents, "hello", backend, project_id, page_id)
+    assert order == ["held", "model step", "let go"]
 
 
 async def test_tool_errors_go_back_to_the_model(workspace, project):

@@ -11,18 +11,21 @@
 - Idle unload (an Urakatsu addition): once no run has used the models for
   ``PipelineConfig.idle_unload_minutes``, every loaded model is unloaded, so a model used
   once does not hold device memory other programs need. The next run loads it again.
+  Code that uses a model outside ``execute`` holds ``in_use`` so it is not unloaded under it.
+- Every unload goes through ``_unload``, which also hands the memory back: dropping a model
+  leaves PyTorch's share of it reserved, out of reach of native servers and other programs.
 """
 
 from __future__ import annotations
 
 import asyncio
-import gc
 import io
 import logging
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Iterator, Optional
 
 from urakatsu.core.config import PipelineConfig
 from urakatsu.core.errors import ModelLoadError, ProcessingError, UrakatsuError, is_out_of_memory
@@ -36,6 +39,7 @@ from urakatsu.pipeline.scope import NormalizedScope, ProjectScope, Scope
 from urakatsu.pipeline.stages import InpaintingMask, StageInput, StageProcessor, processors
 from urakatsu.providers.base import Provider
 from urakatsu.runtimes.manager import RuntimeManager
+from urakatsu.runtimes.torch_runtime import release_memory
 from urakatsu.scene import Patch, Session, Snapshot
 
 log = logging.getLogger(__name__)
@@ -100,6 +104,7 @@ class Pipeline:
         self._accelerator = asyncio.Semaphore(1)
         self._execution = asyncio.Lock()
         self._last_used = time.monotonic()
+        self._users = 0  # ``in_use`` blocks open now
         self._idle_watch: Optional[asyncio.Task] = None
 
     @property
@@ -125,6 +130,7 @@ class Pipeline:
             self.runtimes.select_device(config.device)
             self.unload_all()
             return
+        stale = []
         for stage, provider in list(self._providers.items()):
             wanted = {config.provider_for(stage)} | ({config.fill_provider()} if stage is Stage.INPAINTING else set())
             changed = (
@@ -133,8 +139,9 @@ class Pipeline:
                 or config.settings_for(stage, provider.id) != previous.settings_for(stage, provider.id)
             )
             if changed:
-                provider.unload()
+                stale.append(provider)
                 del self._providers[stage]
+        self._unload(*stale)
 
     def provider(self, stage: Stage, fill: bool = False) -> Provider:
         """The stage's provider. ``fill`` asks for the generative fill model, which takes the
@@ -145,17 +152,29 @@ class Pipeline:
         if existing is not None and existing.id == wanted:
             return existing
         if existing is not None:
-            existing.unload()
+            self._unload(existing)
         cls = self.registry.get(stage, wanted)
         provider = cls(self.config.settings_for(stage, wanted), self.runtimes, self.config.runtime_for(wanted))
         self._providers[stage] = provider
         return provider
 
     def unload_all(self, keep: Stage | None = None) -> list[Stage]:
+        wanted = [(stage, provider) for stage, provider in self._providers.items() if stage is not keep]
+        unloaded = self._unload(*[provider for _, provider in wanted])
+        return [stage for stage, provider in wanted if provider in unloaded]
+
+    def _unload(self, *providers: Provider) -> list[Provider]:
+        """Unloads ``providers`` and hands back what they held; returns the ones that were loaded.
+        One that fails stays loaded, for the next unload, and does not keep the others."""
         unloaded = []
-        for stage, provider in self._providers.items():
-            if stage is not keep and provider.unload():
-                unloaded.append(stage)
+        for provider in providers:
+            try:
+                if provider.unload():
+                    unloaded.append(provider)
+            except Exception:  # noqa: BLE001 - e.g. a native server that would not stop
+                log.exception("could not unload %s", provider.id)
+        if unloaded:
+            release_memory()
         return unloaded
 
     def loaded(self) -> dict[Stage, str]:
@@ -179,7 +198,7 @@ class Pipeline:
         results = []
         await self._accelerator.acquire()
         try:
-            with stopping(stop):
+            with self.in_use(), stopping(stop):
                 await provider.load()
                 for image in images:
                     if stop.stopped:
@@ -193,7 +212,6 @@ class Pipeline:
                         results.append(await provider.detect(image))
         finally:
             self._accelerator.release()
-            self.touch()
         return results
 
     # -- idle unload -----------------------------------------------------------------------------
@@ -203,6 +221,18 @@ class Pipeline:
         outside ``execute`` (the agent's local model) calls it too."""
         self._last_used = time.monotonic()
         self._watch_idle()
+
+    @contextmanager
+    def in_use(self) -> Iterator[None]:
+        """Keeps idle unload away for the block: ``execute`` has the execution lock for that, code
+        that uses a model outside it (restitching, an agent turn) has this."""
+        self._users += 1
+        self.touch()
+        try:
+            yield
+        finally:
+            self._users -= 1
+            self.touch()
 
     def _watch_idle(self, restart: bool = False) -> None:
         """Starts the countdown task; ``restart`` replaces a running one (the timeout changed)."""
@@ -220,19 +250,15 @@ class Pipeline:
             timeout = self.config.idle_unload_minutes * 60
             if timeout <= 0 or not self.loaded():
                 return
-            remaining = self._last_used + timeout - time.monotonic()
+            remaining = timeout if self._users else self._last_used + timeout - time.monotonic()
             if remaining > 0:
                 await asyncio.sleep(remaining)
                 continue
             async with self._execution:  # no run starts while the models unload
-                if time.monotonic() - self._last_used < timeout:
+                if self._users or time.monotonic() - self._last_used < timeout:
                     continue
                 unloaded = self.unload_all()
             if unloaded:
-                gc.collect()
-                from urakatsu.runtimes.torch_runtime import release_cache
-
-                release_cache()
                 log.info("unloaded %s after %g idle minutes", ", ".join(stage.value for stage in unloaded), self.config.idle_unload_minutes)
             return
 
@@ -266,10 +292,13 @@ class Pipeline:
             if isinstance(outcome, _Attempt) and is_out_of_memory(outcome.error) and not stop.stopped:
                 self._accelerator.release()
                 released = True
-                log.warning("retrying %s on page %s after memory pressure: %s", stage.value, input.page, outcome.error)
+                # The text alone: a log record that keeps the exception would keep what follows from working.
+                log.warning("retrying %s on page %s after memory pressure: %s", stage.value, input.page, str(outcome.error))
+                outcome = None  # its traceback's frames hold the failed attempt's tensors
                 await self._accelerator.acquire()
                 released = False
                 self.unload_all(keep=stage)
+                release_memory()  # always: the failed attempt's memory, even with nothing else to unload
                 await asyncio.sleep(OOM_SETTLE_SECONDS)
                 if stop.stopped:
                     return _Completion(input.page, stage, model, 0.0, _STOPPED)
@@ -299,7 +328,7 @@ class Pipeline:
         return _SKIPPED if patch.is_empty() else patch
 
     def _stage_error(self, stage: Stage, provider: Provider, kind: ErrorKind, error: BaseException) -> PipelineError:
-        provider.unload()
+        self._unload(provider)
         prefix = f"failed to load {provider.id}" if kind is ErrorKind.MODEL_LOAD else f"{provider.id} failed"
         log.debug("%s", prefix, exc_info=error)
         return PipelineError(kind, stage, f"{prefix}: {error}")

@@ -254,8 +254,13 @@ class Provider(ABC):
             availability = Availability.yes() if self.attached() else self.available(self.runtime_name)
             if not availability.ok:
                 raise ProviderUnavailable(f"{self.id}: {availability.reason}")
-            await asyncio.to_thread(self._remote.load if self._remote is not None else self._load)
-            self._loaded = True
+            await asyncio.to_thread(self._load_now)
+
+    def _load_now(self) -> None:
+        (self._remote.load if self._remote is not None else self._load)()
+        # Here, not after the await: a cancelled load's thread still finishes, and a model that
+        # arrives must be one ``unload`` can reach.
+        self._loaded = True
 
     def attached(self) -> bool:
         """Whether the provider uses a server someone else runs (``server_url`` set, on the runtime

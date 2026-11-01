@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import time
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Literal, Mapping, Optional
+from typing import Any, AsyncIterator, Callable, ContextManager, Literal, Mapping, Optional
 
 import httpx
 
@@ -85,6 +85,9 @@ class ChatBackend(ABC):
     # The model's context window in tokens, when the backend knows it; the loop assumes
     # ``compaction.DEFAULT_CONTEXT_WINDOW`` otherwise.
     context_window: Optional[int] = None
+    # Held for a whole turn by a backend whose model lives in this process's pipeline, so idle
+    # unload does not stop it between or during model steps.
+    keep_loaded: Optional[Callable[[], ContextManager[None]]] = None
 
     @abstractmethod
     def stream(self, system: str, messages: list[Message], tools: list[ToolSpec]) -> AsyncIterator[BackendEvent]:

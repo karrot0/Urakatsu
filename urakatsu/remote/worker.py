@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import gc
 import hashlib
 import hmac
 import json
@@ -69,6 +68,7 @@ from urakatsu.core.registry import registry as default_registry
 from urakatsu.core.stage import Stage
 from urakatsu.providers.base import Provider
 from urakatsu.runtimes.manager import RuntimeManager
+from urakatsu.runtimes.torch_runtime import release_memory
 
 from . import OFFLOADED, PROTOCOL, wire
 
@@ -282,7 +282,7 @@ class Worker:
             await asyncio.wait({model.task})
         async with self.lane:
             model.provider.unload()
-        gc.collect()
+        release_memory()
         return True
 
     async def unload_all(self) -> None:
@@ -303,14 +303,15 @@ class Worker:
             except Exception as error:
                 if not is_out_of_memory(error):
                     raise
-                log.warning("retrying %s after memory pressure: %s", model.provider.id, error)
+                log.warning("retrying %s after memory pressure: %s", model.provider.id, str(error))
                 for other in self.models.values():
                     if other is not model and other.state == "ready":
                         other.provider.unload()
                         other.state = "failed"  # the client's next call loads it again
                         other.failure = {"error": "unloaded to free memory", "kind": "load"}
-                gc.collect()
-                return await asyncio.to_thread(function, *args)
+            # Outside the ``except``: while it runs, the exception holds the failed attempt's tensors.
+            release_memory()
+            return await asyncio.to_thread(function, *args)
 
     def submit(self, model: Model, function: Callable[..., Any], args: tuple, encode: Callable[[Any], tuple[bytes, str]]) -> Job:
         """Runs ``function(*args)`` as a job whose result is ``encode``d (body, media type)."""

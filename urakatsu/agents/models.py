@@ -227,6 +227,7 @@ class ModelDirectory:
 
         backend = OpenAiChatBackend("local", f"{server.process.base_url}/v1/chat/completions", model, None, ref)
         backend.context_window = N_CTX
+        backend.keep_loaded = self.workspace.pipeline.in_use
         return backend
 
 

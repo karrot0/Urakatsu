@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
@@ -344,7 +345,8 @@ class Turns:
                     turn.status = await run_command(conversation, agent, command[0], command[1], context, turn.publish, self.store.save)
                 else:
                     assert backend is not None
-                    turn.status = await run_turn(conversation, agent, backend, context, turn.publish, self.store.save)
+                    with backend.keep_loaded() if backend.keep_loaded else nullcontext():
+                        turn.status = await run_turn(conversation, agent, backend, context, turn.publish, self.store.save)
             finally:
                 turn.publish({"type": "done", "status": turn.status})
                 turn.finish()

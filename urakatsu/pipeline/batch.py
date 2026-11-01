@@ -15,7 +15,6 @@ the stage it failed (a page whose translation failed is still inpainted).
 
 from __future__ import annotations
 
-import gc
 import logging
 import time
 from dataclasses import dataclass, field
@@ -78,14 +77,6 @@ def needs(stage: Stage, other: Stage) -> bool:
     return any(prerequisite is other or needs(prerequisite, other) for prerequisite in PREREQUISITES[stage])
 
 
-def release_memory() -> None:
-    """Hands what the unloaded models held back to the system before the next model loads."""
-    gc.collect()
-    from urakatsu.runtimes.torch_runtime import release_cache
-
-    release_cache()
-
-
 async def run_batch(
     pipeline: Pipeline,
     session: Session,
@@ -121,7 +112,6 @@ async def run_batch(
                 break
             status.state = "unloading"
             pipeline.unload_all()
-            release_memory()
             pages = [
                 page
                 for chapter in chapters
@@ -166,7 +156,6 @@ async def run_batch(
     finally:
         status.state = "unloading"
         pipeline.unload_all()
-        release_memory()
         if restore is not None:
             pipeline.configure(restore())
         status.state = "finished"
@@ -174,4 +163,4 @@ async def run_batch(
     return result
 
 
-__all__ = ["BatchChapter", "BatchResult", "BatchStatus", "PHASE_ORDER", "needs", "phases_for", "release_memory", "run_batch"]
+__all__ = ["BatchChapter", "BatchResult", "BatchStatus", "PHASE_ORDER", "needs", "phases_for", "run_batch"]
