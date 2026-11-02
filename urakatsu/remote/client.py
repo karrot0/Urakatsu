@@ -13,6 +13,9 @@ its runtime, so a remote run produces what a local one would.
 - A model the user installed from the Models page goes along with the load request
   (``installed``): the worker has none of the app's installs. On the ``cloud`` runtime, Urakatsu Cloud and the account key
   instead (``cloud``).
+- A file a setting names on this machine (``Provider.remote_files``, a LoRA) is sent before the
+  load, in ``UPLOAD_PART`` parts, unless the worker already has it; the setting then names the
+  worker's copy (``upload:<sha256>/<name>``).
 - A Kaggle worker gets a new tunnel address when its session restarts: when it stops answering,
   the client reads its address from the session's log again and repeats the request there once.
 - Loading and every inference call are jobs on the worker: the request returns at once, and the
@@ -32,8 +35,10 @@ its runtime, so a remote run produces what a local one would.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import httpx
@@ -60,6 +65,10 @@ STOP_POLL_WAIT = 2.0
 # Settings that say where to connect or hold the user's own keys, not how the model runs: the
 # worker uses its own, and a key never leaves this machine.
 CONNECTION_SETTINGS = frozenset({"remote_url", "remote_api_key", "remote_worker", "server_url", "server_api_key", "api_key"})
+# Bytes per upload request: under the 100 MB a Cloudflare tunnel accepts in one body.
+UPLOAD_PART = 32 * 2**20
+# SHA-256 of files already hashed, by (path, size, modification time).
+_digests: dict[tuple[str, int, int], str] = {}
 
 # Tests swap this for one that returns a client bound to an in-process worker.
 client_factory: Callable[[str, dict[str, str]], httpx.Client] = lambda url, headers: httpx.Client(
@@ -103,14 +112,29 @@ def _poll_wait() -> float:
     return POLL_WAIT if current_stop() is None else STOP_POLL_WAIT
 
 
+def digest(path: Path) -> str:
+    stat = path.stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns)
+    if key not in _digests:
+        hasher = hashlib.sha256()
+        with path.open("rb") as file:
+            for block in iter(lambda: file.read(2**20), b""):
+                hasher.update(block)
+        _digests[key] = hasher.hexdigest()
+    return _digests[key]
+
+
 def load_request(provider: "Provider") -> dict[str, Any]:
     """What ``POST /v1/models`` (and a preload) sends a worker for ``provider``: its stage, its
-    settings without where it connects, and the installed model those settings name, if any."""
+    settings without where it connects (files on this machine named by the worker's copy), and
+    the installed model those settings name, if any."""
     body: dict[str, Any] = {
         "stage": provider.stage.value,
         "provider": provider.id,
         "settings": provider.settings.model_dump(mode="json", exclude=CONNECTION_SETTINGS),
     }
+    for key, path in provider.remote_files().items():
+        body["settings"][key] = f"upload:{digest(path)}/{path.name}"
     model = getattr(provider.settings, "model", None)
     if model:
         from urakatsu.catalog.installed import InstalledModels
@@ -204,6 +228,10 @@ class RemoteModel:
             raise ProviderUnavailable(
                 f"the worker at {url} speaks protocol {info.get('protocol')}, this app {PROTOCOL}; update Urakatsu on one of them"
             )
+        offered = {entry.get("id") for entry in info.get("providers") or []}
+        if not self.on_cloud and offered and self.provider.id not in offered:
+            self.close()
+            raise ProviderUnavailable(f"the worker at {url} cannot run {self.provider.name or self.provider.id}; update Urakatsu on the worker (restart its notebook)")
         try:
             self._load_model()
         except BaseException:
@@ -215,6 +243,7 @@ class RemoteModel:
         if self.on_cloud:
             body = {"stage": self.provider.stage.value, "provider": self.provider.id, "settings": self.model_settings()}
         else:
+            self._send_files()
             body = load_request(self.provider)
         state = self._request("POST", "/v1/models", json=body, action=f"load {self.provider.id}", error=ModelLoadError)
         self.model_id = state["id"]
@@ -232,6 +261,23 @@ class RemoteModel:
             self.provider.instructed = bool(state["instructed"])
             self.provider.crop_edits = bool(state["instructed"]) and not getattr(type(self.provider), "sees_mask", False)
         self._check_weights(state)
+
+    def _send_files(self) -> None:
+        """Sends the worker each file the settings name here that it does not have yet, resuming
+        where an interrupted send stopped."""
+        for path in self.provider.remote_files().values():
+            sha, size = digest(path), path.stat().st_size
+            action = f"send {path.name}"
+            state = self._request("GET", f"/v1/files/{sha}", action=action, error=ModelLoadError)
+            if state.get("complete"):
+                continue
+            log.info("sending %s (%d bytes) to the worker", path.name, size)
+            with path.open("rb") as file:
+                while not state.get("complete"):
+                    offset = int(state.get("received", 0))
+                    file.seek(offset)
+                    params = {"name": path.name, "size": size, "offset": offset}
+                    state = self._request("PUT", f"/v1/files/{sha}", params=params, content=file.read(UPLOAD_PART), action=action, error=ModelLoadError)
 
     def _check_weights(self, state: dict[str, Any]) -> None:
         """Weights stay pinned for reproducible results: say so when the worker's differ from ours."""
@@ -352,3 +398,16 @@ class RemoteModel:
     def _inpaint(self, image: Image.Image, mask: np.ndarray, data: dict[str, str]) -> Image.Image:
         files = {"image": ("image.png", wire.encode_image(image), wire.PNG), "mask": ("mask.npz", wire.encode_array(mask), wire.NPZ)}
         return wire.decode_image(self._call("inpaint", files=files, data=data))
+
+    def detect_censorship(self, image: Image.Image) -> np.ndarray:
+        return wire.decode_array(self._call("detect_censorship", files={"image": ("page.png", wire.encode_image(image), wire.PNG)}))
+
+    def reconstruct(self, image: Image.Image, mask: np.ndarray, white: bool) -> Image.Image:
+        files = {"image": ("crop.png", wire.encode_image(image), wire.PNG), "mask": ("mask.npz", wire.encode_array(mask), wire.NPZ)}
+        return wire.decode_image(self._call("decensor", files=files, data={"white": "true" if white else "false"}))
+
+    def colorize(self, image: Image.Image, reference: Optional[Image.Image] = None) -> Image.Image:
+        files = {"image": ("page.png", wire.encode_image(image), wire.PNG)}
+        if reference is not None:
+            files["reference"] = ("reference.png", wire.encode_image(reference), wire.PNG)
+        return wire.decode_image(self._call("colorize", files=files))

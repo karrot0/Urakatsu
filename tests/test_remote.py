@@ -20,7 +20,21 @@ from urakatsu.core.errors import OutOfMemory, ProviderUnavailable, is_out_of_mem
 from urakatsu.core.registry import Registry
 from urakatsu.core.results import LayoutDetection, LayoutDetections, LayoutMask
 from urakatsu.core.stop import StopToken, StoppedError, stopping
-from urakatsu.providers.base import DetectionProvider, InpaintingProvider, OcrProvider, TranslationProvider
+from pathlib import Path
+from typing import Optional
+
+from pydantic import Field
+
+from urakatsu.providers.base import (
+    CensorDetectionProvider,
+    ColorizationProvider,
+    DecensorProvider,
+    DetectionProvider,
+    InpaintingProvider,
+    OcrProvider,
+    ProviderSettings,
+    TranslationProvider,
+)
 from urakatsu.core.config import save_config
 from urakatsu.remote import CLOUD, REMOTE, client as remote_client, cloud, wire
 from urakatsu.remote.worker import Worker, create_app
@@ -91,6 +105,53 @@ class LocalTranslator(TranslationProvider):
     id = "local-translator"
 
 
+class EchoBarDetector(CensorDetectionProvider):
+    id = "echo-bar-detector"
+    name = "Echo bar detector"
+
+    def _detect_censorship(self, image):
+        mask = np.zeros((image.height, image.width), np.uint8)
+        mask[5:15, 10:30] = 255
+        mask[15, 10:30] = 128  # a soft edge, kept as the reconstruction's alpha
+        return mask
+
+
+class EchoDecensor(DecensorProvider):
+    id = "echo-decensor"
+    name = "Echo decensor"
+
+    def _reconstruct(self, image, mask, white):
+        pixels = np.asarray(image.convert("RGB")).copy()
+        pixels[mask > 0] = 250 if white else 3
+        return Image.fromarray(pixels)
+
+
+class LoraSettings(ProviderSettings):
+    lora: Optional[str] = Field(default=None)
+    reference: Optional[str] = Field(default=None)
+
+
+class EchoColorizer(ColorizationProvider):
+    """Tints the page by its LoRA file's first byte, and copies a reference's corner color."""
+
+    id = "echo-colorizer"
+    name = "Echo colorizer"
+    Settings = LoraSettings
+
+    def remote_files(self):
+        return {"lora": Path(self.settings.lora)} if self.settings.lora else {}
+
+    def reference_image(self):
+        return Image.open(self.settings.reference).convert("RGB") if self.settings.reference else None
+
+    def _colorize(self, image, reference=None):
+        pixels = np.asarray(image.convert("RGB")).copy()
+        pixels[..., 0] = Path(self.settings.lora).read_bytes()[0] if self.settings.lora else 0
+        if reference is not None:
+            pixels[..., 2] = reference.getpixel((0, 0))[2]
+        return Image.fromarray(pixels)
+
+
 def page() -> Image.Image:
     rng = np.random.default_rng(7)
     return Image.fromarray(rng.integers(0, 256, (48, 64, 3), dtype=np.uint8), "RGB")
@@ -118,7 +179,7 @@ class SharedClient:
 def worker(monkeypatch):
     registry = Registry()
     registry._discovered = True
-    for cls in (EchoDetector, EchoOcr, SlowOcr, EchoInpainter, ExhaustedInpainter):
+    for cls in (EchoDetector, EchoOcr, SlowOcr, EchoInpainter, ExhaustedInpainter, EchoBarDetector, EchoDecensor, EchoColorizer):
         registry.add(cls)
     instance = Worker(PipelineConfig(device="cpu"), RuntimeManager("cpu"), registry)
     with TestClient(create_app(instance, TOKEN)) as http:
@@ -209,6 +270,89 @@ async def test_remote_providers_match_local_runs(worker):
     filled = np.asarray(inpainter._fill(image, mask, "abc"))
     assert (filled[8:20, 10:40] == 3).all() and np.array_equal(filled[30:], np.asarray(image)[30:])
     assert inpainter.unload() and not inpainter.loaded
+
+
+async def test_censor_bars_are_found_and_reconstructed_on_a_worker(worker):
+    image = page()
+    detector = remote(EchoBarDetector)
+    await detector.load()
+    mask = await detector.detect_censorship(image)
+    assert mask.dtype == np.uint8 and np.array_equal(mask, EchoBarDetector()._detect_censorship(image))
+
+    decensor = remote(EchoDecensor)
+    await decensor.load()
+    # The stage calls it synchronously, once per group of bars.
+    for white in (False, True):
+        assert np.array_equal(np.asarray(decensor._reconstruct(image, mask, white)), np.asarray(EchoDecensor()._reconstruct(image, mask, white)))
+
+
+async def test_a_colorizer_runs_on_a_worker_with_its_lora_and_reference(worker, tmp_path, monkeypatch):
+    instance, _, _ = worker
+    monkeypatch.setattr(remote_client, "UPLOAD_PART", 5)  # several parts, as a large LoRA over a tunnel
+    lora = tmp_path / "here" / "color.safetensors"
+    lora.parent.mkdir()
+    lora.write_bytes(bytes([77]) + b"lora weights")
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (8, 8), (0, 0, 201)).save(reference)
+
+    colorizer = remote(EchoColorizer, lora=str(lora), reference=str(reference))
+    await colorizer.load()
+    (model,) = instance.models.values()
+    copy = Path(model.provider.settings.lora)
+    assert copy != lora and copy.read_bytes() == lora.read_bytes() and copy.name == lora.name
+    assert model.provider.settings.reference == str(reference)  # never opened there: the image travels with the page
+
+    pixels = np.asarray(await colorizer.colorize(page()))
+    assert (pixels[..., 0] == 77).all() and (pixels[..., 2] == 201).all()
+
+
+async def test_a_file_the_worker_has_is_not_sent_again(worker, tmp_path):
+    instance, _, _ = worker
+    lora = tmp_path / "color.safetensors"
+    lora.write_bytes(b"\x05 weights")
+    first = remote(EchoColorizer, lora=str(lora))
+    await first.load()
+    first.unload()
+    instance.shared.requests.clear()
+    second = remote(EchoColorizer, lora=str(lora))
+    await second.load()
+    assert not [path for method, path in instance.shared.requests if method == "PUT"]
+
+
+def test_the_worker_refuses_a_damaged_or_misplaced_file(worker):
+    instance, http, _ = worker
+    data = b"some weights"
+    digest = remote_client.hashlib.sha256(data).hexdigest()
+    wrong = remote_client.hashlib.sha256(b"other").hexdigest()
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    assert http.put(f"/v1/files/{wrong}", params={"name": "x.safetensors", "size": len(data), "offset": 0}, content=data, headers=headers).status_code == 400
+    assert http.get(f"/v1/files/{wrong}", headers=headers).json() == {"received": 0, "complete": False}
+    assert http.put(f"/v1/files/{digest}", params={"name": "../x", "size": len(data), "offset": 0}, content=data, headers=headers).status_code == 400
+    assert http.put(f"/v1/files/{digest}", params={"name": "x.safetensors", "size": len(data), "offset": 4}, content=data[4:], headers=headers).status_code == 400
+    assert http.get("/v1/files/not-a-digest", headers=headers).status_code == 400
+    sent = http.put(f"/v1/files/{digest}", params={"name": "x.safetensors", "size": len(data), "offset": 0}, content=data, headers=headers).json()
+    assert sent == {"received": len(data), "complete": True}
+
+
+def test_a_load_naming_a_file_never_sent_is_refused(worker):
+    _, http, _ = worker
+    body = {"stage": "colorization", "provider": "echo-colorizer", "settings": {"lora": "upload:" + "0" * 64 + "/x.safetensors"}}
+    response = http.post("/v1/models", json=body, headers={"Authorization": f"Bearer {TOKEN}"})
+    assert response.status_code == 400 and "was not sent" in response.json()["error"]
+
+
+async def test_a_worker_without_the_provider_is_reported_as_outdated(worker, monkeypatch):
+    instance, _, _ = worker
+    original = instance.info
+
+    def older():
+        info = original()
+        info["providers"] = [entry for entry in info["providers"] if entry["stage"] != "colorization"]
+        return info
+
+    monkeypatch.setattr(instance, "info", older)
+    with pytest.raises(ProviderUnavailable, match="update Urakatsu on the worker"):
+        await remote(EchoColorizer).load()
 
 
 async def test_settings_reach_the_worker_without_the_connection(worker):

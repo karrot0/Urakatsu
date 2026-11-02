@@ -74,7 +74,7 @@ class WorkerEntry(BaseModel):
 
 class Assignment(BaseModel):
     worker: str  # the entry's id
-    role: str  # detection | ocr | inpainting | fill | sound_effects
+    role: str  # detection | ocr | inpainting | fill | sound_effects | censor_detection | decensor | colorization
     provider: str
     name: str
     request: dict[str, Any]  # the load request (``client.load_request``)
@@ -87,6 +87,9 @@ ROLES: tuple[tuple[str, Stage], ...] = (
     ("inpainting", Stage.INPAINTING),
     ("fill", Stage.INPAINTING),
     ("sound_effects", Stage.INPAINTING),
+    ("censor_detection", Stage.CENSOR_DETECTION),
+    ("decensor", Stage.DECENSOR),
+    ("colorization", Stage.COLORIZATION),
 )
 
 
@@ -144,6 +147,12 @@ def _slot(config: PipelineConfig, role: str) -> str:
         return config.fill_provider()
     if role == "sound_effects":
         return config.redraw_provider() if config.sound_effects.mode == "redraw" else ""
+    if role == "censor_detection":
+        return config.censorship.detector if config.censorship.mode != "off" else ""
+    if role == "decensor":  # with "detect" it runs only when asked, so it loads then
+        return config.censorship.model if config.censorship.mode == "remove" else ""
+    if role == "colorization":
+        return config.colorization.model if config.colorization.mode != "off" else ""
     return config.provider_for(Stage.parse(role))
 
 

@@ -541,10 +541,21 @@ function CensorshipSection({ detectors, models, draft, update }: { detectors: Pr
   const [pending, setPending] = useState<PendingDownload[]>([]);
   const detectorSettings = detector ? draft.processorJson[detector.id] : undefined;
   const modelSettings = model ? draft.processorJson[model.id] : undefined;
+  // A model on a worker or Urakatsu Cloud downloads its weights there, not here.
+  const here = (provider: ProviderInfo) => ![REMOTE, CLOUD].includes(selectedRuntime(provider, draft));
+  const detectorHere = !!detector && here(detector);
+  const modelHere = !!model && here(model);
   useEffect(() => {
     if (mode === "off" || !detector || !model) return;
+    const settings: Record<string, unknown> = {};
+    if (detectorHere) settings[detector.id] = parseJson(detectorSettings);
+    if (modelHere) settings[model.id] = parseJson(modelSettings);
+    if (!Object.keys(settings).length) {
+      setPending([]);
+      return;
+    }
     let current = true;
-    catalog.pendingDownloads({ [detector.id]: parseJson(detectorSettings), [model.id]: parseJson(modelSettings) }).then(
+    catalog.pendingDownloads(settings).then(
       (found) => {
         if (current) setPending(found);
       },
@@ -553,10 +564,10 @@ function CensorshipSection({ detectors, models, draft, update }: { detectors: Pr
     return () => {
       current = false;
     };
-  }, [mode, detector?.id, model?.id, detectorSettings, modelSettings]);
+  }, [mode, detector?.id, model?.id, detectorSettings, modelSettings, detectorHere, modelHere]);
   const needsModel = pending.some((item) => item.model);
   return (
-    <PreferenceSection title="Censorship" description="Bars drawn over adult works. For works whose characters are all adults. Runs on this computer only.">
+    <PreferenceSection title="Censorship" description="Bars drawn over adult works. For works whose characters are all adults. Runs on this computer unless you pick one of your workers for a model.">
       <div role="radiogroup" aria-label="Censorship" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
         {CENSORSHIP_MODES.map((option) => {
           const active = mode === option.mode;
@@ -671,15 +682,17 @@ function ColorizationSection({ providers, draft, update }: { providers: Provider
       </div>
       {mode !== "off" && providers.length > 1 && (
         <PreferenceRow title="Colorizer" description="How the page is painted.">
-          <div className={CONTROL_PAIR}>
-            <Select label="Colorizer" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(colorizationModel) => update({ colorizationModel })} />
-            <RuntimeSelect provider={provider} draft={draft} update={update} />
-          </div>
+          <Select label="Colorizer" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(colorizationModel) => update({ colorizationModel })} />
         </PreferenceRow>
       )}
       {mode !== "off" && provider && (
         <PreferenceRow title="Model" description="Paints the page. Lists the installed models that edit images.">
           <InstalledModelSelect providerId={provider.id} builtIn={provider.weights.length > 0} value={typeof settings.model === "string" ? settings.model : ""} onChange={setModel} />
+        </PreferenceRow>
+      )}
+      {mode !== "off" && provider && provider.runtimes.length > 1 && (
+        <PreferenceRow title="Runs on" description="This computer, or one of your workers, such as a Colab or Kaggle notebook (Settings, Workers). A LoRA is sent to the worker the first time.">
+          <RuntimeSelect provider={provider} draft={draft} update={update} />
         </PreferenceRow>
       )}
     </PreferenceSection>

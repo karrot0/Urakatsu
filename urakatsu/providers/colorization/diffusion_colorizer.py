@@ -5,6 +5,8 @@ recipe with ``ref_images``, or the editing recipe of its weights, as ``anima-edi
 with any LoRA from the models folder. Nothing here names one. The page goes in as the first
 reference image and an optional color reference as the second, the order reference LoRAs expect.
 stable-diffusion.cpp picks how references reach each model (``--ref-image-args`` presets).
+On a worker (Colab, Kaggle) the LoRA is sent to it once (``remote_files``), and the reference
+goes along with each page.
 
 The model redraws the page rather than painting on it, at about ``megapixels``: its lines are
 softer than the page's and land several pixels away, more in some places than others. So its
@@ -77,16 +79,15 @@ def keep_ink(page: Image.Image, color: Image.Image) -> Image.Image:
 class ColorizeProcessor:
     edits = True  # the page always goes in as ``ref_images``
 
-    def __init__(self, server: SdServer, defaults: dict[str, Any], settings: DiffusionColorizerSettings, lora: Optional[Path] = None, reference: Optional[Image.Image] = None):
+    def __init__(self, server: SdServer, defaults: dict[str, Any], settings: DiffusionColorizerSettings, lora: Optional[Path] = None):
         self.server = server
         self.defaults = defaults
         self.settings = settings
         self.lora = lora
-        self.reference = reference
 
-    def request(self, page: Image.Image) -> dict[str, Any]:
+    def request(self, page: Image.Image, reference: Optional[Image.Image] = None) -> dict[str, Any]:
         settings = self.settings
-        references = [page] if self.reference is None else [page, self.reference]
+        references = [page] if reference is None else [page, reference]
         body: dict[str, Any] = {
             "prompt": settings.prompt or PROMPT,
             "width": page.width,
@@ -103,10 +104,10 @@ class ColorizeProcessor:
             body["lora"] = [{"path": self.lora.name, "multiplier": float(settings.lora_strength)}]
         return body
 
-    def inference(self, image: Image.Image) -> Image.Image:
+    def inference(self, image: Image.Image, reference: Optional[Image.Image] = None) -> Image.Image:
         width, height = working_size(image.width, image.height, self.settings.megapixels)
         working = resize_pil(image, width, height, LANCZOS3)
-        generated = self.server.generate(self.request(working))
+        generated = self.server.generate(self.request(working, reference))
         if not generated:
             raise RuntimeError("the diffusion model returned no image")
         result = resize_pil(generated[0].convert("RGB"), width, height, LANCZOS3)
@@ -137,7 +138,11 @@ class DiffusionColorizerProvider(ColorizationProvider, DiffusionRecipeProvider):
             raise ProviderUnavailable(f"{self.name}: the LoRA {path} was not found")
         return path
 
-    def _reference(self) -> Optional[Image.Image]:
+    def remote_files(self) -> dict[str, Path]:
+        lora = self._lora()
+        return {"lora": lora} if lora is not None else {}
+
+    def reference_image(self) -> Optional[Image.Image]:
         if not self.settings.reference:
             return None
         path = Path(self.settings.reference).expanduser()
@@ -163,9 +168,9 @@ class DiffusionColorizerProvider(ColorizationProvider, DiffusionRecipeProvider):
         return [*args, "--lora-model-dir", str(lora.parent)] if lora is not None else args
 
     def _processor_for(self, server: SdServer, recipe: Recipe) -> ColorizeProcessor:
-        return ColorizeProcessor(server, dict(recipe.defaults), self.settings, self._lora(), self._reference())
+        return ColorizeProcessor(server, dict(recipe.defaults), self.settings, self._lora())
 
-    def _colorize(self, image: Image.Image) -> Image.Image:
+    def _colorize(self, image: Image.Image, reference: Optional[Image.Image] = None) -> Image.Image:
         if self._processor is None:
             raise RuntimeError("the diffusion model is not loaded")
-        return self._processor.inference(image.convert("RGB"))
+        return self._processor.inference(image.convert("RGB"), reference)

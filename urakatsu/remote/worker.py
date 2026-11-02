@@ -1,5 +1,5 @@
-"""``urakatsu worker``: serves this machine's detection, OCR and inpainting models to Urakatsu
-apps elsewhere (their ``remote`` runtime, ``client.RemoteModel``).
+"""``urakatsu worker``: serves this machine's detection, OCR, inpainting, censor bar and
+colorization models to Urakatsu apps elsewhere (their ``remote`` runtime, ``client.RemoteModel``).
 
 API (every route needs ``Authorization: Bearer <token>`` unless the worker runs without one):
 
@@ -11,6 +11,11 @@ API (every route needs ``Authorization: Bearer <token>`` unless the worker runs 
     POST   /v1/models/{id}/detect       image (PNG)                             -> job
     POST   /v1/models/{id}/recognize    crops (PNG, repeated)                   -> job
     POST   /v1/models/{id}/inpaint      image (PNG), mask (npz), fill?, prompt? -> job
+    POST   /v1/models/{id}/colorize     image (PNG), reference? (PNG)           -> job
+    POST   /v1/models/{id}/detect_censorship  image (PNG)                       -> job (npz mask)
+    POST   /v1/models/{id}/decensor     image (PNG), mask (npz), white          -> job
+    GET    /v1/files/{sha256}           {received, complete}
+    PUT    /v1/files/{sha256}?name&size&offset   the next part of a file    -> {received, complete}
     GET    /v1/jobs/{job}?wait=s        {job, state: running | done | failed, failure}
     GET    /v1/jobs/{job}/result        detections JSON (``wire``), {texts}, or PNG; then the job is gone
     POST   /v1/shutdown                 ends the worker (the app's Stop button), when it was started to allow it
@@ -24,6 +29,11 @@ dropped after ``JOB_TTL``.
 ``installed`` is a model the app installed from its Models page (the registry entry,
 ``catalog.installed.InstalledModel``): the worker registers it in its own store and downloads its
 files, since only the app knows what it installed.
+
+A setting that names a file on the app's machine (a LoRA, ``Provider.remote_files``) reaches the
+worker as ``upload:<sha256>/<name>``: the client sends the file first through ``/v1/files``, in
+parts small enough for a tunnel (Cloudflare refuses request bodies over 100 MB), and skips one
+the worker already has. The worker checks the digest and gives the provider its own copy.
 
 Preloading (``/v1/preload``, ``urakatsu worker --preload``) takes the models the app assigned to
 this worker: the first of each stage loads, the others only download (one model per stage stays
@@ -51,9 +61,11 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -74,10 +86,13 @@ from . import OFFLOADED, PROTOCOL, wire
 
 log = logging.getLogger(__name__)
 
-STAGES = (Stage.DETECTION, Stage.OCR, Stage.INPAINTING)
+STAGES = (Stage.DETECTION, Stage.OCR, Stage.INPAINTING, Stage.CENSOR_DETECTION, Stage.DECENSOR, Stage.COLORIZATION)
 # Seconds a poll may wait for its job: well under the 100 s that Cloudflare keeps a request open.
 MAX_WAIT = 25.0
 JOB_TTL = 600.0
+UPLOAD = "upload:"
+UPLOAD_LIMIT = 8 * 2**30
+DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 class LoadRequest(BaseModel):
@@ -214,7 +229,7 @@ class Worker:
     async def load(self, request: LoadRequest) -> Model:
         stage = Stage.parse(request.stage)
         if stage not in STAGES:
-            raise ValueError(f"a worker runs detection, OCR and inpainting models, not {stage.value}")
+            raise ValueError(f"a worker runs detection, OCR, inpainting, censor bar and colorization models, not {stage.value}")
         cls = self.registry.get(stage, request.provider)
         if not local(cls):
             raise ValueError(f"{cls.id} runs only on Urakatsu Cloud, not on a worker")
@@ -239,7 +254,69 @@ class Worker:
             if installed.id != request.settings.get("model"):
                 raise ValueError(f"the installed model sent is {installed.id}, not the one the settings name")
             InstalledModels(self.runtimes.store).add(installed)  # its files download when the model loads
-        return cls(request.settings, self.runtimes, self.runtime_for(cls))
+        return cls(self.uploaded(request.settings), self.runtimes, self.runtime_for(cls))
+
+    # -- files sent by the app ------------------------------------------------------------------
+
+    def uploads(self) -> Path:
+        return self.runtimes.store.root / "uploads"
+
+    def _upload(self, digest: str) -> tuple[Optional[Path], Path]:
+        """The finished file sent under ``digest``, if there is one, and where its parts go."""
+        if not DIGEST.fullmatch(digest):
+            raise ValueError(f"{digest!r} is not a SHA-256 digest")
+        folder = self.uploads() / digest
+        done = next((path for path in folder.iterdir() if path.is_file()), None) if folder.is_dir() else None
+        return done, self.uploads() / f"{digest}.part"
+
+    def upload_state(self, digest: str) -> dict[str, Any]:
+        done, part = self._upload(digest)
+        if done is not None:
+            return {"received": done.stat().st_size, "complete": True}
+        return {"received": part.stat().st_size if part.exists() else 0, "complete": False}
+
+    def receive(self, digest: str, name: str, size: int, offset: int, data: bytes) -> dict[str, Any]:
+        """Writes the part of a file at ``offset``; once all ``size`` bytes are in, checks them."""
+        if not name or Path(name).name != name or name in (".", ".."):
+            raise ValueError(f"{name!r} is not a file name")
+        if not 0 < size <= UPLOAD_LIMIT:
+            raise ValueError(f"a file sent to a worker must be under {UPLOAD_LIMIT // 2**30} GiB")
+        state = self.upload_state(digest)
+        if state["complete"]:
+            return state
+        _, part = self._upload(digest)
+        if offset != state["received"] or offset + len(data) > size:
+            raise ValueError(f"expected bytes from {state['received']}, got {len(data)} at {offset}")
+        part.parent.mkdir(parents=True, exist_ok=True)
+        with part.open("ab") as file:
+            file.write(data)
+        received = offset + len(data)
+        if received < size:
+            return {"received": received, "complete": False}
+        hasher = hashlib.sha256()
+        with part.open("rb") as file:
+            for block in iter(lambda: file.read(2**20), b""):
+                hasher.update(block)
+        if hasher.hexdigest() != digest:
+            part.unlink()
+            raise ValueError(f"{name} arrived damaged (its SHA-256 differs); send it again")
+        target = self.uploads() / digest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        part.replace(target)
+        log.info("received %s (%d bytes)", name, size)
+        return {"received": size, "complete": True}
+
+    def uploaded(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """``settings`` with each ``upload:<sha256>/<name>`` replaced by this worker's copy."""
+        resolved = dict(settings)
+        for key, value in settings.items():
+            if isinstance(value, str) and value.startswith(UPLOAD):
+                digest, _, name = value[len(UPLOAD) :].partition("/")
+                done, _ = self._upload(digest)
+                if done is None:
+                    raise ValueError(f"{name or digest} was not sent to this worker; the app sends it before loading the model")
+                resolved[key] = str(done)
+        return resolved
 
     async def fetch(self, request: LoadRequest) -> None:
         """Downloads a model's weights without loading it."""
@@ -449,6 +526,55 @@ def create_app(worker: Worker, token: Optional[str], preload: Optional[list[Load
         else:
             function, args = model.provider._inpaint, (pixels, region)
         return started(worker.submit(model, function, args, lambda result: (wire.encode_image(result), wire.PNG)))
+
+    @app.post("/v1/models/{identifier}/colorize")
+    async def colorize(identifier: str, image: UploadFile = File(...), reference: Optional[UploadFile] = File(None)):
+        model = worker.ready(identifier)
+        if model is None:
+            return gone(identifier)
+        try:
+            page = wire.decode_image(await image.read())
+            guide = wire.decode_image(await reference.read()) if reference is not None else None
+        except Exception as error:  # noqa: BLE001
+            return failed(error, 400)
+        return started(worker.submit(model, model.provider._colorize, (page, guide), lambda result: (wire.encode_image(result), wire.PNG)))
+
+    @app.post("/v1/models/{identifier}/detect_censorship")
+    async def detect_censorship(identifier: str, image: UploadFile = File(...)):
+        model = worker.ready(identifier)
+        if model is None:
+            return gone(identifier)
+        try:
+            page = wire.decode_image(await image.read())
+        except Exception as error:  # noqa: BLE001
+            return failed(error, 400)
+        return started(worker.submit(model, model.provider._detect_censorship, (page,), lambda mask: (wire.encode_array(mask), wire.NPZ)))
+
+    @app.post("/v1/models/{identifier}/decensor")
+    async def decensor(identifier: str, image: UploadFile = File(...), mask: UploadFile = File(...), white: bool = Form(False)):
+        model = worker.ready(identifier)
+        if model is None:
+            return gone(identifier)
+        try:
+            pixels, region = wire.decode_image(await image.read()), wire.decode_array(await mask.read())
+        except Exception as error:  # noqa: BLE001
+            return failed(error, 400)
+        return started(worker.submit(model, model.provider._reconstruct, (pixels, region, white), lambda result: (wire.encode_image(result), wire.PNG)))
+
+    @app.get("/v1/files/{digest}")
+    async def file_state(digest: str):
+        try:
+            return worker.upload_state(digest)
+        except ValueError as error:
+            return failed(error, 400)
+
+    @app.put("/v1/files/{digest}")
+    async def upload(digest: str, request: Request, name: str, size: int, offset: int):
+        try:
+            data = await request.body()
+            return await asyncio.to_thread(worker.receive, digest, name, size, offset, data)
+        except ValueError as error:
+            return failed(error, 400)
 
     def no_job(identifier: str) -> JSONResponse:
         message = f"no job {identifier} (it finished more than {JOB_TTL:.0f} s ago, or the worker restarted)"

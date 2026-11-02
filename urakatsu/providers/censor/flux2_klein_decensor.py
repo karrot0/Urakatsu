@@ -13,6 +13,9 @@ Removing a bar needs more than removing text: the Koharu fork at
 https://github.com/spgsroot/koharu found bars still visible after 4 steps, and that partial
 strength keeps them from the initial image. So this runs at full strength for 8 steps, and the
 model works from the crop as its reference.
+
+On a worker (Colab, Kaggle) the worker downloads the pinned LoRA itself; one the user picked from
+disk is sent to it once (``remote_files``).
 """
 
 from __future__ import annotations
@@ -50,7 +53,8 @@ SIZES = ("4b", "9b")
 
 
 class Flux2KleinDecensorSettings(ProviderSettings):
-    """Not ``Flux2KleinSettings``: this has no ``server_url``, so pages never leave this computer."""
+    """Not ``Flux2KleinSettings``: this has no ``server_url``, so pages go nowhere but this computer
+    and a worker the user picks in the runtime menu."""
 
     prompt: str = Field(default=BLACK_PROMPT, description="Instruction for black bars")
     white_prompt: str = Field(default=WHITE_PROMPT, description="Instruction for white bars")
@@ -99,6 +103,12 @@ class Flux2KleinDecensorProvider(DecensorProvider, Flux2KleinProvider):
         if not path.is_file():
             raise ProviderUnavailable(f"{self.name}: the LoRA {path} was not found")
         return path
+
+    def remote_files(self) -> dict[str, Path]:
+        """A LoRA the user picked goes to the worker; the pinned one the worker downloads itself."""
+        if not self.settings.lora or not self.settings.lora_strength:
+            return {}
+        return {"lora": self._lora()}
 
     def _pinned_lora(self) -> Optional[Path]:
         """The bar LoRA, on the only size it was trained for; checked once per load."""

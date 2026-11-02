@@ -151,6 +151,11 @@ class Provider(ABC):
         """The inference methods a ``RemoteModel`` takes over; each stage interface names its own."""
         return {}
 
+    def remote_files(self) -> dict[str, Path]:
+        """Settings that name a file on this machine (a LoRA picked from disk), by setting name.
+        A worker has none of them, so the client sends each one and the worker gets its copy."""
+        return {}
+
     # -- metadata -----------------------------------------------------------------------------
 
     @classmethod
@@ -416,6 +421,10 @@ class CensorDetectionProvider(Provider):
     """Maps censor bars on a page: the stage keeps what it returns as the page's mask, for review."""
 
     stage = Stage.CENSOR_DETECTION
+    remotable = True
+
+    def _remote_methods(self, remote) -> dict[str, Any]:
+        return {"_detect_censorship": remote.detect_censorship}
 
     async def detect_censorship(self, image: Image.Image) -> np.ndarray:
         return await asyncio.to_thread(self._detect_censorship, image)
@@ -426,11 +435,14 @@ class CensorDetectionProvider(Provider):
 
 
 class DecensorProvider(Provider):
-    """Reconstructs the art under one group of censor bars. Local only, so it never goes to a
-    worker or to Urakatsu Cloud."""
+    """Reconstructs the art under one group of censor bars. Pages go to a worker only when the
+    user picks one in the model's runtime menu."""
 
     stage = Stage.DECENSOR
-    remotable = False
+    remotable = True
+
+    def _remote_methods(self, remote) -> dict[str, Any]:
+        return {"_reconstruct": remote.reconstruct}
 
     def _reconstruct(self, image: Image.Image, mask: np.ndarray, white: bool) -> Image.Image:  # pragma: no cover - interface
         """``image`` with the bars under ``mask`` removed; ``white`` says they are paper-white."""
@@ -438,15 +450,23 @@ class DecensorProvider(Provider):
 
 
 class ColorizationProvider(Provider):
-    """Paints a black-and-white page in color."""
+    """Paints a black-and-white page in color. The color reference is read here and travels with
+    each page, so a worker never needs the file."""
 
     stage = Stage.COLORIZATION
-    remotable = False
+    remotable = True
+
+    def _remote_methods(self, remote) -> dict[str, Any]:
+        return {"_colorize": remote.colorize}
 
     async def colorize(self, image: Image.Image) -> Image.Image:
-        return await asyncio.to_thread(self._colorize, image)
+        return await asyncio.to_thread(self._colorize, image, self.reference_image())
 
-    def _colorize(self, image: Image.Image) -> Image.Image:  # pragma: no cover - interface
+    def reference_image(self) -> Optional[Image.Image]:
+        """The colored image the settings name for the model to follow, if any."""
+        return None
+
+    def _colorize(self, image: Image.Image, reference: Optional[Image.Image] = None) -> Image.Image:  # pragma: no cover - interface
         """``image`` in color, at its size."""
         raise NotImplementedError
 

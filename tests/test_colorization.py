@@ -278,7 +278,7 @@ def test_the_request_sends_the_page_then_the_reference_with_the_lora(tmp_path):
     settings = DiffusionColorizerSettings(prompt="trigger", lora_strength=0.8, megapixels=0.25)
     server = _Server()
     reference = Image.new("RGB", (32, 32), PAINT)
-    ColorizeProcessor(server, {"steps": 20, "cfg_scale": 5}, settings, tmp_path / "color.safetensors", reference).inference(Image.new("RGB", (600, 900), (255, 255, 255)))
+    ColorizeProcessor(server, {"steps": 20, "cfg_scale": 5}, settings, tmp_path / "color.safetensors").inference(Image.new("RGB", (600, 900), (255, 255, 255)), reference)
 
     request = server.requests[0]
     assert request["prompt"] == "trigger"
@@ -336,8 +336,17 @@ def test_the_provider_accepts_any_model_that_edits_from_references():
 
 def test_the_provider_names_no_model_of_its_own():
     assert DiffusionColorizerProvider.weight_sources() == ()
-    assert DiffusionColorizerProvider.remotable is False
     assert DiffusionColorizerProvider.stage is Stage.COLORIZATION
+
+
+def test_the_provider_can_run_on_a_worker_and_sends_its_lora_there(tmp_path):
+    from urakatsu.remote import CLOUD, REMOTE
+
+    assert DiffusionColorizerProvider.runtimes_declared() == ("diffusion", REMOTE, CLOUD)
+    lora = tmp_path / "color.safetensors"
+    lora.write_bytes(b"x")
+    assert DiffusionColorizerProvider({"lora": str(lora)}).remote_files() == {"lora": lora}
+    assert DiffusionColorizerProvider({"lora": str(lora), "lora_strength": 0}).remote_files() == {}
 
 
 def test_a_missing_lora_or_reference_is_reported(tmp_path):
@@ -346,7 +355,7 @@ def test_a_missing_lora_or_reference_is_reported(tmp_path):
         provider._lora()
     provider = DiffusionColorizerProvider({"reference": str(tmp_path / "gone.png")})
     with pytest.raises(ProviderUnavailable, match="color reference"):
-        provider._reference()
+        provider.reference_image()
 
 
 def test_the_server_finds_the_lora_folder(tmp_path):

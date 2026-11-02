@@ -381,11 +381,22 @@ def test_what_the_settings_replace_is_not_pending():
     assert _labels(Er0mangaSegProvider, {"weights": "D:/mine.pth"}) == []
 
 
-def test_decensor_never_leaves_this_computer():
-    assert Flux2KleinDecensorProvider.runtimes_declared() == ("diffusion",)
+def test_decensor_leaves_this_computer_only_for_a_worker_the_user_picks():
+    from urakatsu.remote import CLOUD, REMOTE
+
+    assert Flux2KleinDecensorProvider.runtimes_declared() == ("diffusion", REMOTE, CLOUD)
+    assert Flux2KleinDecensorProvider.default_runtime() == "diffusion"  # a worker is only ever picked on purpose
     assert Flux2KleinDecensorProvider.stage is Stage.DECENSOR
-    assert "server_url" not in Flux2KleinDecensorSettings.model_fields
+    assert "server_url" not in Flux2KleinDecensorSettings.model_fields  # no attached server outside the worker path
     assert not Flux2KleinDecensorProvider(Flux2KleinDecensorSettings()).attached()
+
+
+def test_only_a_lora_the_user_picked_is_sent_to_a_worker(tmp_path):
+    assert Flux2KleinDecensorProvider(Flux2KleinDecensorSettings()).remote_files() == {}  # the worker downloads the pinned one
+    lora = tmp_path / "bars.safetensors"
+    lora.write_bytes(b"x")
+    assert Flux2KleinDecensorProvider(Flux2KleinDecensorSettings(lora=str(lora))).remote_files() == {"lora": lora}
+    assert Flux2KleinDecensorProvider(Flux2KleinDecensorSettings(lora=str(lora), lora_strength=0)).remote_files() == {}
 
 
 class _Server:
