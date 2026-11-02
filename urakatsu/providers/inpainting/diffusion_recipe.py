@@ -17,6 +17,7 @@ from __future__ import annotations
 import functools
 import logging
 import math
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -76,13 +77,25 @@ class DiffusionRecipeSettings(ProviderSettings):
 
 
 @functools.lru_cache(maxsize=4)
-def slot_flags(executable: str) -> dict[str, str]:
-    """``sd-server``'s flag for each recipe slot, read from its ``--help``."""
+def slot_flags(executable: str, env: tuple[tuple[str, str], ...] = ()) -> dict[str, str]:
+    """``sd-server``'s flag for each recipe slot, read from its ``--help``.
+
+    ``env`` is the environment the server launches with: a ROCm build on Linux does not start
+    without the ROCm libraries on ``LD_LIBRARY_PATH``, and then prints no help at all. A failure
+    is raised (and not cached) rather than read as a release without the flags."""
     try:
-        text = subprocess.run([executable, "--help"], capture_output=True, text=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-    except (OSError, subprocess.SubprocessError):
-        text = ""
+        result = subprocess.run(
+            [executable, "--help"],
+            capture_output=True, text=True, timeout=30, env={**os.environ, **dict(env)},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )  # fmt: skip
+        text, error = result.stdout, result.stderr
+    except (OSError, subprocess.SubprocessError) as exc:
+        text, error = "", str(exc)
     flags = set(re.findall(r"(?<![\w-])(--[a-z][a-z0-9_-]*)", text))
+    if not flags:
+        detail = error.strip().splitlines()[-1] if error.strip() else "it printed nothing"
+        raise ProviderUnavailable(f"stable-diffusion.cpp's sd-server did not start ({detail})")
     return {flag[2:].replace("-", "_"): flag for flag in flags}
 
 
@@ -260,7 +273,7 @@ class DiffusionRecipeProvider(InpaintingProvider):
         package = runtime.package()  # installs or updates stable-diffusion.cpp first
         recipe = self._recipe(package.tag, recipe_id)
 
-        flags = slot_flags(str(package.executable))
+        flags = slot_flags(str(package.executable), tuple(sorted(runtime.env(package).items())))
         args: list[str] = []
         sizes: list[int] = []
         for slot, source in components:

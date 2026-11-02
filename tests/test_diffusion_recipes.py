@@ -385,6 +385,29 @@ def test_slots_map_to_the_servers_own_flags():
         flag_for("audio_vae", flags)
 
 
+def test_help_runs_with_the_servers_environment(tmp_path):
+    """A ROCm sd-server on Linux needs the ROCm libraries to print its help; a server that
+    printed nothing is reported as not starting, not as a release without the flag."""
+    import subprocess
+    import sys
+    from unittest import mock
+
+    from urakatsu.core.errors import ProviderUnavailable
+    from urakatsu.providers.inpainting.diffusion_recipe import slot_flags
+
+    def fake_run(args, env, **kwargs):
+        ready = env.get("LD_LIBRARY_PATH") == "/rocm/lib"
+        out = "  --diffusion-model <string>  path to the diffusion model\n" if ready else ""
+        err = "" if ready else "error while loading shared libraries: libhipblas.so.3"
+        return subprocess.CompletedProcess(args, 0 if ready else 127, out, err)
+
+    exe = str(tmp_path / f"sd-server-{sys.version_info.minor}")
+    with mock.patch("urakatsu.providers.inpainting.diffusion_recipe.subprocess.run", fake_run):
+        with pytest.raises(ProviderUnavailable, match="did not start .*libhipblas"):
+            slot_flags(exe)
+        assert slot_flags(exe, (("LD_LIBRARY_PATH", "/rocm/lib"),))["diffusion_model"] == "--diffusion-model"
+
+
 @pytest.mark.parametrize(
     "sizes, free, ram, expected",
     [

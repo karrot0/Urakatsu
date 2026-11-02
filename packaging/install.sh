@@ -26,18 +26,46 @@ die() {
     exit 1
 }
 
-# The package with WebKitGTK 4.1, which the setup window needs, for this distribution.
-webkit_hint() {
+# The app's window is Qt (pywebview's Qt backend), from wheels that leave these to the system.
+# Setup installs it later, so they are checked here, before they can stop the first start.
+QT_LIBS="libnss3.so libnspr4.so libXtst.so.6 libasound.so.2"
+# Only X11 sessions load Qt's xcb plugin; many desktops lack these, libxcb-cursor above all.
+XCB_LIBS="libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1
+    libxcb-render-util.so.0 libxcb-shape.so.0 libxcb-xkb.so.1 libxkbcommon-x11.so.0"
+
+# The libraries above that this system lacks.
+missing_qt_libs() {
+    known="$(PATH="$PATH:/sbin:/usr/sbin" ldconfig -p 2> /dev/null)" || return 0
+    needed="$QT_LIBS"
+    [ -n "${WAYLAND_DISPLAY:-}" ] || needed="$needed $XCB_LIBS"
+    for lib in $needed; do
+        case "$known" in
+            *"$lib "*) ;;
+            *) printf '%s ' "$lib" ;;
+        esac
+    done
+}
+
+# Everything the setup window and the app need from this distribution, as one command.
+packages_hint() {
     if command -v apt-get > /dev/null 2>&1; then
-        say "  sudo apt-get install libwebkit2gtk-4.1-0"
+        alsa=libasound2 # renamed in Ubuntu 24.04 and Debian 13, and apt will not pick for us
+        apt-cache show libasound2t64 > /dev/null 2>&1 && alsa=libasound2t64
+        say "  sudo apt-get install libwebkit2gtk-4.1-0 libnss3 libxtst6 $alsa libxcb-cursor0" \
+            "libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0" \
+            "libxcb-xkb1 libxkbcommon-x11-0"
     elif command -v dnf > /dev/null 2>&1; then
-        say "  sudo dnf install webkit2gtk4.1"
+        say "  sudo dnf install webkit2gtk4.1 nss libXtst alsa-lib xcb-util-cursor xcb-util-wm" \
+            "xcb-util-image xcb-util-keysyms xcb-util-renderutil libxkbcommon-x11"
     elif command -v pacman > /dev/null 2>&1; then
-        say "  sudo pacman -S webkit2gtk-4.1"
+        say "  sudo pacman -S webkit2gtk-4.1 nss libxtst alsa-lib xcb-util-cursor xcb-util-wm" \
+            "xcb-util-image xcb-util-keysyms xcb-util-renderutil libxkbcommon-x11"
     elif command -v zypper > /dev/null 2>&1; then
-        say "  sudo zypper install libwebkit2gtk-4_1-0"
+        say "  sudo zypper install libwebkit2gtk-4_1-0 mozilla-nss libXtst6 libasound2 libxcb-cursor0" \
+            "libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0" \
+            "libxcb-xkb1 libxkbcommon-x11-0"
     else
-        say "  WebKitGTK 4.1, from your distribution's packages"
+        say "  the packages with these libraries, from your distribution"
     fi
 }
 
@@ -73,7 +101,9 @@ main() {
     getconf GNU_LIBC_VERSION > /dev/null 2>&1 || die "Urakatsu needs a Linux with glibc 2.35 or newer"
     [ "$(id -u)" != 0 ] || die "Urakatsu installs per user: run this as yourself, without sudo"
     [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || die "Urakatsu is a desktop app and there is no display here"
-    command -v curl > /dev/null 2>&1 || die "this script needs curl"
+    for tool in curl awk tar sha256sum ldd; do
+        command -v "$tool" > /dev/null 2>&1 || die "this script needs $tool, which is not installed"
+    done
 
     say "Finding the $channel..."
     json="$(curl -fsSL "$release")" || die "could not read $release (GitHub may be limiting requests: try again later)"
@@ -100,17 +130,18 @@ main() {
     missing="$(ldd "$work/Urakatsu" 2>&1 | grep 'not found' || true)"
     case "$missing" in
         *GLIBC*) die "Urakatsu needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36)" ;;
-        *libwebkit2gtk*)
-            say "Urakatsu needs WebKitGTK 4.1. Install it, then run this again:"
-            webkit_hint
-            exit 1
-            ;;
-        ?*) die "Urakatsu needs libraries this system is missing: $missing" ;;
     esac
+    libs="$(printf '%s\n' "$missing" | awk 'NF { printf "%s ", $1 }')$(missing_qt_libs)"
+    if [ -n "$libs" ]; then
+        say "This system is missing libraries Urakatsu needs: $libs"
+        say "Install them, then run this again:"
+        packages_hint
+        exit 1
+    fi
 
     if [ -n "$quiet" ]; then
         "$work/Urakatsu" --quiet < /dev/null
-        say "Urakatsu is installed: open it from the applications menu."
+        say "Urakatsu is installed and starting. It is also in your applications menu."
     else
         say "Opening Urakatsu setup..."
         "$work/Urakatsu" < /dev/null

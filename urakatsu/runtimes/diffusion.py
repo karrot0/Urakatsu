@@ -125,10 +125,14 @@ class DiffusionRuntime(Runtime):
     def package(self) -> Installed:
         return self.packages.ensure(STABLE_DIFFUSION_CPP, _hardware())
 
+    def env(self, installed: Installed) -> dict[str, str]:
+        """What ``sd-server`` runs with: only this device, and a ROCm build's libraries (it does not start without them)."""
+        return device_env(self.device, installed.variant) if self.device.is_accelerator else {}
+
     def launch(self, name: str, model_args: Sequence[str]) -> SdServer:
         installed = self.package()
         port = free_port()
-        env = device_env(self.device, installed.variant) if self.device.is_accelerator else {}
+        env = self.env(installed)
         process = ServerProcess(
             f"sd-server-{name}",
             installed.executable,

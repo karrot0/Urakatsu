@@ -34,9 +34,11 @@ WebKitGTK 4.1 (`libwebkit2gtk-4.1-0`), which desktop installs of current distrib
 carries; the site's `/install.sh` redirects to the latest release's copy. It finds the release's
 tarball with GitHub's API, checks its SHA-256, extracts it under `~/.cache` (`/tmp` is often
 noexec), and runs the setup above. It stops first on anything the setup could not survive: another
-system or architecture, root, no display, or a missing library, naming the package to install for
-WebKitGTK. It never runs `sudo`. `--nightly` takes the nightly build; `--quiet` passes `--quiet` to
-setup, which uses the default folders. Only Windows installs its own updates, so on Linux running
+system or architecture, root, no display, or a missing library. WebKitGTK is one of those, and so
+are the libraries the app's Qt window takes from the system (`libxcb-cursor` is the one desktops
+tend to lack); the script prints the one command that installs them on apt, dnf, pacman or zypper
+systems, and never runs `sudo` itself. `--nightly` takes the nightly build; `--quiet` passes
+`--quiet` to setup, which uses the default folders. Only Windows installs its own updates, so on Linux running
 the command again is the update.
 
 ## The app environment
