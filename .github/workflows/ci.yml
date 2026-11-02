@@ -70,6 +70,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.2
       # Errors only: syntax errors and undefined names.
       - run: uvx ruff check --select E9,F63,F7,F82 urakatsu tests packaging
+      - run: sh -n packaging/install.sh
 
   web:
     name: Web UI

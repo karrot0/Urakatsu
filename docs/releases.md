@@ -34,7 +34,8 @@ release PR open and [git-cliff](https://git-cliff.org) writes the changelog.
    `CHANGELOG.md`.
 2. Merging the PR tags `vX.Y.Z` and creates the GitHub release with the same entry as its notes.
 3. The release workflow then runs on the tag: it checks the tag against `pyproject.toml`, builds
-   the three installers, attaches them, and names the release "Urakatsu X.Y.Z".
+   the three installers, attaches them with the Linux install script (`packaging/install.sh`), and
+   names the release "Urakatsu X.Y.Z".
 
 To change what a release says, edit the commit messages before it, or edit the release PR's
 `CHANGELOG.md` entry and its description before merging (the description becomes the notes).

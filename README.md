@@ -63,6 +63,17 @@
 
 ### Install
 
+On Linux, one command downloads the latest release and opens setup:
+
+```bash
+curl -fsSL https://urakatsu.com/install.sh | sh
+```
+
+Add `-s -- --nightly` after `sh` for the nightly build, or `-s -- --quiet` to skip the setup window
+and use the default folders. The script is [packaging/install.sh](packaging/install.sh).
+
+On any system, you can install by hand:
+
 1. Download the file for your system from the [latest release](../../releases/latest). For the
    newest changes, take the nightly build from the [releases page](../../releases) instead.
 
@@ -93,7 +104,8 @@ from other installs with their projects and models, ready to reuse.
 
 ### Update and uninstall
 
-- **Update:** run the newer download the same way. Your projects, models and settings stay.
+- **Update:** run the newer download the same way, or on Linux the install command again. Your
+  projects, models and settings stay.
 - **Uninstall:** you choose whether your projects and models are deleted too.
   - **Windows:** open **Settings**, then **Apps**, then **Installed apps**, and uninstall
     Urakatsu.
