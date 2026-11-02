@@ -105,7 +105,7 @@ export async function exportChapter(projectId: string, chapterId: string, format
   return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format === "strip" ? "png" : format}` };
 }
 
-/** Replaces a page's source image. The server makes a new page in its place; this returns its id. */
+/** Replaces a page's source image, keeping the page and its work; this returns the page's id. */
 export async function uploadPageSource(projectId: string, pageId: string, file: File): Promise<string> {
   const form = new FormData();
   form.append("file", file);

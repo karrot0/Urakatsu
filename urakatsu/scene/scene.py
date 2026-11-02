@@ -18,6 +18,7 @@ remove user-owned values or values owned by another producer.
 from __future__ import annotations
 
 import copy
+import math
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -556,6 +557,35 @@ class Edit:
         self._state_page(page_id).entities[page_id].components[c.Page.KIND] = page.model_copy()
 
     @_logged
+    def scale_page(self, page_id: str, width: float, height: float) -> None:
+        """Resizes the page to ``width`` x ``height`` and scales what is drawn on it to match
+        (shapes, OCR lines, type sizes). Origins are kept: a resize is not an edit, so generated
+        work stays re-runnable. Assets are resampled separately (:meth:`resample_asset`)."""
+        state = self._state_page(page_id)
+        components = state.entities[page_id].components
+        page = components[c.Page.KIND]
+        sx, sy = width / page.width, height / page.height
+        uniform = math.sqrt(sx * sy)  # type sizes under a resize that changes the aspect
+
+        def scaled(points: list[c.Point]) -> list[c.Point]:
+            return [c.Point(x=p.x * sx, y=p.y * sy) for p in points]
+
+        components[c.Page.KIND] = page.model_copy(update={"width": width, "height": height})
+        for entity in state.entities.values():
+            parts = entity.components
+            if (geometry := parts.get(c.Geometry.KIND)) is not None:
+                parts[c.Geometry.KIND] = geometry.model_copy(update={"points": scaled(geometry.points)})
+            if (ocr := parts.get(c.OcrAnalysis.KIND)) is not None:
+                parts[c.OcrAnalysis.KIND] = ocr.model_copy(update={"line_boundaries": [scaled(line) for line in ocr.line_boundaries]})
+            if (type_ := parts.get(c.Typography.KIND)) is not None:
+                parts[c.Typography.KIND] = type_.model_copy(
+                    update={
+                        "size": type_.size * uniform if type_.size is not None else None,
+                        "stroke_width": type_.stroke_width * uniform if type_.stroke_width is not None else None,
+                    }
+                )
+
+    @_logged
     def add_entity(self, parent: str, at: At = At.END) -> str:
         page = self.page_for(parent)
         state = self._state_page(page)
@@ -675,11 +705,21 @@ class Edit:
         if existing is not None and self.generation is not None:
             if isinstance(existing.origin, c.UserOrigin):
                 raise AuthorshipError("pipeline cannot overwrite a user-owned asset")
-        blob = self.base.blobs.address(value.data) if hasattr(self.base.blobs, "address") else new_id()
-        self._blobs[blob] = value.data
         target.assets[role] = c.Asset(
-            origin=self._lifecycle_origin(), blob=blob, media_type=value.media_type, metadata=value.metadata
+            origin=self._lifecycle_origin(), blob=self._store(value.data), media_type=value.media_type, metadata=value.metadata
         )
+
+    @_logged
+    def resample_asset(self, entity: str, role: str, value: c.AssetInput) -> None:
+        """Replaces an asset with the same image at another size, keeping its origin (see :meth:`scale_page`)."""
+        target = self._entity(entity, write=True)
+        existing = target.assets[role]
+        target.assets[role] = existing.model_copy(update={"blob": self._store(value.data), "media_type": value.media_type, "metadata": value.metadata})
+
+    def _store(self, data: bytes) -> str:
+        blob = self.base.blobs.address(data) if hasattr(self.base.blobs, "address") else new_id()
+        self._blobs[blob] = data
+        return blob
 
     @_logged
     def remove_asset(self, entity: str, role: str) -> None:

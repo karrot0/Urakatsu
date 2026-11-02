@@ -210,7 +210,7 @@ interface Actions {
   redo(): Promise<void>;
   uploadPages(files: FileList | File[], chapterId?: string): Promise<void>;
   removePage(pageId: string): Promise<void>;
-  /** Replaces a page's source image; the page's text and cleanup go with the old one. */
+  /** Replaces a page's source image; the page keeps its text and layers, scaled to the new image. */
   swapPageSource(pageId: string, file: File): Promise<void>;
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
@@ -564,17 +564,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const project = state.project;
       if (!project) return;
       try {
-        const swapped = await uploadPageSource(project.id, pageId, file);
+        await uploadPageSource(project.id, pageId, file);
         const next = await client.getProject({ projectId: project.id });
         forgetAssets(project.id, pageId);
-        setState((s) =>
-          withLiveSelection({
-            ...s,
-            project: next,
-            pageId: s.pageId === pageId ? swapped : s.pageId,
-            blockId: s.pageId === pageId ? undefined : s.blockId,
-          }),
-        );
+        setState((s) => withLiveSelection({ ...s, project: next }));
       } catch (error) {
         fail(error);
       }

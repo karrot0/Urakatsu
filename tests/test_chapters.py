@@ -6,12 +6,12 @@ import pytest
 from PIL import Image
 
 from urakatsu.pipeline.projects import DEFAULT_CHAPTER_ID, ProjectStore, chapters_of
+from urakatsu.scene import At
+from urakatsu.scene import components as c
 
 
 def png(color: int = 0) -> bytes:
-    buffer = io.BytesIO()
-    Image.new("RGB", (8, 8), (color, color, color)).save(buffer, format="PNG")
-    return buffer.getvalue()
+    return encoded(Image.new("RGB", (8, 8), (color, color, color)), "PNG")
 
 
 def layout(store: ProjectStore, project: str) -> list[tuple[str, list[str]]]:
@@ -38,17 +38,55 @@ def test_swapping_a_source_keeps_the_place_and_label_and_can_be_undone(tmp_path)
     bigger = io.BytesIO()
     Image.new("RGB", (16, 24), (9, 9, 9)).save(bigger, format="PNG")
 
-    swapped = store.swap_page_source(project, a, bigger.getvalue())
+    assert store.swap_page_source(project, a, bigger.getvalue()) == a
 
     snapshot = store.session(project).snapshot()
-    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [swapped, b]), (second, [c])]
-    assert snapshot.pages() == [swapped, b, c]
-    page = snapshot.page(swapped)
+    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [a, b]), (second, [c])]
+    page = snapshot.page(a)
     assert (page.label, page.width, page.height) == ("a.png", 16, 24)
-    assert snapshot.blobs.read(snapshot.asset(swapped, "source").blob) == bigger.getvalue()
+    assert snapshot.blobs.read(snapshot.asset(a, "source").blob) == bigger.getvalue()
 
     store.session(project).undo()
-    assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [a, b]), (second, [c])]
+    snapshot = store.session(project).snapshot()
+    assert (snapshot.page(a).width, snapshot.page(a).height) == (8, 8)
+    assert snapshot.blobs.read(snapshot.asset(a, "source").blob) == png()
+
+
+def test_swapping_a_source_keeps_the_page_work_scaled_to_the_new_size(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create("p")
+    page = store.import_page(project, "a.png", png())
+    session = store.session(project)
+    edit = session.snapshot().edit_as(c.Generation(producer="test"))
+    region = edit.add_analysis_region(page, At.END, "text", c.Geometry.rectangle(2, 2, 4, 4))
+    content = edit.add_text_content(page)
+    edit.set(content, c.Translation(text=c.Authored(value="Hello")))
+    edit.set_asset(page, "text-mask", c.AssetInput(data=encoded(Image.new("L", (8, 8), 255), "PNG"), media_type="image/png", metadata=c.AssetMetadata(width=8, height=8)))
+    session.commit(edit.finish())
+    edit = session.snapshot().edit()
+    layer = edit.add_entity(page)
+    edit.set(layer, c.RasterLayer(name="Paint", kind=c.RasterLayerKind.PAINT))
+    edit.set(layer, c.Typography(size=10))
+    edit.set_asset(layer, "source", c.AssetInput(data=encoded(Image.new("RGBA", (8, 8), (255, 0, 0, 255)), "PNG"), media_type="image/png", metadata=c.AssetMetadata(width=8, height=8)))
+    session.commit(edit.finish())
+
+    store.swap_page_source(project, page, encoded(Image.new("RGB", (16, 24)), "PNG"))
+
+    snapshot = session.snapshot()
+    geometry = snapshot.component(region, c.Geometry)
+    assert [(p.x, p.y) for p in geometry.points] == [(4, 6), (12, 6), (12, 18), (4, 18)]
+    assert not c.is_user(geometry.origin)  # still the detector's, so a re-run may replace it
+    assert snapshot.component(content, c.Translation).text.value == "Hello"
+    assert snapshot.component(layer, c.Typography).size == pytest.approx(10 * 6**0.5)
+    mask = snapshot.asset(page, "text-mask")
+    assert not c.is_user(mask.origin)
+    assert Image.open(io.BytesIO(snapshot.blobs.read(mask.blob))).size == (16, 24)
+    paint = Image.open(io.BytesIO(snapshot.asset_bytes(layer, "source")))
+    assert paint.size == (16, 24) and paint.getpixel((8, 12)) == (255, 0, 0, 255)
+
+    session.undo()
+    snapshot = session.snapshot()
+    assert [(p.x, p.y) for p in snapshot.component(region, c.Geometry).points] == [(2, 2), (6, 2), (6, 6), (2, 6)]
 
 
 def test_a_swap_that_cannot_read_the_image_leaves_the_page_alone(tmp_path):
@@ -217,9 +255,8 @@ def test_the_source_route_swaps_a_page_and_waits_for_running_jobs(isolated_home)
 
     swapped = client.put(url, files=image)
     assert swapped.status_code == 200
-    assert swapped.json()["name"] == "a.png" and swapped.json()["id"] != page
-    assert [p.id for p in workspace.project_view(project).pages] == [swapped.json()["id"]]
+    assert swapped.json()["name"] == "a.png" and swapped.json()["id"] == page  # the same page, new image
+    assert [p.id for p in workspace.project_view(project).pages] == [page]
 
-    assert "not found" in client.put(url, files=image).json()["detail"]  # the old page is gone
     workspace.jobs["running"] = type("Job", (), {"project_id": project, "status": "running"})()
-    assert client.put(f"/api/v1/projects/{project}/pages/{swapped.json()['id']}/source", files=image).status_code == 412
+    assert client.put(url, files=image).status_code == 412

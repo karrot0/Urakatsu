@@ -318,22 +318,25 @@ class ProjectStore:
         self.touch(project_id)
 
     def swap_page_source(self, project_id: str, page_id: str, data: bytes) -> str:
-        """Replaces a page's source image in one undoable commit and returns the new page: same
-        label, same place. Page work (text, cleanup) is discarded: it belonged to the old image."""
+        """Replaces a page's source image in one undoable commit and returns the page's id (it is
+        the same page). Page work (text, translations, masks, cleanup and paint layers) is kept;
+        an image of another size scales it to fit, so a better scan of the page keeps its place."""
         data, media_type, width, height = _normalize(data, self.lossless_pages)
         session = self.session(project_id)
         snapshot = session.snapshot()
-        label = snapshot.page(page_id).label
-        chapters = chapters_of(snapshot)
+        page = snapshot.page(page_id)
+        old = (round(page.width), round(page.height))
         edit = snapshot.edit()
-        page = _add_page(edit, label, data, media_type, width, height)
-        edit.remove_entity(page_id, RemovePolicy.CASCADE)
-        for chapter in chapters:
-            chapter.pages = [page if p == page_id else p for p in chapter.pages]
-        write_chapters(edit, chapters)
+        edit.set_asset(page_id, "source", AssetInput(data=data, media_type=media_type, metadata=AssetMetadata(width=width, height=height)))
+        if (width, height) != old:
+            edit.scale_page(page_id, float(width), float(height))
+            for entity in snapshot.subtree(page_id):
+                for role, asset in snapshot.state.entity(entity).assets.items():
+                    if (entity, role) != (page_id, "source") and (asset.metadata.width, asset.metadata.height) == old:
+                        edit.resample_asset(entity, role, _resampled(snapshot.blobs.read(asset.blob), asset.metadata, (width, height)))
         session.commit(edit.finish())
         self.touch(project_id)
-        return page
+        return page_id
 
     # -- pages ---------------------------------------------------------------------------------------
 
@@ -496,6 +499,17 @@ def _encode_slices(slices: list[Image.Image], lossless: bool, lossless_pages: bo
 
     with ThreadPoolExecutor(min(8, max(1, len(slices)))) as pool:
         return list(pool.map(encode, slices))
+
+
+def _resampled(data: bytes, metadata: AssetMetadata, size: tuple[int, int]) -> AssetInput:
+    """A page-sized asset (a mask or a layer) at ``size``: masks keep hard edges, layers are filtered."""
+    image = Image.open(io.BytesIO(data))
+    if image.mode in ("1", "L", "P"):
+        image = image.resize(size, Image.Resampling.NEAREST)
+    else:  # premultiplied, so transparent pixels do not bleed their color into the edges
+        image = image.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
+    resized = metadata.model_copy(update={"width": size[0], "height": size[1]})
+    return AssetInput(data=_encode(image, format="PNG"), media_type="image/png", metadata=resized)
 
 
 def _encode(image: Image.Image, **options) -> bytes:
