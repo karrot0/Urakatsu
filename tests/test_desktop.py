@@ -169,3 +169,57 @@ def test_the_webview_cache_is_emptied_once_per_ui_build(monkeypatch, tmp_path):
     (ui / "index.html").write_text("<script src='/assets/index-new.js'></script>")
     app.drop_stale_cache(storage)  # updated: emptied again
     assert not cache.exists() and (kept / "data").exists()
+
+
+def test_linux_downloads_use_qt6_calls_and_the_pages_file_name(tmp_path, monkeypatch):
+    # pywebview's own handler calls Qt 5's setPath, which aborted the app on every export.
+    import types
+
+    class View:
+        localization = {"global.saveFile": "Save file"}
+
+    class Request:  # Qt 6's QWebEngineDownloadRequest
+        def __init__(self):
+            self.calls = []
+
+        def suggestedFileName(self):
+            return "Series - Chapter 1.cbz"
+
+        def downloadDirectory(self):
+            return str(tmp_path)
+
+        def setDownloadDirectory(self, folder):
+            self.calls.append(("directory", folder))
+
+        def setDownloadFileName(self, name):
+            self.calls.append(("name", name))
+
+        def accept(self):
+            self.calls.append(("accept",))
+
+        def cancel(self):
+            self.calls.append(("cancel",))
+
+    asked = []
+    chosen = str(tmp_path / "out" / "mine.cbz")
+    dialog = SimpleNamespace(getSaveFileName=lambda parent, title, suggested: (asked.append(suggested), (chosen, ""))[1])
+    qt = types.ModuleType("webview.platforms.qt")
+    qt.QFileDialog = dialog
+    qt.BrowserView = type("BrowserView", (), {})
+    qt._profile_storage_path = "~/.pywebview"
+    platforms = types.ModuleType("webview.platforms")
+    platforms.qt = qt
+    monkeypatch.setitem(sys.modules, "webview.platforms", platforms)
+    monkeypatch.setitem(sys.modules, "webview.platforms.qt", qt)
+
+    app.qt_downloads(tmp_path / "storage")
+    assert qt._profile_storage_path == str(tmp_path / "storage")
+    request = Request()
+    qt.BrowserView.on_download_requested(View(), request)
+    assert asked == [str(tmp_path / "Series - Chapter 1.cbz")]
+    assert request.calls == [("directory", str(tmp_path / "out")), ("name", "mine.cbz"), ("accept",)]
+
+    dialog.getSaveFileName = lambda *args: ("", "")
+    request = Request()
+    qt.BrowserView.on_download_requested(View(), request)
+    assert request.calls == [("cancel",)]

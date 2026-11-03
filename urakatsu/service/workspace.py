@@ -196,7 +196,15 @@ class Workspace:
         """GPU and system memory with Urakatsu's share of each; the UI polls this."""
         from urakatsu.runtimes.memory import report
 
-        return report(self.runtimes.device).model_dump(mode="json")
+        loaded = [
+            {"stage": stage.value, "provider": provider.id, "name": getattr(provider, "name", provider.id)}
+            for stage, provider in self.pipeline.loaded_providers().items()
+        ]
+        return {**report(self.runtimes.device).model_dump(mode="json"), "loaded": loaded, "busy": self.pipeline.busy}
+
+    async def unload_models(self, stage: Optional[str] = None) -> list[str]:
+        """Unloads one stage's model (``stage``), or every model, outside a run; returns the stages unloaded."""
+        return [s.value for s in await self.pipeline.unload(Stage.parse(stage) if stage else None)]
 
     def capabilities(self) -> dict[str, Any]:
         report = self.report()

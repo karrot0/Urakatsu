@@ -507,6 +507,46 @@ def main() -> int:
     storage.mkdir(parents=True, exist_ok=True)
     drop_stale_cache(storage)
     webview.settings["ALLOW_DOWNLOADS"] = True
-    icon = str(resources.files("urakatsu.desktop") / "urakatsu.png") if sys.platform.startswith("linux") else None
-    webview.start(desktop.boot, private_mode=False, storage_path=str(storage), icon=icon)
+    linux = sys.platform.startswith("linux")
+    if linux:
+        qt_downloads(storage)
+    icon = str(resources.files("urakatsu.desktop") / "urakatsu.png") if linux else None
+    webview.start(desktop.boot, private_mode=False, storage_path=str(storage), icon=icon, gui="qt" if linux else None)
     return 0
+
+
+def qt_downloads(storage: Path) -> None:
+    """Replaces pywebview's Qt download handler, which crashes the app on every export.
+
+    pywebview 6.2 calls Qt 5's ``QWebEngineDownloadItem.setPath``; Qt 6's download request has no
+    such method, and an exception in a PyQt6 slot aborts the process. Its dialog also suggested
+    the blob URL's id rather than the name the page gave the file (``<a download>``).
+    """
+    try:
+        from webview.platforms import qt
+    except ImportError:
+        log.exception("Qt cannot be loaded; downloads use pywebview's own handler")
+        return
+    # Read when the module loads, before ``webview.start`` sets the storage path: set it here,
+    # or the window's profile (saved theme, shortcuts, sign-ins) would move to ~/.pywebview.
+    qt._profile_storage_path = str(storage)
+
+    def on_download_requested(view: Any, download: Any) -> None:
+        try:
+            name = download.suggestedFileName() if hasattr(download, "suggestedFileName") else Path(download.url().path()).name
+            folder = download.downloadDirectory() if hasattr(download, "downloadDirectory") else str(Path.home() / "Downloads")
+            path, _ = qt.QFileDialog.getSaveFileName(view, view.localization["global.saveFile"], str(Path(folder) / name))
+            if not path:
+                download.cancel()
+                return
+            target = Path(path)
+            if hasattr(download, "setDownloadFileName"):  # Qt 6
+                download.setDownloadDirectory(str(target.parent))
+                download.setDownloadFileName(target.name)
+            else:
+                download.setPath(str(target))
+            download.accept()
+        except Exception:  # noqa: BLE001 - an exception here would abort the whole app
+            log.exception("could not save a download")
+
+    qt.BrowserView.on_download_requested = on_download_requested

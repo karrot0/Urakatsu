@@ -82,6 +82,33 @@ async def test_zero_keeps_models_loaded(project):
 
 
 @pytest.mark.asyncio
+async def test_models_unload_on_request_one_stage_or_all(project):
+    store, project_id = project
+    pipeline = make_pipeline(0)
+    await pipeline.execute(store.session(project_id), Request())
+    loaded = set(pipeline.loaded())
+    assert Stage.OCR in loaded
+    assert await pipeline.unload(Stage.OCR) == [Stage.OCR]
+    assert set(pipeline.loaded()) == loaded - {Stage.OCR}
+    assert await pipeline.unload(Stage.OCR) == []  # nothing left to unload there
+    assert set(await pipeline.unload()) == loaded - {Stage.OCR}
+    assert pipeline.loaded() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_manual_unload_never_pulls_a_model_from_under_a_run(project):
+    from urakatsu.core.errors import ProjectBusy
+
+    store, project_id = project
+    pipeline = make_pipeline(0)
+    await pipeline.execute(store.session(project_id), Request())
+    with pipeline.in_use():  # a restitch or an agent turn using a model
+        with pytest.raises(ProjectBusy):
+            await pipeline.unload()
+    assert pipeline.loaded()
+
+
+@pytest.mark.asyncio
 async def test_turning_the_timeout_on_starts_the_countdown(project):
     store, project_id = project
     pipeline = make_pipeline(0)

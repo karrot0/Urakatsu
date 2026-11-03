@@ -1,8 +1,8 @@
 // Settings > Sources: the installer. Turn a source system on (Urakatsu installs and starts its
-// runtime), add extension repositories, and install the sources you read. Below them, Komga, where
+// runtime, or connects to a Suwayomi Server you already run), add extension repositories, and install the sources you read. Below them, Komga, where
 // projects are exported to (KomgaSettings).
 
-import { ChevronDown, ChevronUp, Globe, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, EyeOff, Globe, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { describeError } from "../api/client";
@@ -31,6 +31,10 @@ const STATE: Record<SystemStatus["state"], [string, Tone]> = {
 const FIRST_START: Record<string, string> = {
   suwayomi: "The first start downloads Suwayomi Server with its own Java runtime (about 350 MB) and can take a few minutes.",
   mana: "The first start downloads Bun (about 40 MB) to run Mana bundles.",
+};
+
+const SERVER_HINT: Record<string, string> = {
+  suwayomi: "http://192.168.1.10:4567",
 };
 
 const REPOSITORY_HINT: Record<string, string> = {
@@ -88,21 +92,44 @@ function SystemSection({ system, onStatus }: { system: SystemStatus; onStatus: (
     }
   };
 
+  // A server already running elsewhere is connected to, never installed, started or stopped.
+  const remote = !!system.server;
+  const save = async (url: string | null, username: string, password: string | null) => {
+    setBusy(true);
+    try {
+      const status = await sources.connect(system.id, url, username, password);
+      onStatus(status);
+      return true;
+    } catch (error) {
+      ws.reportError(describeError(error));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <PreferenceSection title={system.name} description={system.description} action={<Badge tone={tone}>{label}</Badge>}>
-      <PreferenceRow title="Turned on" description={system.enabled ? "Starts with Urakatsu." : FIRST_START[system.id]}>
+      <PreferenceRow
+        title="Turned on"
+        description={system.enabled ? (remote ? "Connects when Urakatsu starts." : "Starts with Urakatsu.") : remote ? "Connects to your server; nothing is downloaded." : FIRST_START[system.id]}
+      >
         <Switch label={`Turn on ${system.name}`} checked={system.enabled} disabled={busy} onChange={(on) => act(() => sources.setEnabled(system.id, on))} />
       </PreferenceRow>
-      <PreferenceRow title="Runtime" description={system.message ?? (starting && !running ? "Installing and starting. This can take a few minutes the first time." : undefined)}>
+      {system.connectable && <ServerForm system={system} busy={busy} onSave={save} />}
+      <PreferenceRow
+        title={remote ? "Server" : "Runtime"}
+        description={system.message ?? (starting && !running ? (remote ? "Connecting." : "Installing and starting. This can take a few minutes the first time.") : (system.server ?? undefined))}
+      >
         <div className="flex items-center justify-between gap-2">
-          <span className="tabular-nums">{system.version ?? "Not installed"}</span>
+          <span className="tabular-nums">{system.version ?? (remote ? "Not connected" : "Not installed")}</span>
           {running ? (
             <Button variant="outline" size="sm" disabled={busy} onClick={() => act(() => sources.stop(system.id))}>
-              Stop
+              {remote ? "Disconnect" : "Stop"}
             </Button>
           ) : (
             <Button variant="outline" size="sm" disabled={starting || !system.enabled} onClick={() => act(() => sources.start(system.id))}>
-              {starting ? "Starting" : "Start"}
+              {starting ? (remote ? "Connecting" : "Starting") : remote ? "Connect" : "Start"}
             </Button>
           )}
         </div>
@@ -110,6 +137,76 @@ function SystemSection({ system, onStatus }: { system: SystemStatus; onStatus: (
       {system.browser && <BrowserRow system={system} />}
       {running && <Repositories system={system} />}
     </PreferenceSection>
+  );
+}
+
+/** Where the system's server runs: Urakatsu's own, or one already running elsewhere (always on, on a NAS or in Docker). */
+function ServerForm({ system, busy, onSave }: { system: SystemStatus; busy: boolean; onSave: (url: string | null, username: string, password: string | null) => Promise<boolean> }) {
+  const [elsewhere, setElsewhere] = useState(!!system.server);
+  const [url, setUrl] = useState(system.server ?? "");
+  const [username, setUsername] = useState(system.username ?? "");
+  const [password, setPassword] = useState("");
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    setElsewhere(!!system.server);
+    setUrl(system.server ?? "");
+    setUsername(system.username ?? "");
+  }, [system.server, system.username]);
+  // The saved password is only ever sent to the address and user it was saved for.
+  const moved = url.trim().replace(/\/+$/, "") !== (system.server ?? "") || username.trim() !== (system.username ?? "");
+  const saved = !!system.username && !moved;
+
+  return (
+    <>
+      <PreferenceRow title="Use a server already running" description={`Connect to a ${system.name} you run yourself instead of running one here.`}>
+        <Switch
+          label="Use a server already running"
+          checked={elsewhere}
+          disabled={busy}
+          onChange={async (on) => {
+            setElsewhere(on);
+            if (!on && system.server && !(await onSave(null, "", null))) setElsewhere(true);
+          }}
+        />
+      </PreferenceRow>
+      {elsewhere && (
+        <form
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (await onSave(url.trim(), username.trim(), password || (saved ? null : ""))) setPassword("");
+          }}
+        >
+          <PreferenceRow title="Address" description={`Such as ${SERVER_HINT[system.id] ?? "http://192.168.1.10:4567"}.`}>
+            <Input aria-label={`${system.name} address`} placeholder={SERVER_HINT[system.id] ?? "http://"} value={url} onChange={(e) => setUrl(e.target.value)} />
+          </PreferenceRow>
+          <PreferenceRow
+            title="Sign-in"
+            description={saved ? "Saved. Enter a new password to replace it." : "Only when the server asks for one (basic authentication). Kept on this computer; the password is never shown again."}
+          >
+            <div className="flex gap-1">
+              <Input className="min-w-0 flex-1" aria-label="User name" autoComplete="off" placeholder="User name" value={username} onChange={(e) => setUsername(e.target.value)} />
+              <Input
+                className="min-w-0 flex-1"
+                aria-label="Password"
+                type={shown ? "text" : "password"}
+                autoComplete="off"
+                placeholder={saved ? "Saved" : "Password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <Button type="button" variant="ghost" size="icon-sm" aria-label={shown ? "Hide the password" : "Show the password"} onClick={() => setShown((s) => !s)}>
+                {shown ? <EyeOff size={14} /> : <Eye size={14} />}
+              </Button>
+            </div>
+          </PreferenceRow>
+          <div className="flex justify-end py-3">
+            <Button type="submit" size="sm" disabled={busy || !url.trim() || (!moved && !password && system.state === "running")}>
+              {system.server ? "Save and connect" : "Connect"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </>
   );
 }
 

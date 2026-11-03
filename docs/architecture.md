@@ -40,7 +40,8 @@ Urakatsu keeps Koharu's stage semantics:
   and a page's later stages become eligible as soon as their prerequisites finish.
 - At most one job per stage runs at a time, and accelerated stages share one admission lane.
   On out-of-memory the other models are unloaded and the job retries once; any other failure
-  unloads the failing stage.
+  unloads the failing stage. Outside a run, the memory meter in the sidebar lists the loaded
+  models and unloads one or all of them (`POST /api/v1/models/unload`).
 - Stopping is cooperative and discards the uncommitted result. Each committed stage saves the
   project.
 - A user edit (`origin = user`) is never overwritten by a later generated result.

@@ -8,6 +8,12 @@ installing an extension makes its sources (one per language) available.
 Suwayomi keeps every series it has seen in its own database, so a series id here is
 Suwayomi's manga id and a chapter id is its chapter id. Both stay valid as long as the
 server's data folder does.
+
+Urakatsu can also use a Suwayomi Server that already runs elsewhere (``connect``): an always-on
+server on a NAS or in Docker, signed in to with basic authentication when it asks for it. The
+address is kept in ``URAKATSU_HOME/sources/suwayomi/remote.json``. Starting and stopping then
+only connect and disconnect: that server is never installed, started or stopped from here. Its
+ids are its own, so projects linked through one server are not found through the other.
 """
 
 from __future__ import annotations
@@ -24,7 +30,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+from pydantic import BaseModel, field_validator
 
+from urakatsu.core import files
 from urakatsu.runtimes.packages import SUWAYOMI
 
 from .base import (
@@ -51,10 +59,37 @@ MANGA_FIELDS = "id title author artist description genre status thumbnailUrl rea
 CHAPTER_FIELDS = "id name chapterNumber sourceOrder uploadDate scanlator"
 
 
+REMOTE_FILE = "remote.json"
+REMOTE_TIMEOUT = 15.0  # seconds to wait for a server elsewhere to answer when connecting
+
+
 def _free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
+
+
+class RemoteServer(BaseModel):
+    """A Suwayomi Server that runs elsewhere, used instead of Urakatsu's own."""
+
+    url: str  # http(s)://host:port
+    username: str = ""
+    password: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value.endswith("/api/graphql"):
+            value = value[: -len("/api/graphql")]
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("the Suwayomi address starts with http:// or https:// (such as http://192.168.1.10:4567)")
+        return value
+
+    @field_validator("username")
+    @classmethod
+    def _username(cls, value: str) -> str:
+        return value.strip()
 
 
 class SuwayomiSystem(SourceSystem):
@@ -70,15 +105,64 @@ class SuwayomiSystem(SourceSystem):
         self._version: Optional[str] = None
         self._error: Optional[str] = None
         self._starting = False
+        self._connected = False  # to a remote server
         self._lock = threading.Lock()
+        self._remote = self._read_remote()
+
+    # -- remote server -----------------------------------------------------------------------------
+
+    def _read_remote(self) -> Optional[RemoteServer]:
+        try:
+            return RemoteServer.model_validate_json((self.root / REMOTE_FILE).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except ValueError as error:
+            log.warning("ignoring unreadable %s: %s", self.root / REMOTE_FILE, error)
+            return None
+
+    def remote(self) -> Optional[RemoteServer]:
+        """The server elsewhere this system uses, or None while it runs its own."""
+        return self._remote
+
+    def connect(self, url: Optional[str], username: str = "", password: Optional[str] = None) -> SystemStatus:
+        current = self.remote()
+        server = None
+        if url and url.strip():
+            server = RemoteServer(url=url, username=username, password=password or "")
+            # The saved password is only ever sent to the address and user it was saved for.
+            if password is None and current is not None and (current.url, current.username) == (server.url, server.username):
+                server.password = current.password
+        with self._lock:
+            self._terminate()
+            self._connected = False
+            self._version = None
+            self._error = None
+            if server is None:
+                (self.root / REMOTE_FILE).unlink(missing_ok=True)
+            else:
+                files.write_text(self.root / REMOTE_FILE, server.model_dump_json(indent=1))
+            self._remote = server
+        if server is not None:
+            try:
+                self.start()
+            except SourceSystemError:
+                pass  # the status carries the error; the address stays saved to try again
+        return self.status()
+
+    def _auth(self) -> Optional[httpx.BasicAuth]:
+        remote = self.remote()
+        return httpx.BasicAuth(remote.username, remote.password) if remote is not None and remote.username else None
 
     # -- lifecycle ---------------------------------------------------------------------------------
 
     def _running(self) -> bool:
+        if self.remote() is not None:
+            return self._connected and not self._starting
         return self._process is not None and self._process.poll() is None and self._port is not None and not self._starting
 
     def status(self) -> SystemStatus:
-        installed = self.packages.installed(SUWAYOMI)
+        remote = self.remote()
+        installed = self.packages.installed(SUWAYOMI) if remote is None else None
         if self._starting:
             state = "starting"
         elif self._running():
@@ -86,33 +170,54 @@ class SuwayomiSystem(SourceSystem):
         elif self._error:
             state = "error"
         else:
-            state = "stopped" if installed else "not_installed"
+            state = "stopped" if installed or remote else "not_installed"
         return SystemStatus(
             id=self.id,
             name=self.name,
             description=self.description,
             homepage=self.homepage,
             state=state,
-            runtime=SUWAYOMI.id,
+            runtime=SUWAYOMI.id if remote is None else None,
             version=self._version or (installed.tag if installed else None),
             message=self._error if state == "error" else None,
+            connectable=True,
+            server=remote.url if remote else None,
+            username=(remote.username or None) if remote else None,
         )
 
     def start(self) -> SystemStatus:
         with self._lock:
             if self._running():
                 return self.status()
+            remote = self.remote()
             self._starting = True
             self._error = None
             try:
-                self._launch()
+                if remote is not None:
+                    self._reach(remote)
+                else:
+                    self._launch()
             except Exception as error:
-                self._error = str(error)
+                self._error = self._explain(error, remote)
                 self._terminate()
+                if remote is not None:
+                    raise SourceSystemError(f"Could not reach Suwayomi Server at {remote.url}: {self._error}") from error
                 raise SourceSystemError(f"Suwayomi Server did not start: {error}") from error
             finally:
                 self._starting = False
         return self.status()
+
+    def _reach(self, remote: RemoteServer) -> None:
+        about = self._gql("{ aboutServer { version } }", timeout=REMOTE_TIMEOUT)["aboutServer"]
+        self._version = about["version"]
+        self._connected = True
+        log.info("using Suwayomi Server %s at %s", self._version, remote.url)
+
+    @staticmethod
+    def _explain(error: Exception, remote: Optional[RemoteServer]) -> str:
+        if remote is not None and isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 401:
+            return "it asks for a sign-in; enter the user name and password set in its basic authentication" if not remote.username else "it did not accept the user name and password"
+        return str(error)
 
     def _launch(self) -> None:
         from urakatsu.runtimes.hardware import discover
@@ -181,19 +286,25 @@ class SuwayomiSystem(SourceSystem):
                 process.kill()
 
     def stop(self) -> None:
+        """Stops Urakatsu's own server; a remote one keeps running, and is only let go of."""
         with self._lock:
             self._terminate()
+            self._connected = False
 
     # -- transport ---------------------------------------------------------------------------------
+
+    def _address(self) -> str:
+        remote = self.remote()
+        return remote.url if remote is not None else f"http://127.0.0.1:{self._port}"
 
     def _base(self) -> str:
         if not self._running():
             self.start()
-        return f"http://127.0.0.1:{self._port}"
+        return self._address()
 
     def _gql(self, query: str, variables: Optional[dict[str, Any]] = None, timeout: float = 120.0) -> dict[str, Any]:
-        base = f"http://127.0.0.1:{self._port}" if self._starting else self._base()
-        response = httpx.post(f"{base}/api/graphql", json={"query": query, "variables": variables or {}}, timeout=timeout)
+        base = self._address() if self._starting else self._base()
+        response = httpx.post(f"{base}/api/graphql", json={"query": query, "variables": variables or {}}, timeout=timeout, auth=self._auth())
         response.raise_for_status()
         body = response.json()
         if body.get("errors"):
@@ -202,8 +313,10 @@ class SuwayomiSystem(SourceSystem):
 
     def _get(self, path: str) -> Image:
         url = path if path.startswith("http") else self._base() + path
+        # The sign-in goes to the Suwayomi server only, never to a site an absolute URL points at.
+        auth = self._auth() if url.startswith(self._address() + "/") else None
         for attempt in range(2):
-            response = httpx.get(url, timeout=120.0, follow_redirects=True)
+            response = httpx.get(url, timeout=120.0, follow_redirects=True, auth=auth)
             # A thumbnail can 404 while Suwayomi is still fetching it the first time.
             if response.status_code == 404 and attempt == 0:
                 time.sleep(1.0)
@@ -291,14 +404,18 @@ class SuwayomiSystem(SourceSystem):
         pkg = self._gql("query($id: LongString!) { source(id: $id) { extension { pkgName } } }", {"id": source_id})["source"]["extension"]["pkgName"]
         return self.extension_icon(pkg)
 
-    @staticmethod
-    def _series(node: dict[str, Any]) -> Series:
+    def _series(self, node: dict[str, Any]) -> Series:
         authors = [name for name in (node.get("author"), node.get("artist")) if name]
         status = node.get("status")
+        cover = node.get("thumbnailUrl")
+        remote = self.remote()
+        if cover and remote is not None and cover.startswith("/"):
+            # Covers are cached by URL, and another server's manga 5 is another series.
+            cover = remote.url + cover
         return Series(
             id=str(node["id"]),
             title=node["title"],
-            cover=node.get("thumbnailUrl"),
+            cover=cover,
             url=node.get("realUrl"),
             summary=node.get("description") or "",
             authors=list(dict.fromkeys(authors)),

@@ -32,6 +32,12 @@ class RepositoryBody(BaseModel):
     url: str
 
 
+class ServerBody(BaseModel):
+    url: Optional[str] = None  # none: the system runs its own server again
+    username: str = ""
+    password: Optional[str] = None  # none keeps the saved one for the same address and user
+
+
 class LinkBody(BaseModel):
     system: str
     source: str
@@ -130,6 +136,13 @@ def sources_router(ws: Workspace) -> APIRouter:
     @router.post("/sources/systems/{system_id}/stop")
     def stop(system_id: str):
         _guard(systems.get, system_id).stop()
+        return changed(system_id, systems.status(system_id))
+
+    @router.put("/sources/systems/{system_id}/server")
+    def connect(system_id: str, body: ServerBody):
+        """Uses a server already running elsewhere (an always-on Suwayomi), or the system's own again."""
+        changed(system_id)
+        _guard(lambda: systems.get(system_id).connect(body.url, body.username, body.password))
         return changed(system_id, systems.status(system_id))
 
     @router.get("/sources/systems/{system_id}/repositories")

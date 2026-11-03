@@ -27,6 +27,17 @@ downloaded chapter is never fetched again, so your edits stay.
 Covers are kept at tile size in `URAKATSU_HOME/cache/covers`, and a search fetches its covers
 in parallel, so results fill in as fast as the site allows.
 
+## Your own Suwayomi Server
+
+If you already run Suwayomi Server (always on, on a NAS or in Docker), Urakatsu can use it
+instead of installing its own: in Settings, Sources, Suwayomi Server, turn on **Use a server
+already running** and enter its address (such as `http://192.168.1.10:4567`). When the server
+uses basic authentication, enter its user name and password too; they are kept on this computer
+(`URAKATSU_HOME/sources/suwayomi/remote.json`) and only ever sent to that address. Its
+repositories and installed extensions are the ones you see, and Start and Stop only connect and
+disconnect: the server keeps running. Series and chapter ids belong to a server, so a project
+linked through one server is not found through another.
+
 ## Komga
 
 The other way round: a project can go to a Komga server as a series, its chapters as books,

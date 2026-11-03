@@ -27,9 +27,11 @@ import json
 import logging
 import os
 import platform
+import posixpath
 import re
 import shutil
 import ssl
+import stat
 import tarfile
 import tempfile
 import threading
@@ -177,6 +179,8 @@ PACKAGES = {package.id: package for package in (LLAMA_CPP, STABLE_DIFFUSION_CPP,
 
 ARCHIVES = (".zip", ".tar.gz", ".tgz")
 
+_RELINKED: set[Path] = set()  # installs ``relink`` has already checked in this process
+
 
 @lru_cache(maxsize=1)
 def _tls_context() -> ssl.SSLContext:
@@ -289,6 +293,10 @@ class PackageManager:
             data = json.loads(path.read_text(encoding="utf-8"))
             installed = Installed(package=package.id, path=self.root / package.id / data["path"], **{k: data[k] for k in ("tag", "variant", "installed_at", "checked_at")})
             installed.executable  # noqa: B018 - validates the install is complete
+            if installed.path not in _RELINKED:
+                _RELINKED.add(installed.path)
+                if relink(installed.path):
+                    log.info("repaired flattened library symlinks in %s", installed.path)
             return installed
         except (OSError, ValueError, KeyError, FileNotFoundError):
             return None
@@ -600,9 +608,19 @@ def _extract(archive: Path, destination: Path) -> None:
 
     if archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive) as zf:
+            links: list[tuple[str, str]] = []
             for member in zf.infolist():
                 safe(member.filename)
-            zf.extractall(destination)
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    target = zf.read(member).decode("utf-8")
+                    safe(posixpath.join(posixpath.dirname(member.filename), target))
+                    links.append((member.filename, target))
+                else:
+                    zf.extract(member, destination)
+            # ``extractall`` writes a Unix symlink entry as a file holding its target, so a
+            # Linux build's libwebpmux.so.3 -> libwebpmux.so.3.x.y "is too short" to load.
+            for name, target in links:
+                _link(destination / name, target)
     elif archive.name.endswith((".tar.gz", ".tgz")):
         with tarfile.open(archive, "r:gz") as tf:
             for member in tf.getmembers():
@@ -615,6 +633,40 @@ def _extract(archive: Path, destination: Path) -> None:
         for path in destination.rglob("*"):
             if path.is_file() and (path.name.startswith(("llama-", "sd-")) or path.name in ("bun", "java", "cloudflared")) and "." not in path.name:
                 path.chmod(path.stat().st_mode | 0o111)
+
+
+def _link(path: Path, target: str) -> None:
+    """The symlink ``path`` -> ``target``, or a copy of the target where symlinks are not allowed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink() or path.exists():
+        path.unlink()
+    try:
+        os.symlink(target, path)
+    except OSError:
+        source = path.parent / target
+        if source.is_file():
+            shutil.copy2(source, path)
+
+
+def relink(root: Path) -> int:
+    """Repairs shared-library symlinks an earlier install flattened into files naming their target.
+
+    Returns how many it repaired. Installs made before ``_extract`` kept symlinks hold these files.
+    """
+    if os.name == "nt" or not root.is_dir():
+        return 0
+    fixed = 0
+    for path in root.rglob("*.so*"):
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 255:
+            continue
+        try:
+            target = path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if target and "/" not in target and target != path.name and (path.parent / target).is_file():
+            _link(path, target)
+            fixed += 1
+    return fixed
 
 
 def start_updater(manager: Optional[PackageManager] = None) -> Optional[threading.Thread]:

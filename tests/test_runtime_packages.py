@@ -290,3 +290,28 @@ def test_without_the_build_repository_linux_keeps_upstreams_builds(tmp_path, mon
     manager = PackageManager(root=tmp_path, offline=False, transport=sd_repos(build_repo=False))
     installed = manager.ensure(STABLE_DIFFUSION_CPP, CUDA)
     assert (installed.tag, installed.variant) == ("master-12-bbb", "linux-vulkan")
+
+
+def test_zip_symlinks_are_restored_not_flattened(tmp_path):
+    # Linux sd.cpp builds ship libwebpmux.so.3 as a symlink entry; zipfile alone writes it as a
+    # 20-byte file holding the target's name, which the loader rejects as "file too short".
+    from urakatsu.runtimes.packages import _extract, relink
+
+    archive = tmp_path / "sd-bin-Linux.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("build/bin/libwebpmux.so.3.1.0", b"\x7fELF" + b"\0" * 300)
+        link = zipfile.ZipInfo("build/bin/libwebpmux.so.3")
+        link.external_attr = 0o120777 << 16
+        zf.writestr(link, "libwebpmux.so.3.1.0")
+    out = tmp_path / "out"
+    _extract(archive, out)
+    restored = out / "build" / "bin" / "libwebpmux.so.3"
+    assert restored.read_bytes() == (out / "build" / "bin" / "libwebpmux.so.3.1.0").read_bytes()
+
+    # An install made before that keeps the flattened file; relink repairs it on POSIX.
+    restored.unlink()
+    restored.write_text("libwebpmux.so.3.1.0")
+    if os.name == "nt":
+        assert relink(out) == 0
+    else:
+        assert relink(out) == 1 and restored.is_symlink()

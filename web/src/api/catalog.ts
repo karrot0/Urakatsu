@@ -221,7 +221,16 @@ export type MemoryPool = { name: string; total: number; used: number; app: numbe
  * Live GPU and system memory. RAM includes model layers offloaded to the CPU; ``spilled`` is
  * Urakatsu's GPU memory the driver moved into shared system memory (Windows only).
  */
-export type MemoryUsage = { device: string; gpu: (MemoryPool & { spilled: number | null }) | null; ram: MemoryPool };
+export type MemoryUsage = {
+  device: string;
+  gpu: (MemoryPool & { spilled: number | null }) | null;
+  ram: MemoryPool;
+  /** The models loaded now, one per stage (absent from servers before manual unload). */
+  loaded?: LoadedModel[];
+  /** A run is using the models, so they cannot be unloaded now. */
+  busy?: boolean;
+};
+export type LoadedModel = { stage: string; provider: string; name: string };
 
 export type FolderMove = { source: string; target: string; status: "moving" | "completed" | "failed"; done: number; total: number; current: string; error: string | null; left_behind: number };
 /** The models folder: where it is, what the models take, its drive's space, and a move in progress. */
@@ -247,6 +256,8 @@ export interface LocalLora {
 export const catalog = {
   hardware: () => call<Hardware>("/catalog/hardware"),
   memory: () => call<MemoryUsage>("/memory"),
+  /** Unloads one stage's model, or every loaded model; refused while a run uses them. */
+  unloadModels: (stage?: string) => call<{ unloaded: string[] }>(`/models/unload${stage ? `?${query({ stage })}` : ""}`, { method: "POST" }),
   storage: () => call<Storage>("/storage"),
   /** ``null`` returns to the default folder; ``move`` carries the installed models along. */
   setModelsFolder: (models_dir: string | null, move: boolean) => call<Storage>("/storage", { method: "PUT", body: JSON.stringify({ models_dir, move }) }),

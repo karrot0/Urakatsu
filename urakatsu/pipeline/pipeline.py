@@ -12,6 +12,8 @@
   ``PipelineConfig.idle_unload_minutes``, every loaded model is unloaded, so a model used
   once does not hold device memory other programs need. The next run loads it again.
   Code that uses a model outside ``execute`` holds ``in_use`` so it is not unloaded under it.
+- Manual unload (an Urakatsu addition): the user can unload one stage's model or all of them
+  (``unload``), outside a run.
 - Every unload goes through ``_unload``, which also hands the memory back: dropping a model
   leaves PyTorch's share of it reserved, out of reach of native servers and other programs.
 """
@@ -28,7 +30,7 @@ from enum import Enum
 from typing import Iterator, Optional
 
 from urakatsu.core.config import PipelineConfig
-from urakatsu.core.errors import ModelLoadError, ProcessingError, UrakatsuError, is_out_of_memory
+from urakatsu.core.errors import ModelLoadError, ProcessingError, ProjectBusy, UrakatsuError, is_out_of_memory
 from urakatsu.core.progress import Progress, ProgressKind, ProgressSink, StepPreview, StepSink, reporting_steps
 from urakatsu.core.registry import Registry, registry as default_registry
 from urakatsu.core.stage import Operation, Stage
@@ -178,7 +180,30 @@ class Pipeline:
         return unloaded
 
     def loaded(self) -> dict[Stage, str]:
-        return {stage: p.id for stage, p in self._providers.items() if p.loaded}
+        return {stage: p.id for stage, p in self.loaded_providers().items()}
+
+    def loaded_providers(self) -> dict[Stage, Provider]:
+        return {stage: p for stage, p in self._providers.items() if p.loaded}
+
+    @property
+    def busy(self) -> bool:
+        """A run, or code outside one (restitching, an agent turn), is using the models."""
+        return self._execution.locked() or self._users > 0
+
+    async def unload(self, stage: Stage | None = None) -> list[Stage]:
+        """Unloads one stage's model, or every model, when the user asks; returns the stages
+        unloaded. Never under a run: it raises ``ProjectBusy`` while one uses the models."""
+        if self.busy:
+            raise ProjectBusy("a run is using the models; stop it or wait for it to finish, then unload them")
+        async with self._execution:  # no run starts while the models unload
+            if stage is None:
+                unloaded = self.unload_all()
+            else:
+                provider = self._providers.get(stage)
+                unloaded = [stage] if provider is not None and self._unload(provider) else []
+        if unloaded:
+            log.info("unloaded %s on request", ", ".join(s.value for s in unloaded))
+        return unloaded
 
     # -- execution -------------------------------------------------------------------------------
 
@@ -429,6 +454,10 @@ class _Execution:
                 stages = [stage for stage in stages if stage is not Stage.SOUND_EFFECTS]
                 if not stages:
                     raise ValueError("sound effects are not set to redraw (Settings, Pipeline, Sound effects)")
+            elif pipeline.config.sound_effects.mode == "redraw" and Stage.INPAINTING in stages and request.inpainting_mask is None and Stage.SOUND_EFFECTS not in stages:
+                # Inpainting leaves sound effects set to redraw in the art for the sound effects stage,
+                # so a run that inpaints (Inpaint for a chapter or the project) redraws them too.
+                stages = [*stages, Stage.SOUND_EFFECTS]
             if pipeline.config.watermarks.mode != "remove":
                 # The watermarks stage only exists in a run while watermarks are removed.
                 if Stage.WATERMARKS in stages:

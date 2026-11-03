@@ -119,6 +119,14 @@ def api_router(ws: Workspace) -> APIRouter:
     def memory():
         return guard(ws.memory)
 
+    @router.post("/models/unload")
+    async def unload_models(stage: Optional[str] = None) -> dict[str, list[str]]:
+        """Unloads one stage's model (``?stage=``), or every loaded model; refused (412) during a run."""
+        try:
+            return {"unloaded": await ws.unload_models(stage)}
+        except Exception as error:
+            raise http_error(error)
+
     @router.get("/data-folder")
     def data_folder() -> dict[str, str]:
         return {"path": str(home())}

@@ -58,6 +58,9 @@ class SystemStatus(BaseModel):
     message: Optional[str] = None
     enabled: bool = False
     browser: Optional[str] = None  # the built-in browser, for systems that have one
+    connectable: bool = False  # can use a server already running elsewhere instead of its own (``connect``)
+    server: Optional[str] = None  # the address of that server while the system uses one
+    username: Optional[str] = None  # who it signs in to that server as, if anyone
 
 
 class Repository(BaseModel):
@@ -164,6 +167,13 @@ class SourceSystem(ABC):
 
     def close(self) -> None:
         self.stop()
+
+    def connect(self, url: Optional[str], username: str = "", password: Optional[str] = None) -> SystemStatus:
+        """Uses the server at ``url`` instead of running its own; no ``url`` goes back to its own.
+
+        ``password`` None keeps the saved one, but only for the address it was saved for.
+        """
+        raise NotImplementedError(f"{self.name} cannot use another server")
 
     # -- installer: repositories and extensions ----------------------------------------------------
 

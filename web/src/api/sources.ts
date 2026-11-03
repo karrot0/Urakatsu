@@ -18,6 +18,12 @@ export interface SystemStatus {
   enabled: boolean;
   /** The built-in browser, for systems that have one. */
   browser: string | null;
+  /** The system can use a server already running elsewhere instead of its own. */
+  connectable: boolean;
+  /** That server's address while the system uses one; null runs its own. */
+  server: string | null;
+  /** Who it signs in to that server as, if anyone (the password is never sent back). */
+  username: string | null;
 }
 
 export interface Repository {
@@ -138,6 +144,9 @@ export const sources = {
   setEnabled: (id: string, enabled: boolean) => call<SystemStatus>(`${system(id)}/enabled`, json("PUT", { enabled })),
   start: (id: string) => call<SystemStatus>(`${system(id)}/start`, { method: "POST" }),
   stop: (id: string) => call<SystemStatus>(`${system(id)}/stop`, { method: "POST" }),
+  /** Uses the server at `url` (null: the system's own again); a null password keeps the saved one. */
+  connect: (id: string, url: string | null, username = "", password: string | null = null) =>
+    call<SystemStatus>(`${system(id)}/server`, json("PUT", { url, username, password })),
   repositories: (id: string) => call<Repository[]>(`${system(id)}/repositories`),
   addRepository: (id: string, url: string) => call<Repository[]>(`${system(id)}/repositories`, json("POST", { url })),
   removeRepository: (id: string, url: string) => call<Repository[]>(`${system(id)}/repositories?${q({ url })}`, { method: "DELETE" }),

@@ -292,6 +292,22 @@ def test_the_stage_joins_a_run_only_while_sound_effects_are_redrawn():
     assert config.provider_for(Stage.SOUND_EFFECTS) == "diffusion-model"
 
 
+def test_a_run_that_inpaints_redraws_sound_effects_too(tmp_path):
+    from types import SimpleNamespace
+
+    from urakatsu.pipeline.pipeline import Request, _Execution
+
+    session = Session(tmp_path)
+    _page(session)
+    config = PipelineConfig()
+    config.sound_effects = SoundEffectsConfig(mode="redraw", model="diffusion-model")
+    execution = _Execution(SimpleNamespace(config=config), session, Request(operation=Operation.only(Stage.INPAINTING)))
+    assert execution.scheduler.total == 2  # inpainting, then the redraw
+    config.sound_effects = SoundEffectsConfig(mode="typeset")
+    execution = _Execution(SimpleNamespace(config=config), session, Request(operation=Operation.only(Stage.INPAINTING)))
+    assert execution.scheduler.total == 1
+
+
 def test_redraw_leaves_the_art_between_merged_pieces(tmp_path):
     # Two halves 10 px apart: close enough to be one sound effect, with art between them.
     pieces = [_piece("onomatopoeia", 20, 20, 30, 30), _piece("onomatopoeia", 60, 20, 30, 30)]

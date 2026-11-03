@@ -6,7 +6,8 @@ current scene snapshot on demand.
 
 ``SOUND_EFFECTS`` is not in Koharu: with sound effects set to ``redraw`` it redraws each
 translated sound effect with an image model, so it waits for translation and inpainting.
-In any other mode a run leaves it out (``pipeline.py``).
+A run that inpaints gets it after inpainting, since inpainting leaves those sound effects in the
+art for it. In any other mode a run leaves it out (``pipeline.py``).
 
 ``WATERMARKS`` is not in Koharu either: with watermarks set to ``remove`` it removes repeated
 watermarks before detection reads the page (``pipeline/stages/watermarks.py``), and a run that
