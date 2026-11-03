@@ -105,14 +105,18 @@ export async function exportChapter(projectId: string, chapterId: string, format
   return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format === "strip" ? "png" : format}` };
 }
 
-/** Replaces a page's source image, keeping the page and its work; this returns the page's id. */
-export async function uploadPageSource(projectId: string, pageId: string, file: File): Promise<string> {
+/** Replaces pages' source images in one undo step, keeping each page and its work. */
+export async function uploadPageSources(projectId: string, swaps: [pageId: string, file: File][]): Promise<void> {
   const form = new FormData();
-  form.append("file", file);
-  const response = await fetch(`/api/v1/projects/${projectId}/pages/${pageId}/source`, { method: "PUT", body: form });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Swap failed: ${response.status} ${response.statusText}`);
-  return body.id;
+  for (const [pageId, file] of swaps) {
+    form.append("page_ids", pageId);
+    form.append("files", file);
+  }
+  const response = await fetch(`/api/v1/projects/${projectId}/sources`, { method: "PUT", body: form });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(typeof body?.detail === "string" ? body.detail : `Swap failed: ${response.status} ${response.statusText}`);
+  }
 }
 
 export function describeError(error: unknown): string {

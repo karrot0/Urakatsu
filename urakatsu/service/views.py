@@ -195,6 +195,8 @@ def typography_view(value: Optional[c.Typography]) -> Optional[TypographyView]:
 
 
 def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = None) -> PageView:
+    # Only reads, and builds new view objects: no component needs copying (most of a project view's time).
+    snapshot = snapshot.borrowed()
     meta = snapshot.page(page)
     blocks: list[TextBlockView] = []
     for layer in snapshot.text_layers(page):

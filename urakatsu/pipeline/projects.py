@@ -321,22 +321,30 @@ class ProjectStore:
         """Replaces a page's source image in one undoable commit and returns the page's id (it is
         the same page). Page work (text, translations, masks, cleanup and paint layers) is kept;
         an image of another size scales it to fit, so a better scan of the page keeps its place."""
-        data, media_type, width, height = _normalize(data, self.lossless_pages)
+        return self.swap_page_sources(project_id, [(page_id, data)])[0]
+
+    def swap_page_sources(self, project_id: str, sources: list[tuple[str, bytes]]) -> list[str]:
+        """:meth:`swap_page_source` for several pages (page id, image bytes) in one undoable commit.
+        Every image is read before anything changes, so one bad file leaves every page alone."""
+        if len({page_id for page_id, _ in sources}) != len(sources):
+            raise ValueError("each page can take only one new source image")
+        images = [(page_id, *_normalize(data, self.lossless_pages)) for page_id, data in sources]
         session = self.session(project_id)
         snapshot = session.snapshot()
-        page = snapshot.page(page_id)
-        old = (round(page.width), round(page.height))
         edit = snapshot.edit()
-        edit.set_asset(page_id, "source", AssetInput(data=data, media_type=media_type, metadata=AssetMetadata(width=width, height=height)))
-        if (width, height) != old:
-            edit.scale_page(page_id, float(width), float(height))
-            for entity in snapshot.subtree(page_id):
-                for role, asset in snapshot.state.entity(entity).assets.items():
-                    if (entity, role) != (page_id, "source") and (asset.metadata.width, asset.metadata.height) == old:
-                        edit.resample_asset(entity, role, _resampled(snapshot.blobs.read(asset.blob), asset.metadata, (width, height)))
+        for page_id, data, media_type, width, height in images:
+            page = snapshot.page(page_id)
+            old = (round(page.width), round(page.height))
+            edit.set_asset(page_id, "source", AssetInput(data=data, media_type=media_type, metadata=AssetMetadata(width=width, height=height)))
+            if (width, height) != old:
+                edit.scale_page(page_id, float(width), float(height))
+                for entity in snapshot.subtree(page_id):
+                    for role, asset in snapshot.state.entity(entity).assets.items():
+                        if (entity, role) != (page_id, "source") and (asset.metadata.width, asset.metadata.height) == old:
+                            edit.resample_asset(entity, role, _resampled(snapshot.blobs.read(asset.blob), asset.metadata, (width, height)))
         session.commit(edit.finish())
         self.touch(project_id)
-        return page_id
+        return [page_id for page_id, _ in sources]
 
     # -- pages ---------------------------------------------------------------------------------------
 

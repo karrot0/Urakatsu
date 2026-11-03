@@ -62,7 +62,7 @@ import { MemoryMeter } from "./MemoryMeter";
 import { ActionMenu, ContextActions, Tooltip } from "./primitives";
 import { KnowledgeButton } from "./Knowledge";
 import { ProjectFormatButton } from "./ProjectFormat";
-import { swapSource } from "./swapSource";
+import { swapSources } from "./swapSource";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
 
@@ -890,7 +890,8 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
     const add = !!event && (event.ctrlKey || event.metaKey);
     ws.selectPage(page.id, event?.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
   };
-  const inSelection = selectedPages(ws).includes(page.id);
+  const selection = selectedPages(ws);
+  const inSelection = selection.includes(page.id);
   const [exporting, setExporting] = useState(false);
   const exportPng = async () => {
     setExporting(true);
@@ -909,7 +910,14 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
     <div ref={sortable.setNodeRef} style={style} role="listitem">
       <ContextActions
         actions={[
-          { label: "Swap source image", disabled, onSelect: () => swapSource(page, ws.swapPageSource) },
+          {
+            label: inSelection ? `Swap ${selection.length} source images` : "Swap source image",
+            disabled,
+            onSelect: () => {
+              const pages = inSelection ? selection.map((id) => ws.project!.pages.find((p) => p.id === id)!) : [page];
+              swapSources(pages, ws.swapPageSources, ws.reportError);
+            },
+          },
           { label: "Export as PNG", disabled: exporting, onSelect: () => void exportPng() },
           { label: "Remove page", danger: true, disabled, onSelect: () => void remove() },
         ]}

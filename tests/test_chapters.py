@@ -98,6 +98,31 @@ def test_a_swap_that_cannot_read_the_image_leaves_the_page_alone(tmp_path):
     assert layout(store, project) == [(DEFAULT_CHAPTER_ID, [a])]
 
 
+def test_swapping_several_sources_is_one_undo_step_and_all_or_nothing(tmp_path):
+    store = ProjectStore(tmp_path)
+    project = store.create("p")
+    a = store.import_page(project, "a.png", png())
+    b = store.import_page(project, "b.png", png())
+    session = store.session(project)
+    big = encoded(Image.new("RGB", (16, 16)), "PNG")
+
+    with pytest.raises(OSError):  # the bad second image stops the first swap too
+        store.swap_page_sources(project, [(a, big), (b, b"not an image")])
+    assert session.snapshot().page(a).width == 8
+    with pytest.raises(ValueError):
+        store.swap_page_sources(project, [(a, big), (a, big)])
+
+    assert store.swap_page_sources(project, [(a, big), (b, png(255))]) == [a, b]
+    snapshot = session.snapshot()
+    assert snapshot.page(a).width == 16
+    assert snapshot.blobs.read(snapshot.asset(b, "source").blob) == png(255)
+
+    session.undo()
+    snapshot = session.snapshot()
+    assert snapshot.page(a).width == 8
+    assert snapshot.blobs.read(snapshot.asset(b, "source").blob) == png()
+
+
 def test_pages_import_into_the_requested_chapter_and_keep_page_order_flat(tmp_path):
     store = ProjectStore(tmp_path)
     project = store.create("p")
@@ -258,5 +283,12 @@ def test_the_source_route_swaps_a_page_and_waits_for_running_jobs(isolated_home)
     assert swapped.json()["name"] == "a.png" and swapped.json()["id"] == page  # the same page, new image
     assert [p.id for p in workspace.project_view(project).pages] == [page]
 
+    other = workspace.add_page(project, "b.png", png()).id
+    batch = f"/api/v1/projects/{project}/sources"
+    two = [("files", ("1.png", png(9), "image/png")), ("files", ("2.png", png(7), "image/png"))]
+    assert client.put(batch, data={"page_ids": [page, other]}, files=two).status_code == 200
+    assert client.put(batch, data={"page_ids": [page]}, files=two).status_code == 400
+
     workspace.jobs["running"] = type("Job", (), {"project_id": project, "status": "running"})()
     assert client.put(url, files=image).status_code == 412
+    assert client.put(batch, data={"page_ids": [page, other]}, files=two).status_code == 412

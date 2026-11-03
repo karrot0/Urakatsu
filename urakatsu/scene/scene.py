@@ -242,6 +242,12 @@ class Snapshot:
         value = self._state.entity(entity).components.get(cls.KIND)
         return value.model_copy(deep=True) if value is not None else None  # type: ignore[return-value]
 
+    def borrowed(self) -> "Snapshot":
+        """This snapshot for code that only reads: ``component`` hands out the stored values instead of
+        copies. The copy exists so a caller may change what it gets; a view of a whole project reads
+        thousands of components and changes none (``service.views.page_view``)."""
+        return _BorrowedSnapshot(self._state, self.blobs)
+
     def has(self, entity: str, cls: type[c.Component]) -> bool:
         return cls.KIND in self._state.entity(entity).components
 
@@ -364,6 +370,16 @@ class Snapshot:
 
     def edit_as(self, generation: c.Generation) -> "Edit":
         return Edit(self, generation)
+
+
+class _BorrowedSnapshot(Snapshot):
+    """``Snapshot.borrowed``: components without the defensive copy; the reader must not change them."""
+
+    def component(self, entity: str, cls: type[C]) -> Optional[C]:
+        return self._state.entity(entity).components.get(cls.KIND)  # type: ignore[return-value]
+
+    def borrowed(self) -> "Snapshot":
+        return self
 
 
 class BlobReader:

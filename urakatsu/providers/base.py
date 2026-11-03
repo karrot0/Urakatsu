@@ -24,6 +24,7 @@ model only Urakatsu Cloud runs.
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib.util
 from abc import ABC
 from pathlib import Path
@@ -94,6 +95,10 @@ class ProviderInfo(BaseModel):
     defaults: dict[str, Any] = Field(default_factory=dict)
     prompted: bool = False
     instructed: bool = False
+
+
+# Each provider class's settings schema and defaults for ``Provider.info`` (``Provider._settings_info``).
+_SETTINGS_INFO: dict[type, tuple[dict[str, Any], dict[str, Any]]] = {}
 
 
 class Provider(ABC):
@@ -227,16 +232,27 @@ class Provider(ABC):
         return cls.accepts.__func__ is not Provider.accepts.__func__
 
     @classmethod
+    def _settings_info(cls) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The settings' JSON schema and defaults as the UI sees them. Both depend only on the class, and
+        building the schema is most of what ``info`` costs (the capabilities call asks for every provider),
+        so they are built once per class; callers get their own copy."""
+        cached = _SETTINGS_INFO.get(cls)
+        if cached is None:
+            schema = cls.Settings.model_json_schema()
+            defaults = cls.Settings().model_dump(mode="json")
+            hidden = ["remote_worker"] if cls.uses_catalog() else ["model", "remote_worker"]  # the runtime menu picks the worker
+            if not cls.remotable:
+                hidden += ["remote_url", "remote_api_key"]  # remote_worker is hidden above
+            for name in hidden:
+                schema.get("properties", {}).pop(name, None)
+                defaults.pop(name, None)
+            cached = _SETTINGS_INFO[cls] = (schema, defaults)
+        return copy.deepcopy(cached[0]), copy.deepcopy(cached[1])
+
+    @classmethod
     def info(cls) -> ProviderInfo:
         default = cls.default_runtime()
-        schema = cls.Settings.model_json_schema()
-        defaults = cls.Settings().model_dump(mode="json")
-        hidden = ["remote_worker"] if cls.uses_catalog() else ["model", "remote_worker"]  # the runtime menu picks the worker
-        if not cls.remotable:
-            hidden += ["remote_url", "remote_api_key"]  # remote_worker is hidden above
-        for name in hidden:
-            schema.get("properties", {}).pop(name, None)
-            defaults.pop(name, None)
+        schema, defaults = cls._settings_info()
         return ProviderInfo(
             id=cls.id,
             name=cls.name or cls.id,

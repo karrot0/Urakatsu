@@ -415,6 +415,11 @@ class Workspace:
     def renderer(self):
         if self._renderer is None:
             from urakatsu.renderer import Renderer
+    def swap_page_sources(self, project_id: str, sources: list[tuple[str, bytes]]) -> ProjectView:
+        self._idle(project_id)
+        self.store.swap_page_sources(project_id, sources)
+        return self.project_view(project_id)
+
 
             self._renderer = Renderer(self.config.typesetting)
         return self._renderer

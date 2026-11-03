@@ -732,3 +732,45 @@ def test_only_models_a_cloud_worker_runs_are_offered(monkeypatch):
     off = EchoDetector.runtime_availability(CLOUD)
     assert not off.ok and off.reason == "not running on Urakatsu Cloud right now"
     cloud.reset()
+
+
+def test_a_stale_cloud_listing_is_refreshed_without_waiting(monkeypatch):
+    # The capabilities call asks from the service's event loop: only the first listing is waited for.
+    import threading
+
+    cloud.reset()
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")
+    online = {"value": ["echo-ocr"]}
+    release, asked = threading.Event(), []
+
+    def get(url, timeout):
+        asked.append(url)
+        if len(asked) > 1:
+            release.wait(5)
+        body = {"providers": [{"id": p, "online": True} for p in online["value"]]}
+        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cloud.httpx, "get", get)
+    assert cloud.hosted() == {"echo-ocr"} and len(asked) == 1
+    stamp, address, ids = cloud._hosted
+    cloud._hosted = (stamp - cloud.HOSTED_TTL - 1, address, ids)  # the listing went stale
+    online["value"] = ["echo-detector"]
+    assert cloud.hosted() == {"echo-ocr"}  # the old answer, at once, while the listing is asked again
+    assert cloud.hosted() == {"echo-ocr"} and len(asked) == 2  # one refresh at a time
+    release.set()
+    for _ in range(100):
+        if cloud._hosted[2] == {"echo-detector"}:
+            break
+        threading.Event().wait(0.02)
+    assert cloud.hosted() == {"echo-detector"} and len(asked) == 2
+
+    # A refresh that answers after a reset does not bring the old listing back.
+    release.clear()
+    stamp, address, ids = cloud._hosted
+    cloud._hosted = (stamp - cloud.HOSTED_TTL - 1, address, ids)
+    cloud.hosted()
+    cloud.reset()
+    release.set()
+    threading.Event().wait(0.2)
+    assert cloud._hosted is None
+    cloud.reset()

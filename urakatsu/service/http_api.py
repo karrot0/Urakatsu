@@ -257,6 +257,13 @@ def api_router(ws: Workspace) -> APIRouter:
     async def swap_page_source(project_id: str, page_id: str, file: UploadFile = File(...)):
         return guard(ws.swap_page_source, project_id, page_id, await file.read())
 
+    @router.put("/projects/{project_id}/sources")
+    async def swap_page_sources(project_id: str, page_ids: list[str] = Form(...), files: list[UploadFile] = File(...)):
+        """New source images for several pages, ``files[i]`` for ``page_ids[i]``, in one undo step."""
+        if len(page_ids) != len(files):
+            raise HTTPException(400, f"{len(files)} images for {len(page_ids)} pages")
+        return guard(ws.swap_page_sources, project_id, [(page_id, await file.read()) for page_id, file in zip(page_ids, files)])
+
     @router.get("/projects/{project_id}/pages/{page_id}/text-layout")
     def text_layout(project_id: str, page_id: str, v: Optional[str] = None):
         return guard(ws.text_layout, project_id, page_id)

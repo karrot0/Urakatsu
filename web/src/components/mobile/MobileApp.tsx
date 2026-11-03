@@ -16,7 +16,7 @@ import { confirm } from "../ConfirmDialog";
 import { ModelsPage } from "../ModelsPage";
 import { SourcesPage } from "../SourcesPage";
 import { ProjectCover } from "../Start";
-import { swapSource } from "../swapSource";
+import { swapSources } from "../swapSource";
 import { ActionList, GlassButton, ListRow, ListSection, Screen, SearchField, Sheet, TabBar, useLongPress, type Enter, type TabItem } from "./glass";
 import { MobileEditor } from "./MobileEditor";
 import { MobileSettings } from "./MobileSettings";
@@ -612,7 +612,7 @@ function ChapterScreen({ chapterId, enter, onBack, onOpenPage }: { chapterId: st
               actions={[
                 { label: "Open", icon: BookOpen, onSelect: () => (setMenu(undefined), onOpenPage(menu.id)) },
                 { label: "Translate page", icon: Play, disabled: running, onSelect: () => (setMenu(undefined), void ws.run({ kind: "full", scope: "page", pageIds: [menu.id] })) },
-                { label: "Swap source image", icon: ImageUp, disabled: running, onSelect: () => (setMenu(undefined), swapSource(menu, ws.swapPageSource)) },
+                { label: "Swap source image", icon: ImageUp, disabled: running, onSelect: () => (setMenu(undefined), swapSources([menu], ws.swapPageSources, ws.reportError)) },
                 {
                   label: exporting ? "Exporting" : "Export as PNG",
                   icon: FileDown,

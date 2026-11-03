@@ -3,7 +3,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { client, describeError, forgetAssets, uploadPageSource } from "../api/client";
+import { assetUrl, assetVersion, client, describeError, forgetAssets, uploadPageSources } from "../api/client";
 import { challengeOf, type CatalogRuntime, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
 import type { RichStyle } from "../richText";
@@ -210,8 +210,8 @@ interface Actions {
   redo(): Promise<void>;
   uploadPages(files: FileList | File[], chapterId?: string): Promise<void>;
   removePage(pageId: string): Promise<void>;
-  /** Replaces a page's source image; the page keeps its text and layers, scaled to the new image. */
-  swapPageSource(pageId: string, file: File): Promise<void>;
+  /** Replaces pages' source images in one undo step; each page keeps its text and layers, scaled to its new image. */
+  swapPageSources(swaps: [pageId: string, file: File][]): Promise<void>;
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
   deleteChapter(chapterId: string): Promise<void>;
@@ -392,6 +392,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const project = await client.getProject({ projectId: id });
         // Start on the wanted page: selecting the first one first would load its image for nothing.
         const page = project.pages.some((p) => p.id === pageId) ? pageId : project.pages[0]?.id;
+        // Fetch that page's image while the workspace renders: the canvas asks for it only after mounting,
+        // and assetUrl hands it this same request. A failure is left to the canvas's own request.
+        const first = project.pages.find((p) => p.id === page);
+        if (first) void assetUrl(id, first.id, "source", assetVersion(first, "source")).catch(() => undefined);
         setState((s) => ({ ...s, project, link: undefined, pageId: page, blockId: undefined, job: undefined, view: "source" }));
         const link = await sources.link(id);
         setState((s) => (s.project?.id === id ? { ...s, link } : s));
@@ -559,14 +563,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.project, fail],
   );
 
-  const swapPageSource = useCallback(
-    async (pageId: string, file: File) => {
+  const swapPageSources = useCallback(
+    async (swaps: [pageId: string, file: File][]) => {
       const project = state.project;
-      if (!project) return;
+      if (!project || !swaps.length) return;
       try {
-        await uploadPageSource(project.id, pageId, file);
+        await uploadPageSources(project.id, swaps);
         const next = await client.getProject({ projectId: project.id });
-        forgetAssets(project.id, pageId);
+        for (const [pageId] of swaps) forgetAssets(project.id, pageId);
         setState((s) => withLiveSelection({ ...s, project: next }));
       } catch (error) {
         fail(error);
@@ -956,7 +960,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       redo: () => history("redo"),
       uploadPages,
       removePage,
-      swapPageSource,
+      swapPageSources,
       createChapter,
       renameChapter,
       deleteChapter,
@@ -1040,7 +1044,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       history,
       uploadPages,
       removePage,
-      swapPageSource,
+      swapPageSources,
       createChapter,
       renameChapter,
       deleteChapter,

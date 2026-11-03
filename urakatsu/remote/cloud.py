@@ -25,18 +25,34 @@ ACCESS_TTL = 60.0
 
 _hosted: Optional[tuple[float, str, Optional[frozenset[str]]]] = None
 _hosted_lock = threading.Lock()
+_refreshing: set[str] = set()  # addresses whose listing is being refreshed in the background
+_generation = 0  # counts resets, so a refresh started before one is dropped
 _access: dict[str, tuple[float, Availability]] = {}
+_saved_cache: Optional[tuple[tuple, dict]] = None  # (the config file's stat, the provider's settings)
 
 
 def _saved() -> dict:
-    """The Urakatsu Cloud provider's saved settings (its key and address)."""
-    from urakatsu.core.config import load_config
+    """The Urakatsu Cloud provider's saved settings (its key and address). Read again only when the
+    configuration file changed: the capabilities call asks once per provider runtime (dozens of times)."""
+    global _saved_cache
+    from urakatsu.core.config import config_path, load_config
 
+    path = config_path()
     try:
-        return load_config().providers.get(PROVIDER, {})
+        stat = path.stat()
+        stamp: tuple = (str(path), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = (str(path), None, None)
+    cached = _saved_cache
+    if cached is not None and cached[0] == stamp:
+        return dict(cached[1])
+    try:
+        settings = dict(load_config(path).providers.get(PROVIDER, {}))
     except Exception as error:  # noqa: BLE001 - an unreadable config leaves the environment
         log.debug("could not read the Urakatsu Cloud settings: %s", error)
         return {}
+    _saved_cache = (stamp, settings)
+    return dict(settings)
 
 
 def url(settings: Optional[dict] = None) -> str:
@@ -52,21 +68,44 @@ def api_key(settings: Optional[dict] = None) -> Optional[str]:
     return value.strip() or None
 
 
-def hosted() -> Optional[frozenset[str]]:
+def _list_hosted(address: str) -> Optional[frozenset[str]]:
+    try:
+        response = httpx.get(f"{address}/v1/info", timeout=INFO_TIMEOUT)
+        response.raise_for_status()
+        return frozenset(str(p["id"]) for p in response.json().get("providers", []) if p.get("online", True))
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        log.info("could not list the models Urakatsu Cloud at %s hosts: %s", address, error)
+        return None
+
+
+def _keep_hosted(address: str, ids: Optional[frozenset[str]]) -> None:
     global _hosted
+    # A failed listing is retried sooner than a good one is refreshed.
+    _hosted = (time.monotonic() - (HOSTED_TTL - 60.0 if ids is None else 0.0), address, ids)
+
+
+def _refresh_hosted(address: str, generation: int) -> None:
+    ids = _list_hosted(address)
+    with _hosted_lock:
+        _refreshing.discard(address)
+        if generation == _generation:  # not from before a reset
+            _keep_hosted(address, ids)
+
+
+def hosted() -> Optional[frozenset[str]]:
+    """The providers Urakatsu Cloud runs now; None when that is not known. Only the first answer is waited
+    for: an older one is returned at once and refreshed in the background. The capabilities call asks from
+    the service's event loop, and a listing costs a TLS handshake with the cloud (0.5 to 1 s), during which
+    every other request (the project, its page images) would wait."""
     address = url()
     with _hosted_lock:
-        if _hosted is not None and _hosted[1] == address and time.monotonic() - _hosted[0] < HOSTED_TTL:
+        if _hosted is not None and _hosted[1] == address:
+            if time.monotonic() - _hosted[0] >= HOSTED_TTL and address not in _refreshing:
+                _refreshing.add(address)
+                threading.Thread(target=_refresh_hosted, args=(address, _generation), name="urakatsu-cloud-listing", daemon=True).start()
             return _hosted[2]
-        try:
-            response = httpx.get(f"{address}/v1/info", timeout=INFO_TIMEOUT)
-            response.raise_for_status()
-            ids: Optional[frozenset[str]] = frozenset(str(p["id"]) for p in response.json().get("providers", []) if p.get("online", True))
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
-            log.info("could not list the models Urakatsu Cloud at %s hosts: %s", address, error)
-            ids = None
-        # A failed listing is retried sooner than a good one is refreshed.
-        _hosted = (time.monotonic() - (HOSTED_TTL - 60.0 if ids is None else 0.0), address, ids)
+        ids = _list_hosted(address)
+        _keep_hosted(address, ids)
         return ids
 
 
@@ -103,7 +142,9 @@ def image_access() -> Availability:
 
 def reset() -> None:
     """Forgets the hosted list and the image access answers (tests, and after the key changes)."""
-    global _hosted
+    global _hosted, _generation
     with _hosted_lock:
         _hosted = None
+        _generation += 1
+        _refreshing.clear()
     _access.clear()
