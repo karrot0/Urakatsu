@@ -284,7 +284,7 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
     assets = list(snapshot.state.entity(page).assets.keys())
     if any(r.kind == "cleanup" for r in raster_layers):
         assets.append("cleanup")
-    assets += ["thumbnail", "render"] + list(extra_assets or [])
+    assets += ["thumbnail", "render", "render-base", "render-text"] + list(extra_assets or [])
 
     # A blob's content address changes exactly when its bytes do, so an edit to one layer leaves every
     # other asset's URL (and the browser's copy of it) valid. Thumbnails are made from the source alone;
@@ -298,7 +298,7 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
             versions[f"layer:{raster.id}"] = asset.blob
             if raster.kind == "cleanup":
                 versions.setdefault("cleanup", asset.blob)  # the first cleanup layer, as Workspace.asset serves it
-    versions["render"] = str(snapshot.revision)
+    versions["render"] = versions["render-base"] = versions["render-text"] = str(snapshot.revision)
 
     return PageView(
         id=page,

@@ -141,6 +141,10 @@ class Workspace:
         # The same renders' text layout per block (font size, line starts), for the on-canvas text editor.
         self._text_layouts: dict[tuple[str, str, int], dict[str, dict[str, Any]]] = {}
         self._frames: OrderedDict[tuple[str, str, int], Any] = OrderedDict()
+        # The same renders split for the editor (``render_parts``): the art under the text, as drawn while
+        # rendering (kept with the frames), and the encoded pair once asked for.
+        self._bases: dict[tuple[str, str, int], Image.Image] = {}
+        self._parts: OrderedDict[tuple[str, str, int], tuple[bytes, bytes]] = OrderedDict()
         self._thumbnails: dict[str, bytes] = {}
         self._render_lock = threading.Lock()
         # Assets are served from worker threads; the renderer draws one page at a time.
@@ -243,6 +247,9 @@ class Workspace:
             with self._render_lock:
                 self._renders.clear()
                 self._text_layouts.clear()
+                self._frames.clear()
+                self._bases.clear()
+                self._parts.clear()
         self.config = config
         self.store.lossless_pages = config.storage.lossless_pages
         save_config(config)
@@ -299,6 +306,9 @@ class Workspace:
                 del self._renders[key]
             for key in [k for k in self._text_layouts if k[0] == project_id]:
                 del self._text_layouts[key]
+            for cache in (self._frames, self._bases, self._parts):
+                for key in [k for k in cache if k[0] == project_id]:
+                    del cache[key]
 
     def undo(self, project_id: str) -> ProjectView:
         self.session(project_id).undo()
@@ -405,6 +415,11 @@ class Workspace:
         self._idle(project_id)
         return self.page(project_id, self.store.swap_page_source(project_id, page_id, data))
 
+    def swap_page_sources(self, project_id: str, sources: list[tuple[str, bytes]]) -> ProjectView:
+        self._idle(project_id)
+        self.store.swap_page_sources(project_id, sources)
+        return self.project_view(project_id)
+
     def page(self, project_id: str, page_id: str) -> PageView:
         snapshot = self.session(project_id).snapshot()
         snapshot.page(page_id)
@@ -415,11 +430,6 @@ class Workspace:
     def renderer(self):
         if self._renderer is None:
             from urakatsu.renderer import Renderer
-    def swap_page_sources(self, project_id: str, sources: list[tuple[str, bytes]]) -> ProjectView:
-        self._idle(project_id)
-        self.store.swap_page_sources(project_id, sources)
-        return self.project_view(project_id)
-
 
             self._renderer = Renderer(self.config.typesetting)
         return self._renderer
@@ -432,9 +442,14 @@ class Workspace:
             if cached is not None:
                 self._renders.move_to_end(key)
                 return cached
+        from urakatsu.renderer.svg import split_index
+
         with self._draw_lock:
             frame = self.renderer().render(snapshot, page_id)
-            image = frame.composite()
+            # The art under the text first, then the text over it: the editor shows the two apart.
+            split = split_index(frame)
+            base = replace(frame, layers=frame.layers[:split]).composite()
+            image = replace(frame, layers=frame.layers[split:]).composite(onto=base)
         data = _png(image)
         layouts = {
             layer.entity: {"font_size": layer.kind.font_size, "line_starts": list(layer.kind.line_starts), "writing_mode": layer.kind.writing_mode.value}
@@ -444,7 +459,7 @@ class Workspace:
         with self._render_lock:
             self._renders[key] = data
             self._text_layouts[key] = layouts
-            self._keep_frame(key, frame)
+            self._keep_frame(key, frame, base)
             while len(self._renders) > RENDER_CACHE:
                 evicted, _ = self._renders.popitem(last=False)
                 self._text_layouts.pop(evicted, None)
@@ -496,12 +511,49 @@ class Workspace:
         under = replace(frame, layers=[other for other in frame.layers if other is not layer]).composite(box)
         return {"x": left, "y": top, "width": right - left, "height": bottom - top, "text": _data_url(text), "under": _data_url(under)}
 
-    def _keep_frame(self, key: tuple[str, str, int], frame) -> None:
-        """Keeps a rendered frame for lifting its blocks (hold ``_render_lock``)."""
+    def _keep_frame(self, key: tuple[str, str, int], frame, base: Optional[Image.Image] = None) -> None:
+        """Keeps a rendered frame for lifting its blocks (hold ``_render_lock``), with the art under its
+        text when the render drew it."""
         self._frames[key] = frame
         self._frames.move_to_end(key)
+        if base is not None:
+            self._bases[key] = base
         while len(self._frames) > FRAME_CACHE:
-            self._frames.popitem(last=False)
+            evicted, _ = self._frames.popitem(last=False)
+            self._bases.pop(evicted, None)
+
+    def render_parts(self, project_id: str, page_id: str, snapshot: Optional[Snapshot] = None) -> tuple[bytes, bytes]:
+        """The render as the editor shows it: the art under the text (PNG) and everything from the first
+        text layer up as SVG, glyphs as outlines (``urakatsu.renderer.svg``). The browser draws the SVG at
+        the size the page is shown, so text stays sharp when zoomed in, as Koharu's WebGPU canvas
+        keeps it; the export is still the raster render at the page's size."""
+        from urakatsu.renderer.svg import layers_svg, split_index
+
+        snapshot = snapshot or self.session(project_id).snapshot()
+        key = (project_id, page_id, snapshot.revision)
+        with self._render_lock:
+            cached = self._parts.get(key)
+            if cached is not None:
+                self._parts.move_to_end(key)
+                return cached
+        self.render(project_id, page_id, snapshot)
+        with self._render_lock:
+            frame = self._frames.get(key)
+            base = self._bases.get(key)
+        if frame is None:
+            with self._draw_lock:
+                frame = self.renderer().render(snapshot, page_id)
+            with self._render_lock:
+                self._keep_frame(key, frame)
+        split = split_index(frame)
+        if base is None:
+            base = replace(frame, layers=frame.layers[:split]).composite()
+        parts = (_png(base), layers_svg(frame, frame.layers[split:]))
+        with self._render_lock:
+            self._parts[key] = parts
+            while len(self._parts) > RENDER_CACHE:
+                self._parts.popitem(last=False)
+        return parts
 
     def asset(self, project_id: str, page_id: str, kind: str) -> Optional[tuple[bytes, str, int, int]]:
         snapshot = self.session(project_id).snapshot()
@@ -509,6 +561,10 @@ class Workspace:
         size = (int(meta.width), int(meta.height))
         if kind == "render":
             return self.render(project_id, page_id, snapshot), "image/png", *size
+        if kind == "render-base":
+            return self.render_parts(project_id, page_id, snapshot)[0], "image/png", *size
+        if kind == "render-text":
+            return self.render_parts(project_id, page_id, snapshot)[1], "image/svg+xml", *size
         if kind == "thumbnail":
             source = snapshot.asset(page_id, "source")
             if source is None:

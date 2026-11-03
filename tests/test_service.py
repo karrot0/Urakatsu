@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+from dataclasses import dataclass, field
 
 import grpc
 import httpx
@@ -24,13 +25,13 @@ from urakatsu.service.workspace import Workspace
 from fakes import FakeDetector, FakeInpainter, FakeOcr, FakeTranslator, fake_config, fake_processors, page_png
 
 
+@dataclass
 class FakeFrame:
-    def __init__(self, size):
-        self.size = size
-        self.layers = []
+    size: tuple[int, int]
+    layers: list = field(default_factory=list)
 
-    def composite(self):
-        return Image.new("RGBA", self.size, (255, 255, 255, 255))
+    def composite(self, box=None, onto=None):
+        return onto.copy() if onto is not None else Image.new("RGBA", self.size, (255, 255, 255, 255))
 
 
 class FakeRenderer:
@@ -511,6 +512,46 @@ def test_a_lifted_block_over_the_page_under_it_is_the_render(workspace):
     workspace.update_text_block(project, page, block.layer_id, {"frame": turned})
     saved = workspace.lift(project, page, block.layer_id)
     assert {k: preview[k] for k in ("x", "y", "width", "height", "text")} == {k: saved[k] for k in ("x", "y", "width", "height", "text")}
+
+def test_the_render_splits_into_the_art_and_vector_text(workspace):
+    """The editor shows the render as its art (PNG) under its text (SVG outlines, sharp at any zoom); the
+    two drawn together are the render."""
+    import numpy as np
+    import skia
+
+    workspace._renderer = None  # the real renderer, not the fixture's stand-in
+    project = workspace.create_project("sharp").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 10, "y": 10, "width": 220, "height": 70})
+    workspace.create_text_block(project, page, {"x": 20, "y": 110, "width": 200, "height": 60})
+    first, second = workspace.page(project, page).blocks
+    sunset = {"kind": "linear", "angle": 45, "stops": [{"offset": 0, "color": "#ff512fff"}, {"offset": 1, "color": "#2040f0ff"}]}
+    workspace.update_text_block(project, page, first.layer_id, {"translation": "Sharp words", "typography": {"fill_gradient": sunset, "stroke_width": 3}})
+    workspace.update_text_block(project, page, second.layer_id, {"translation": "under lined", "translation_styles": [{"start": 0, "end": 5, "underline": True}]})
+
+    view = workspace.page(project, page)
+    assert {"render-base", "render-text"} <= set(view.assets)
+    assert view.asset_versions["render-text"] == view.asset_versions["render-base"] == view.asset_versions["render"]
+    base_png, base_type, *_ = workspace.asset(project, page, "render-base")
+    svg, svg_type, *_ = workspace.asset(project, page, "render-text")
+    assert (base_type, svg_type) == ("image/png", "image/svg+xml")
+    assert b"<path" in svg and b"<use" in svg and b"linearGradient" in svg and b"<rect" in svg
+
+    base = Image.open(io.BytesIO(base_png)).convert("RGBA")
+    render = Image.open(io.BytesIO(workspace.render(project, page))).convert("RGBA")
+    assert base.size == render.size and base.tobytes() != render.tobytes()  # the text is not in the art
+    surface = skia.Surface(*render.size)
+    surface.getCanvas().clear(skia.ColorTRANSPARENT)
+    dom = skia.SVGDOM.MakeFromStream(skia.MemoryStream(svg))
+    dom.setContainerSize(skia.Size(*render.size))
+    dom.render(surface.getCanvas())
+    text = Image.fromarray(surface.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType, alphaType=skia.kUnpremul_AlphaType), "RGBA")
+    assert text.getchannel("A").getextrema()[1] == 255
+    difference = np.abs(np.asarray(Image.alpha_composite(base, text), dtype=int) - np.asarray(render, dtype=int))[..., :3].max(axis=-1)
+    # Only antialiasing along outline edges may differ between the two rasterizations.
+    assert difference.mean() < 0.5 and (difference > 64).sum() < 50
+    assert workspace.render_parts(project, page) is workspace.render_parts(project, page)  # cached per revision
+
 
 def test_settings_accept_the_remote_runtime(workspace):
     config = workspace.get_config().model_copy(deep=True)

@@ -16,7 +16,7 @@
 // Images pasted with Ctrl+V or dropped on the canvas become pages at the end of the chapter on
 // screen, or of the last chapter when no page is open, as the sidebar's Add pages does.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CornerDownLeft, GalleryVertical, LoaderCircle, Upload, WandSparkles, X } from "lucide-react";
 
@@ -273,6 +273,13 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+/** Waits until `url` is decoded (a failure is left to the <img> showing it). */
+function decoded(url: string): Promise<void> {
+  const image = new Image();
+  image.src = url;
+  return image.decode().catch(() => undefined);
+}
+
 /** The canvas's pixels under `box`, grown to whole pixels and kept on the canvas, as a PNG patch and where it goes. */
 async function patchOf(canvas: HTMLCanvasElement, box: Rect): Promise<{ png: Uint8Array; at: Pt }> {
   const x = Math.max(0, Math.floor(box.x));
@@ -394,6 +401,8 @@ export function Canvas() {
   const [zoom, setZoom] = useState(1);
   const [fittedFor, setFittedFor] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  // In the render view `url` is the art under the text and `textUrl` the text over it as SVG (see the base image effect).
+  const [textUrl, setTextUrl] = useState<string | null>(null);
   // The page `url` is for: in the strip a stale image would show at the new page's place.
   const [urlPage, setUrlPage] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -421,6 +430,7 @@ export function Canvas() {
   const scroll = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const baseImage = useRef<HTMLImageElement>(null);
+  const textImage = useRef<HTMLImageElement>(null);
   const layerCanvases = useRef(new Map<string, HTMLCanvasElement>());
   const pendingPaint = useRef<HTMLCanvasElement>(null);
   const pendingDirty = useRef(false);
@@ -461,25 +471,36 @@ export function Canvas() {
   const paintLayerRef = useRef(paintLayer);
   paintLayerRef.current = paintLayer;
 
-  // Base image: the source, or the server render.
+  // Base image: the source, or the server render. The render comes in two parts, as Koharu's canvas draws it:
+  // the art under the text as an image, and the text as vector outlines (SVG) the browser draws at the size the
+  // page is shown, so lettering stays sharp at any zoom on a low-resolution page. The export is still rasterized
+  // at the page's own size. Both parts are decoded before either is shown, so an edit swaps them together.
   useEffect(() => {
     if (!projectId || !pageId) {
       setUrl(null);
+      setTextUrl(null);
       return;
     }
     let alive = true;
     setMissing(false);
     void (async () => {
-      let found = await assetUrl(projectId, pageId, ws.view === "render" ? "render" : "source", baseVersion);
+      const render = ws.view === "render";
+      let [found, text] = await Promise.all([
+        assetUrl(projectId, pageId, render ? "render-base" : "source", baseVersion),
+        render ? assetUrl(projectId, pageId, "render-text", baseVersion) : null,
+      ]);
       let version = baseVersion;
-      if (!found && ws.view === "render") {
+      if ((!found || (render && !text)) && render) {
         setMissing(true);
         found = await assetUrl(projectId, pageId, "source", sourceVersion);
+        text = null;
         version = sourceVersion;
       }
+      await Promise.all([found, text].map((src) => src && decoded(src)));
       if (alive) {
         urlVersion.current = version;
         setUrl(found);
+        setTextUrl(text);
         setUrlPage(pageId);
       }
     })();
@@ -1085,6 +1106,7 @@ export function Canvas() {
     out.height = page.height;
     const context = out.getContext("2d", { willReadFrequently: true })!;
     context.drawImage(baseImage.current, 0, 0, page.width, page.height);
+    if (textImage.current) context.drawImage(textImage.current, 0, 0, page.width, page.height);
     if (showLayers) for (const layer of rasters) if (layer.visible) {
       const canvas = layerCanvases.current.get(layer.id);
       if (!canvas) continue;
@@ -1108,6 +1130,7 @@ export function Canvas() {
     out.height = bottom - y;
     const context = out.getContext("2d")!;
     context.drawImage(baseImage.current, -x, -y, page.width, page.height);
+    if (textImage.current) context.drawImage(textImage.current, -x, -y, page.width, page.height);
     if (showLayers) for (const layer of rasters) if (layer.visible) {
       const canvas = layerCanvases.current.get(layer.id);
       if (!canvas) continue;
@@ -1441,6 +1464,18 @@ export function Canvas() {
                 onLoad={() => setShown(urlVersion.current)}
               />
             )}
+            {url && textUrl && (!strip || urlPage === page.id) && (
+              // The render's text as vectors over the art, drawn at the zoomed size rather than scaled up from the page's pixels.
+              <img
+                ref={textImage}
+                className="pointer-events-none absolute inset-0 max-w-none select-none"
+                src={textUrl}
+                width={page.width * zoom}
+                height={page.height * zoom}
+                alt=""
+                draggable={false}
+              />
+            )}
             {showLayers &&
               rasters.map((layer) => (
                 <LayerCanvas
@@ -1676,21 +1711,36 @@ const StripPages = memo(function StripPages({
     <>
       <div className="pointer-events-none absolute bg-surface shadow-floating" style={{ left, top, width: strip.width * zoom, height: strip.height * zoom }} />
       {strip.items.map(({ page, top: y }) => {
-        // The render once the page has one worth showing; until then the source, without a render per page.
-        const kind = view === "render" && page.stages.some((stage) => stage.done) ? "render" : "source";
+        // The render once the page has one worth showing (its art, with its text as vectors over it, as on the
+        // current page); until then the source, without a render per page.
+        const rendered = view === "render" && page.stages.some((stage) => stage.done);
+        const kind = rendered ? "render-base" : "source";
         const from = Math.floor(y * zoom);
+        const placed = { left: left + ((strip.width - page.width) / 2) * zoom, top: top + from, width: page.width * zoom, height: Math.ceil((y + page.height) * zoom) - from };
         return (
-          <img
-            key={page.id}
-            className="absolute max-w-none select-none"
-            src={assetHref(projectId, page.id, kind, assetVersion(page, kind))}
-            alt={page.name}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            style={{ left: left + ((strip.width - page.width) / 2) * zoom, top: top + from, width: page.width * zoom, height: Math.ceil((y + page.height) * zoom) - from }}
-            onPointerDown={(event) => onPointerDown(event, page.id)}
-          />
+          <Fragment key={page.id}>
+            <img
+              className="absolute max-w-none select-none"
+              src={assetHref(projectId, page.id, kind, assetVersion(page, kind))}
+              alt={page.name}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              style={placed}
+              onPointerDown={(event) => onPointerDown(event, page.id)}
+            />
+            {rendered && (
+              <img
+                className="pointer-events-none absolute max-w-none select-none"
+                src={assetHref(projectId, page.id, "render-text", assetVersion(page, "render-text"))}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+                style={{ ...placed, height: page.height * zoom, top: top + y * zoom }}
+              />
+            )}
+          </Fragment>
         );
       })}
     </>

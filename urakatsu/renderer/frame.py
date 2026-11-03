@@ -243,11 +243,12 @@ class Frame:
                 return layer
         return None
 
-    def composite(self, box: Optional[tuple[int, int, int, int]] = None) -> PILImage.Image:
+    def composite(self, box: Optional[tuple[int, int, int, int]] = None, onto: Optional[PILImage.Image] = None) -> PILImage.Image:
         """Flattens the page: source, then each visible layer in order (source-over). ``box``
-        (left, top, right, bottom in page pixels) flattens only that part, skipping layers outside it."""
+        (left, top, right, bottom in page pixels) flattens only that part, skipping layers outside it.
+        ``onto`` (the size of ``box``) is what the layers are drawn over, left as it is."""
         x0, y0, x1, y1 = box or (0, 0, self.width, self.height)
-        canvas = PILImage.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        canvas = onto.copy() if onto is not None else PILImage.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
         for layer in self.layers:
             if not layer.presentation.visible or layer.presentation.opacity <= 0.0:
                 continue
