@@ -643,11 +643,15 @@ const COLORIZATION_MODES: { mode: ColorizationMode; title: string; description: 
   { mode: "colorize", title: "Colorize", description: "Black-and-white pages are painted in color, on a layer of their own." },
 ];
 
-/** Black-and-white pages painted in color (not a Koharu setting). The model and LoRA are the user's: see `diffusion_colorizer.py`. */
+/** Black-and-white pages painted in color (not a Koharu setting). An image editing model is the user's
+ * own, with its LoRA (`diffusion_colorizer.py`); the other colorizers bring their weights. */
 function ColorizationSection({ providers, draft, update }: { providers: ProviderInfo[]; draft: Config; update: (patch: Partial<Config>) => void }) {
   const mode = (draft.colorization || "off") as ColorizationMode;
   const provider = providers.find((p) => p.id === draft.colorizationModel) ?? providers[0];
   const settings = provider ? parseJson(draft.processorJson[provider.id]) : {};
+  const properties = (provider ? parseJson(provider.settingsSchemaJson).properties : undefined) as Record<string, unknown> | undefined;
+  const installed = !!properties && "model" in properties;
+  const repo = installed ? undefined : weightsRepo(provider);
   const setModel = (model: string) => {
     if (!provider) return;
     const next: Record<string, unknown> = { ...settings, model };
@@ -655,7 +659,7 @@ function ColorizationSection({ providers, draft, update }: { providers: Provider
     update({ processorJson: { ...draft.processorJson, [provider.id]: JSON.stringify(next) } });
   };
   return (
-    <PreferenceSection title="Colorization" description="Paints black-and-white pages after they are cleaned. Use a model that edits images, with a colorizer LoRA if it needs one.">
+    <PreferenceSection title="Colorization" description="Paints black-and-white pages after they are cleaned.">
       <div role="radiogroup" aria-label="Colorization" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
         {COLORIZATION_MODES.map((option) => {
           const active = mode === option.mode;
@@ -681,12 +685,18 @@ function ColorizationSection({ providers, draft, update }: { providers: Provider
         })}
       </div>
       {mode !== "off" && providers.length > 1 && (
-        <PreferenceRow title="Colorizer" description="How the page is painted.">
-          <Select label="Colorizer" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(colorizationModel) => update({ colorizationModel })} />
+        <PreferenceRow
+          title="Colorizer"
+          description="An image editing model you install from Models, which follows a prompt and a LoRA, or a colorizer that downloads itself and paints a page in about a second."
+        >
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Select label="Colorizer" value={provider?.id ?? ""} options={providerOptions(providers)} onChange={(colorizationModel) => update({ colorizationModel })} />
+            {repo && <p className="truncate text-xs leading-4 text-fg-3" title={provider?.weights[0]}>Runs {repo}</p>}
+          </div>
         </PreferenceRow>
       )}
-      {mode !== "off" && provider && (
-        <PreferenceRow title="Model" description="Paints the page. Lists the installed models that edit images.">
+      {mode !== "off" && provider && installed && (
+        <PreferenceRow title="Model" description="Paints the page. Lists the installed models that edit images, with a colorizer LoRA if it needs one.">
           <InstalledModelSelect providerId={provider.id} builtIn={provider.weights.length > 0} value={typeof settings.model === "string" ? settings.model : ""} onChange={setModel} />
         </PreferenceRow>
       )}

@@ -50,6 +50,8 @@ BUILTIN_MODULES = (
     "urakatsu.providers.censor.flux2_klein_decensor",
     # colorization (not in Koharu)
     "urakatsu.providers.colorization.diffusion_colorizer",
+    "urakatsu.providers.colorization.manga_light_colorizer",
+    "urakatsu.providers.colorization.manga_colorization_v2",
 )
 
 # config.rs: the first entry of each list is the stage default.

@@ -119,7 +119,7 @@ class ColorizeProcessor:
 @register
 class DiffusionColorizerProvider(ColorizationProvider, DiffusionRecipeProvider):
     id: ClassVar[str] = "diffusion-colorizer"
-    name: ClassVar[str] = "Colorizer"
+    name: ClassVar[str] = "Image editing model"
     description: ClassVar[str] = "Any image model stable-diffusion.cpp can edit with, installed from the Models page, with an optional LoRA."
     Settings: ClassVar[type[ProviderSettings]] = DiffusionColorizerSettings
 
