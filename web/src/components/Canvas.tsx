@@ -2132,25 +2132,26 @@ function Overlays({
               points={region.polygon.map((p) => `${p.x},${p.y}`).join(" ")}
             />
           ))}
-      {ws.showBlocks &&
-        page.blocks.map((block, index) =>
-          // The block being dragged is drawn on the drag layer instead.
-          block.layerId === dragging ? null : (
-            <BlockOverlay
-              key={block.layerId}
-              block={block}
-              index={index}
-              points={gesture && "id" in gesture && gesture.id === block.layerId ? gesture.points : block.frame}
-              selected={block.layerId === ws.blockId}
-              interactive={ws.tool === "select"}
-              zoom={zoom}
-              startMove={startMove}
-              startTransform={startTransform}
-              hoverBlock={hoverBlock}
-              readout={gesture?.kind === "transform" && gesture.id === block.layerId ? gesture.readout : undefined}
-            />
-          ),
-        )}
+      {/* With text frames hidden, a frame still takes the pointer: it shows while hovered or selected, so text stays editable. */}
+      {page.blocks.map((block, index) =>
+        // The block being dragged is drawn on the drag layer instead.
+        block.layerId === dragging ? null : (
+          <BlockOverlay
+            key={block.layerId}
+            block={block}
+            index={index}
+            points={gesture && "id" in gesture && gesture.id === block.layerId ? gesture.points : block.frame}
+            selected={block.layerId === ws.blockId}
+            interactive={ws.tool === "select"}
+            ghost={!ws.showBlocks}
+            zoom={zoom}
+            startMove={startMove}
+            startTransform={startTransform}
+            hoverBlock={hoverBlock}
+            readout={gesture?.kind === "transform" && gesture.id === block.layerId ? gesture.readout : undefined}
+          />
+        ),
+      )}
       {gesture?.kind === "text" && <rect className={regionClass({ selected: true, user: false, hidden: false })} x={gesture.rect.x} y={gesture.rect.y} width={gesture.rect.width} height={gesture.rect.height} />}
     </>
   );
@@ -2164,6 +2165,7 @@ function BlockOverlay({
   points,
   selected,
   interactive,
+  ghost,
   zoom,
   startMove,
   startTransform,
@@ -2175,6 +2177,8 @@ function BlockOverlay({
   points: Pt[];
   selected: boolean;
   interactive: boolean;
+  /** Text frames are hidden: drawn only while hovered or selected. */
+  ghost?: boolean;
   zoom: number;
   startMove?: (event: ReactPointerEvent, block: TextBlock) => void;
   startTransform?: TransformStart;
@@ -2189,7 +2193,8 @@ function BlockOverlay({
   const { box, quad } = orientedBox(points);
   const turn = (box.angle * 180) / Math.PI;
   return (
-    <g className={interactive ? undefined : "pointer-events-none"}>
+    // opacity-0 still takes the pointer, so a hidden frame shows on hover and can be pressed.
+    <g className={cn(!interactive && "pointer-events-none", ghost && !selected && "opacity-0 hover:opacity-100")}>
       <polygon
         className={regionClass({ selected, user: manual, hidden: !block.visible })}
         points={points.map((p) => `${p.x},${p.y}`).join(" ")}
