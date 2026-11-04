@@ -35,12 +35,27 @@ def test_operation_resolution_matches_koharu():
         Operation.select([]).resolve()
 
 
-def test_scheduler_streams_pages_in_order():
-    scheduler = Scheduler(["a", "b"], [Stage.DETECTION, Stage.OCR])
+def test_scheduler_runs_page_by_page():
+    scheduler = Scheduler(["a", "b"], [Stage.DETECTION, Stage.OCR, Stage.INPAINTING])
     assert scheduler.start_next(set()) == ("a", Stage.DETECTION)
     assert scheduler.start_next({Stage.DETECTION}) is None
     scheduler.complete("a", Stage.DETECTION)
-    assert {scheduler.start_next(set()), scheduler.start_next({Stage.OCR})} == {("a", Stage.OCR), ("b", Stage.DETECTION)}
+    # Both of a's later stages are eligible; b waits although its detection is free.
+    assert scheduler.start_next(set()) == ("a", Stage.OCR)
+    assert scheduler.start_next({Stage.OCR}) == ("a", Stage.INPAINTING)
+    assert scheduler.start_next({Stage.OCR, Stage.INPAINTING}) is None
+    scheduler.complete("a", Stage.OCR)
+    assert scheduler.start_next({Stage.INPAINTING}) is None
+    assert scheduler.complete("a", Stage.INPAINTING)
+    assert scheduler.start_next(set()) == ("b", Stage.DETECTION)
+
+
+def test_scheduler_moves_on_after_a_failed_page():
+    scheduler = Scheduler(["a", "b"], [Stage.DETECTION, Stage.OCR])
+    assert scheduler.start_next(set()) == ("a", Stage.DETECTION)
+    scheduler.complete("a", Stage.DETECTION)
+    assert scheduler.fail_page("a") == [Stage.OCR]
+    assert scheduler.start_next(set()) == ("b", Stage.DETECTION)
 
 
 @pytest.mark.asyncio

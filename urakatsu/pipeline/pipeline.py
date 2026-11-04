@@ -2,6 +2,7 @@
 
 - Pages enter in project order; a stage runs on one page; completed detection makes
   that page's later stages eligible immediately; at most one job per stage runs.
+  a page finishes before the next one starts (``scheduler.py``).
 - Every job reads the latest committed snapshot; each committed result is its own
   undo step; a patch whose observed state changed is rejected (rebase rule).
 - Accelerator inference uses one admission lane, including remote translation. On

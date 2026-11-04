@@ -38,6 +38,8 @@ Urakatsu keeps Koharu's stage semantics:
 - A stage runs on one page. OCR needs detection, translation needs OCR, inpainting needs
   detection, and rendering needs translation and inpainting. Pages enter in project order,
   and a page's later stages become eligible as soon as their prerequisites finish.
+- Pages run one at a time: every stage of a page finishes before the next page starts, so
+  finished pages appear from the first seconds of a run.
 - At most one job per stage runs at a time, and accelerated stages share one admission lane.
   On out-of-memory the other models are unloaded and the job retries once; any other failure
   unloads the failing stage. Outside a run, the memory meter in the sidebar lists the loaded

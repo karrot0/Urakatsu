@@ -1,9 +1,16 @@
 """Per-page stage scheduler.
 
 Pages enter in project order. A stage on a page is eligible once its
-prerequisites on that page have finished, at most one job per stage runs at a
-time, and the number of pages in flight is bounded by the stage count so the
-pipeline streams through a project instead of fanning out.
+prerequisites on that page have finished, and at most one job per stage runs at
+a time.
+
+Every accelerated job here takes the one admission lane, so nothing overlaps and the
+interleaving only switches models more often and finishes pages later. Here a
+page's stages all finish before the next page starts (D1 R1 I1 T1, D2 ...).
+Measured on four pages with the models resident (detection, OCR, LaMa): the
+same total time as stage-by-stage, the first page done at ~24 s instead of
+~35 s. Automations keep their stage-major batches (``pipeline/batch.py``) for
+models too large to sit together.
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ class Scheduler:
     def __init__(self, pages: list[str], stages: list[Stage]):
         self._pages = [_PageWork(page, stages) for page in pages]
         self._index = {work.page: i for i, work in enumerate(self._pages)}
-        self._window = max(1, len(stages))
+        self._window = 1  # pages in flight: page by page, see the module docstring
         self._active_pages = 0
         self._head = 0
         self.total = len(pages) * len(stages)
