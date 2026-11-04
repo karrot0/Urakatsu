@@ -4,8 +4,9 @@ Port of ``segment.rs``.
 
 Divergences (no exact Python twin for these ICU/hypher pieces):
 - ICU ``LineSegmenter::new_auto`` is replaced by ``uniseg`` (UAX #14 line break
-  boundaries). ICU's dictionary-based segmentation for Thai/Lao/Khmer/Burmese is not
-  reproduced.
+  boundaries), except for text containing Thai, Lao, Khmer or Myanmar. Those scripts
+  write words without spaces, so UAX #14 alone finds no breaks; that text goes to ICU4C's
+  dictionary-based ``LineBreaker`` (``icu4py``), as Koharu's ICU segmenter does.
 - ICU ``LineBreakWordOption::KeepAll`` for Korean is approximated: UAX #14 breaks
   between two Hangul syllables are suppressed; breaks at spaces and punctuation remain.
 - hypher is replaced by ``pyphen`` (Hunspell/LibreOffice hyphenation dictionaries). Break
@@ -241,8 +242,12 @@ class LineBreaker:
         return self
 
     def line_break_opportunities(self, text: str) -> list[LineBreakOpportunity]:
-        # ICU's segment_str yields the leading 0 boundary; uniseg yields only the breaks.
-        boundaries = [0, *line_break_boundaries(text)]
+        dictionary_language = _dictionary_break_language(text)
+        if dictionary_language is not None:
+            boundaries = _icu_boundaries(text, dictionary_language)
+        else:
+            # ICU's segment_str yields the leading 0 boundary; uniseg yields only the breaks.
+            boundaries = [0, *line_break_boundaries(text)]
         if contains_korean(text):
             boundaries = _keep_all_boundaries(text, boundaries)
         opportunities = []
@@ -306,6 +311,40 @@ class LineBreaker:
                 )
             )
         return result
+
+
+# Scripts written without spaces between words (UAX #14 class SA), and the ICU locale
+# whose dictionary segments them.
+_DICTIONARY_SCRIPTS: dict[str, str] = {"Thai": "th", "Laoo": "lo", "Khmr": "km", "Mymr": "my"}
+
+
+def _dictionary_break_language(text: str) -> Optional[str]:
+    """The locale for the first dictionary-segmented script in ``text``, or ``None``."""
+    for ch in text:
+        language = _DICTIONARY_SCRIPTS.get(_script_of(ch))
+        if language is not None:
+            return language
+    return None
+
+
+def _icu_boundaries(text: str, language: str) -> list[int]:
+    """ICU line break boundaries (leading 0 included) as code-point offsets.
+
+    ICU's dictionaries cover every SA script at once, so the locale only picks tailoring.
+    ICU reports UTF-16 offsets; they are mapped back to ``str`` indices.
+    """
+    from icu4py.breakers import LineBreaker as IcuLineBreaker  # ~40 MB of ICU data; load on first use
+
+    utf16_to_index: dict[int, int] = {}
+    position = 0
+    for index, ch in enumerate(text):
+        utf16_to_index[position] = index
+        position += 2 if ord(ch) > 0xFFFF else 1
+    utf16_to_index[position] = len(text)
+    boundaries = [0]
+    for _start, end in IcuLineBreaker(text, language).segments():
+        boundaries.append(utf16_to_index[end])
+    return boundaries
 
 
 def _keep_all_boundaries(text: str, boundaries: list[int]) -> list[int]:

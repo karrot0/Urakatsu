@@ -24,6 +24,7 @@ dependencies = [
     "fonttools>=4.47",
     "python-bidi>=0.6",
     "uniseg>=0.8",
+    "icu4py>=1.2",
     "pyphen>=0.15",
     "jieba>=0.42",
     "regex>=2024.1",

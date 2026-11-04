@@ -15,6 +15,7 @@ from urakatsu.renderer import layout as L
 from urakatsu.renderer import renderer as R
 from urakatsu.renderer import script as S
 from urakatsu.renderer import segment as G
+from urakatsu.renderer import fonts as fonts_module
 from urakatsu.renderer.fonts import Attributes, Font, FontSystem, Fonts
 from urakatsu.renderer.shape import ShapingOptions, TextShaper, shape_script_runs
 from urakatsu.renderer.types import TextAlign, WritingMode
@@ -116,6 +117,26 @@ def test_korean_word_segmentation_uses_keep_all():
     text = "B6층 모험가들이 돌아갔으니까 청소 부탁해"
     segments = [s.text(text) for s in G.LineBreaker().line_segments(text)]
     assert segments == ["B6층 ", "모험가들이 ", "돌아갔으니까 ", "청소 ", "부탁해"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("สวัสดีครับวันนี้อากาศดีมาก", ["สวัสดี", "ครับ", "วัน", "นี้", "อากาศ", "ดี", "มาก"]),
+        ("ខ្ញុំស្រលាញ់ភាសាខ្មែរ", ["ខ្ញុំ", "ស្រលាញ់", "ភាសាខ្មែរ"]),
+        ("ສະບາຍດີປະເທດລາວ", ["ສະບາຍດີ", "ປະເທດ", "ລາວ"]),
+        ("မင်္ဂလာပါခင်ဗျာ", ["မင်္ဂလာ", "ပါ", "ခင်ဗျာ"]),
+    ],
+)
+def test_scripts_without_spaces_break_between_dictionary_words(text, expected):
+    segments = [s.text(text) for s in G.LineBreaker().line_segments(text)]
+    assert segments == expected
+
+
+def test_dictionary_breaks_use_code_point_offsets_after_astral_characters():
+    text = "😀สวัสดีครับ"
+    segments = [s.text(text) for s in G.LineBreaker().line_segments(text)]
+    assert segments == ["😀", "สวัสดี", "ครับ"]
 
 
 def test_japanese_break_on_characters():
@@ -221,6 +242,18 @@ def test_font_resolution_orders_requested_family_first_then_script_fallbacks(sys
     assert fonts[0].family_name == latin
     if system.family_exists("Microsoft YaHei"):
         assert "Microsoft YaHei" in [font.family_name for font in fonts[1:]]
+
+
+@pytest.mark.parametrize(
+    "script, sample",
+    [("Beng", "ঠান্ডা"), ("Taml", "தமிழ்"), ("Telu", "తెలుగు"), ("Gujr", "ગુજરાતી"), ("Khmr", "ខ្មែរ"),
+     ("Laoo", "ລາວ"), ("Mymr", "မြန်မာ"), ("Tibt", "བོད"), ("Thai", "ไทย"), ("Arab", "مرحبا")],
+)
+def test_script_fallbacks_cover_non_latin_scripts(system: FontSystem, latin: str, script: str, sample: str):
+    if not any(system.family_exists(f) for f in fonts_module.SCRIPT_FALLBACK_FAMILIES[script]):
+        pytest.skip(f"no {script} font installed")
+    fonts = system.resolve_with_fallback_families([latin], [], Attributes(), [script])
+    assert any(font.covers(sample) for font in fonts)
 
 
 def test_font_covers_ignores_whitespace_and_variation_selectors(system: FontSystem, latin: str):

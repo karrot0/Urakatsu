@@ -72,6 +72,8 @@ def _parse_output(text: str) -> list[tuple[int, str]]:
         value = json.loads(text, parse_constant=_reject_constant)
     except json.JSONDecodeError as error:
         raise ValueError(f"{error.msg} at line {error.lineno} column {error.colno}") from error
+    if isinstance(value, list):
+        value = {"translations": value}
     if not isinstance(value, dict):
         raise ValueError("invalid type: expected struct TranslationOutput")
     if "translations" not in value:

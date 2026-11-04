@@ -449,7 +449,7 @@ class Desktop:
                 updater.installer = self.run_installer
             log.info("workspace ready at %s", self.server.url)
             self.render(title="Starting Urakatsu", message="Loading the workspace.", percent=100)
-            self.window.load_url(f"{self.server.url}/?shell={chrome.SHELL}")
+            self.window.evaluate_js(f"location.replace({json.dumps(f'{self.server.url}/?shell={chrome.SHELL}')})")
         except Exception as error:  # noqa: BLE001 - shown in the window
             log.exception("startup failed")
             self.render(title="Urakatsu could not start", message=f"Details are in {gpu_setup.default_log_path()}.", error=str(error))

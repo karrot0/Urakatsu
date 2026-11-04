@@ -409,3 +409,14 @@ def test_list_models_empty_without_key_and_propagates_errors(provider, monkeypat
         cls.list_models({}, transport=httpx.MockTransport(lambda r: httpx.Response(429, text="x")))
     with pytest.raises(ApiError):
         cls.list_models({"api_key": "k"}, transport=httpx.MockTransport(lambda r: httpx.Response(401, text="no")))
+
+
+def test_bare_segment_array_is_accepted_as_translations():
+    # Local OpenAI-compatible servers without enforced schemas often drop the wrapper object.
+    reply = json.dumps([{"id": 1, "text": "দুই"}, {"id": 0, "text": "এক"}], ensure_ascii=False)
+    assert prompt.translations("test", reply, ["one", "two"]) == ["এক", "দুই"]
+
+
+def test_non_object_non_array_reply_still_fails_closed():
+    with pytest.raises(TranslationError, match="expected struct TranslationOutput"):
+        prompt.translations("test", '"just a string"', ["one"])
