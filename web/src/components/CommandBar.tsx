@@ -4,11 +4,13 @@ import {
   Bot,
   Check,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
   Eye,
   EyeOff,
   FileImage,
   Layers,
+  LoaderCircle,
   Monitor,
   Moon,
   Play,
@@ -21,6 +23,8 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { describeError, exportChapter, exportPage, saveBlob } from "../api/client";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
@@ -115,6 +119,73 @@ export function CommandBar() {
 
       <InferenceControl />
     </header>
+  );
+}
+
+type ChapterFormat = "cbz" | "zip" | "strip";
+
+function ExportMenu({ variant }: { variant: "default" | "outline" }) {
+  const ws = useWorkspace();
+  const page = currentPage(ws);
+  const chapter = chapterOf(ws, ws.pageId);
+  const webtoon = ws.project?.format?.kind === "webtoon";
+  const [exporting, setExporting] = useState(false);
+
+  const save = async (task: () => Promise<void>) => {
+    setExporting(true);
+    try {
+      await task();
+    } catch (error) {
+      ws.reportError(describeError(error));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const exportAs = (format: ChapterFormat) =>
+    save(async () => {
+      const { blob, filename } = await exportChapter(ws.project!.id, chapter!.id, format);
+      saveBlob(blob, filename);
+    });
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant={variant}
+            size="sm"
+            className={cn(
+              "w-5 rounded-l-none px-0",
+              variant === "default" ? "shadow-[inset_1px_0_0_color-mix(in_oklab,var(--on-brand)_30%,transparent)]" : "-ml-px",
+            )}
+            disabled={!page || exporting}
+            aria-label={exporting ? "Exporting" : "Export"}
+            title={exporting ? "Exporting" : "Export the translated page or chapter"}
+          >
+            {exporting ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : <ChevronDown size={12} />}
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-60">
+        {page && (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="truncate">Export page · {page.name}</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => void save(() => exportPage(ws.project!.id, page))}>Image (.png)</DropdownMenuItem>
+          </DropdownMenuGroup>
+        )}
+        {chapter && chapter.pageIds.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="truncate">Export chapter · {chapter.name}</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => void exportAs("cbz")}>Comic book (.cbz)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void exportAs("zip")}>Images (.zip)</DropdownMenuItem>
+              {webtoon && <DropdownMenuItem onClick={() => void exportAs("strip")}>Long strip (.png)</DropdownMenuItem>}
+            </DropdownMenuGroup>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -280,15 +351,18 @@ function InferenceControl() {
           </SelectorPanel>
         )}
       </Popover>
-      {running ? (
-        <Button variant="outline" size="sm" className="min-w-18" onClick={() => void ws.stop()}>
-          <Square size={12} /> Stop
-        </Button>
-      ) : (
-        <Button size="sm" className="min-w-18" disabled={!ws.pageId} onClick={run} title={picked > 1 ? `Run on the ${picked} selected pages` : undefined}>
-          <Play size={14} /> {picked > 1 ? `Run ${picked} pages` : "Run"}
-        </Button>
-      )}
+      <div className="flex">
+        {running ? (
+          <Button variant="outline" size="sm" className="min-w-18 rounded-r-none" onClick={() => void ws.stop()}>
+            <Square size={12} /> Stop
+          </Button>
+        ) : (
+          <Button size="sm" className="min-w-18 rounded-r-none" disabled={!ws.pageId} onClick={run} title={picked > 1 ? `Run on the ${picked} selected pages` : undefined}>
+            <Play size={14} /> {picked > 1 ? `Run ${picked} pages` : "Run"}
+          </Button>
+        )}
+        <ExportMenu variant={running ? "outline" : "default"} />
+      </div>
     </div>
   );
 }

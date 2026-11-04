@@ -222,7 +222,7 @@ def _focus_existing() -> None:
 
 
 def _set_icon() -> None:
-    """pythonw.exe has Python's icon; give the window and its taskbar button Urakatsu's."""
+    """pythonw.exe has Python's icon and name; give the window and its taskbar button Urakatsu's."""
     if not _windows():
         return
     user32 = ctypes.windll.user32
@@ -239,6 +239,77 @@ def _set_icon() -> None:
         handle = user32.LoadImageW(None, icon, 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
         if handle:
             user32.SendMessageW(hwnd, 0x80, which, handle)  # WM_SETICON
+    try:
+        _set_taskbar_identity(hwnd, icon)
+    except OSError:
+        log.exception("could not set the taskbar identity")
+
+
+def _launcher() -> Optional[Path]:
+    """The installed launcher (``Urakatsu.exe``), which a pinned taskbar button should start."""
+    local = os.environ.get("LOCALAPPDATA")
+    exe = Path(local) / "Programs" / "Urakatsu" / "Urakatsu.exe" if local else None
+    return exe if exe is not None and exe.is_file() else None
+
+
+class _PropertyKey(ctypes.Structure):
+    _fields_ = [("fmtid", ctypes.c_byte * 16), ("pid", ctypes.c_ulong)]
+
+
+class _PropVariant(ctypes.Structure):
+    # VT_LPWSTR only: vt, three reserved words, then the string pointer (24 bytes on 64-bit).
+    _fields_ = [
+        ("vt", ctypes.c_ushort),
+        ("reserved", ctypes.c_ushort * 3),
+        ("value", ctypes.c_wchar_p),
+        ("padding", ctypes.c_void_p),
+    ]
+
+
+def _set_taskbar_identity(hwnd: int, icon: str) -> None:
+    """Names the taskbar button and its jump list "Urakatsu", and makes "Pin to taskbar" pin the app.
+
+    The process AppUserModelID alone leaves Windows to describe the button from the executable,
+    pythonw.exe, so the jump list said "Python" and a pin started a bare Python. The window's own
+    relaunch properties (System.AppUserModel.*) override that.
+    """
+    import uuid
+
+    launcher = _launcher()
+    if launcher is not None:
+        command, icon_resource = f'"{launcher}"', f"{launcher},0"
+    else:
+        python, _ = background_command()
+        command, icon_resource = f'"{python}" -m urakatsu.desktop', icon
+    fmtid = (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3").bytes_le)
+    values = [(2, command), (3, icon_resource), (4, TITLE), (5, APP_ID)]
+
+    ole32 = ctypes.windll.ole32
+    initialized = ole32.CoInitializeEx(None, 2) in (0, 1)  # COINIT_APARTMENTTHREADED; S_OK or S_FALSE
+    try:
+        iid = (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99").bytes_le)
+        store = ctypes.c_void_p()
+        shell32 = ctypes.windll.shell32
+        shell32.SHGetPropertyStoreForWindow.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        result = shell32.SHGetPropertyStoreForWindow(ctypes.c_void_p(hwnd), ctypes.byref(iid), ctypes.byref(store))
+        if result != 0 or not store:
+            raise OSError(f"SHGetPropertyStoreForWindow failed: {result:#x}")
+        vtable = ctypes.cast(ctypes.cast(store, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
+        hresult = ctypes.HRESULT if hasattr(ctypes, "HRESULT") else ctypes.c_long
+        set_value = ctypes.WINFUNCTYPE(hresult, ctypes.c_void_p, ctypes.POINTER(_PropertyKey), ctypes.POINTER(_PropVariant))(vtable[6])
+        commit = ctypes.WINFUNCTYPE(hresult, ctypes.c_void_p)(vtable[7])
+        release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+        try:
+            for pid, text in values:
+                key = _PropertyKey(fmtid, pid)
+                value = _PropVariant(vt=31, value=text)  # VT_LPWSTR; the store copies the string
+                set_value(store, ctypes.byref(key), ctypes.byref(value))
+            commit(store)
+        finally:
+            release(store)
+    finally:
+        if initialized:
+            ole32.CoUninitialize()
 
 
 # ---- the window ---------------------------------------------------------------------------------
