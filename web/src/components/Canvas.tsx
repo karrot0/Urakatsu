@@ -17,6 +17,7 @@
 // screen, or of the last chapter when no page is open, as the sidebar's Add pages does.
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { flushSync } from "react-dom";
 
 import { CornerDownLeft, GalleryVertical, LoaderCircle, Upload, WandSparkles, X } from "lucide-react";
 
@@ -602,18 +603,25 @@ export function Canvas() {
   }, [ws.job?.status]);
 
   // A strip fits its width (it is read by scrolling down); a page fits whole.
+  // The view as fit() left it (its zoom, and the scroll centering gave it), until the user scrolls or zooms.
+  const fitted = useRef<{ zoom: number; scroll?: Pt } | null>(null);
   const fit = useCallback(() => {
     const el = scroll.current;
-    if (!el || !page) return;
+    if (!el || !page) return false;
     center.current = true;
     setViewport({ width: el.clientWidth, height: el.clientHeight });
     // A phone has no room to spare beside the page, and its glass bars float over the top and bottom.
     const narrow = el.clientWidth < 768;
     const marginX = narrow ? 24 : 120;
     const marginY = narrow ? 200 : 80;
-    const fitted = strip ? (el.clientWidth - marginX) / strip.width : Math.min((el.clientWidth - marginX) / page.width, (el.clientHeight - marginY) / page.height);
-    setZoom(clamp(Math.min(fitted, 2), MIN_ZOOM, MAX_ZOOM));
+    const whole = strip ? (el.clientWidth - marginX) / strip.width : Math.min((el.clientWidth - marginX) / page.width, (el.clientHeight - marginY) / page.height);
+    const next = clamp(Math.min(whole, 2), MIN_ZOOM, MAX_ZOOM);
+    fitted.current = { zoom: next };
+    setZoom(next);
+    return true;
   }, [page, strip]);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
 
   const hasPage = !!page;
   const viewportRef = useRef(viewport);
@@ -625,6 +633,9 @@ export function Canvas() {
       const shown = viewportRef.current;
       const next = { width: el.clientWidth, height: el.clientHeight };
       if (shown.width === next.width && shown.height === next.height) return;
+      // The canvas area changed size (the window, a side panel, the panels settling as the editor opens): a view
+      // still as fitted is fitted again; otherwise the page point at the middle of the view stays at its middle.
+      if (fitted.current && fitRef.current()) return;
       const area = svg.current?.getBoundingClientRect();
       const box = el.getBoundingClientRect();
       if (shown.width && area?.width && !center.current) {
@@ -637,10 +648,24 @@ export function Canvas() {
       setViewport(next);
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    // Committed before the frame is painted, so no frame shows the new size with the old padding.
+    const observer = new ResizeObserver(() => flushSync(measure));
     observer.observe(el);
-    return () => observer.disconnect();
+    // A scroll the code did not make (the wheel, a scrollbar, a pan) means the view is no longer as fitted.
+    const onScroll = () => {
+      const at = fitted.current?.scroll;
+      if (at && (Math.abs(el.scrollLeft - at.x) > 1 || Math.abs(el.scrollTop - at.y) > 1)) fitted.current = null;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
   }, [hasPage]);
+  // So does a zoom other than the fitted one.
+  useLayoutEffect(() => {
+    if (fitted.current && Math.abs(zoom - fitted.current.zoom) > 1e-9) fitted.current = null;
+  }, [zoom]);
 
   // Where the page sits: in the scroll area's padding, and in a strip at its place in the chapter.
   const padX = Math.max(viewport.width - MIN_OVERLAP, 40);
@@ -664,6 +689,7 @@ export function Canvas() {
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
     if (strip) placeStrip(el);
     else el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
+    if (fitted.current) fitted.current.scroll = { x: el.scrollLeft, y: el.scrollTop };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, viewport]);
 
