@@ -24,7 +24,6 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
 import psutil
 
 from urakatsu import __version__
@@ -70,6 +69,7 @@ class Server:
         self.error: Optional[BaseException] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown: Optional[asyncio.Event] = None
+        self._started = threading.Event()  # set by serve() once requests are answered
         self._thread = threading.Thread(target=self._run, name="urakatsu-server", daemon=True)
 
     def start(self) -> None:
@@ -95,21 +95,19 @@ class Server:
         workspace = Workspace()
         # A scheduled automation that wakes the computer starts this app if it is closed.
         workspace.automations.wake.launch = background_command()
-        await serve(workspace, port=self.port, grpc_port=None, log_level="warning", shutdown=self._shutdown)
+        await serve(workspace, port=self.port, grpc_port=None, log_level="warning", shutdown=self._shutdown, started=self._started.set)
 
     def wait_ready(self, timeout: float = 120.0) -> None:
+        """Waits for serve() to say it answers requests. Not by asking it over HTTP: on Windows each try
+        before the socket is open takes about a second to fail, so the window opened that much late."""
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        while not self._started.wait(0.05):
             if self.error is not None:
                 raise RuntimeError(f"The server stopped: {self.error}")
-            try:
-                # trust_env=False: a system proxy must not stand between the app and its own server.
-                if httpx.get(f"{self.url}/api/health", timeout=1.0, trust_env=False).status_code == 200:
-                    return
-            except httpx.HTTPError:
-                pass
-            time.sleep(0.2)
-        raise RuntimeError("The server did not start in time")
+            if not self._thread.is_alive() and self._thread.ident is not None:
+                raise RuntimeError("The server stopped")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("The server did not start in time")
 
     def stop(self) -> None:
         if self._loop is not None and self._shutdown is not None:

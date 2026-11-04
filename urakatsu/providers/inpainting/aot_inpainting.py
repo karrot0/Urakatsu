@@ -11,19 +11,23 @@ https://github.com/dmMaze/BallonsTranslator/blob/4bcc635c19f6c63a902872cf77b3d55
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
-import torch
 from PIL import Image
-from safetensors.torch import load_file
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings
 from urakatsu.runtimes.store import HuggingFaceFile
+from urakatsu.runtimes.torch_runtime import no_grad
 
-from .aot_net import AOTGenerator
 from .common import pad_symmetric, python_round, resize_bilinear_nonaliased
+
+if TYPE_CHECKING:  # pragma: no cover
+    # torch and the network are imported where used: the app imports every provider at startup.
+    import torch
+
+    from .aot_net import AOTGenerator
 
 log = logging.getLogger(__name__)
 
@@ -47,8 +51,10 @@ class AotProcessor:
         self.device = device
         self.dtype = dtype
 
-    @torch.no_grad()
+    @no_grad
     def call(self, image: np.ndarray, mask: np.ndarray, max_side: int = MAX_SIDE) -> np.ndarray:
+        import torch
+
         if max_side <= 0:
             raise ValueError("AOT inpainting max side must be positive")
         if image.shape[:2] != mask.shape[:2]:
@@ -106,6 +112,8 @@ def _pad_bottom_right(tensor: torch.Tensor, pad_bottom: int, pad_right: int) -> 
 
 
 def _tensor_to_rgb(output: torch.Tensor) -> np.ndarray:
+    import torch
+
     pixels = ((output.to(torch.float32) + 1.0) * 127.5).round().clamp(0.0, 255.0).to(torch.uint8)
     return pixels.squeeze(0).permute(1, 2, 0).contiguous().cpu().numpy()
 
@@ -127,6 +135,10 @@ class AotInpaintingProvider(InpaintingProvider):
         return (WEIGHTS,)
 
     def _load(self) -> None:
+        from safetensors.torch import load_file
+
+        from .aot_net import AOTGenerator
+
         runtime = self.runtime_instance()
         weights = self.resolve(WEIGHTS)
         device, dtype = runtime.torch_device, runtime.dtype()

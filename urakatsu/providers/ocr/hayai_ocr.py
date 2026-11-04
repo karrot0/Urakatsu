@@ -23,19 +23,19 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from PIL import Image
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import OcrProvider
 from urakatsu.runtimes.store import HuggingFaceFile, WeightSource
-from urakatsu.runtimes.torch_runtime import release_cache
+from urakatsu.runtimes.torch_runtime import inference_mode, release_cache
 
 from ._common import normalize, raw_chw
+
+if TYPE_CHECKING:  # pragma: no cover
+    import torch  # imported where used, and the network on load: the app imports every provider at startup
 
 REPOSITORY = "JustANormalTinkerer/hayai-ocr-v2"
 REVISION = "4a4ce477c9a8841f208b94e1d9ed5c0938965e05"
@@ -84,6 +84,8 @@ class ImageProcessor:
         self.dtype = dtype
 
     def preprocess(self, image: Image.Image):
+        import torch
+
         if image.width == 0 or image.height == 0:
             raise ValueError("cannot recognize an empty image")
         height, width = _image_size_for_max_patches(image.height, image.width, PATCH_SIZE, MAX_NUM_PATCHES)
@@ -113,128 +115,6 @@ class ImageProcessor:
         return patches.to(self.dtype), attention, spatial, (patch_height, patch_width)
 
 
-def _rotate(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """``apply_rotary_emb_2d``: interleaved pairs (even, odd), computed in float32, returned in x's dtype."""
-    orig = x.dtype
-    x = x.float()
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-    cos = cos.unsqueeze(2)
-    sin = sin.unsqueeze(2)
-    rot1 = x1 * cos - x2 * sin
-    rot2 = x1 * sin + x2 * cos
-    return torch.stack([rot1, rot2], dim=-1).flatten(-2).to(orig)
-
-
-def _visual_rope(height: int, width: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-    """upstream ``_get_2d_visual_freqs``: (h*w, 32) angles, first 16 from the row, last 16 from the column."""
-    d_axis = HEAD_DIM // 2
-    freqs = 1.0 / (ROPE_THETA ** (torch.arange(0, d_axis, 2, device=device).float() / d_axis))
-    grid_y = torch.arange(height, device=device, dtype=torch.float32)
-    grid_x = torch.arange(width, device=device, dtype=torch.float32)
-    freqs_y = torch.outer(grid_y, freqs)
-    freqs_x = torch.outer(grid_x, freqs)
-    y_ext = freqs_y.unsqueeze(1).expand(height, width, -1)
-    x_ext = freqs_x.unsqueeze(0).expand(height, width, -1)
-    angles = torch.cat([y_ext, x_ext], dim=-1).flatten(0, 1)
-    return torch.cos(angles), torch.sin(angles)
-
-
-class _RMSNorm(nn.Module):
-    """model.rs ``RmsNorm``: normalise in float32, scale, cast back to the input dtype."""
-
-    def __init__(self, dim: int):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(dim))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        input_dtype = x.dtype
-        x32 = x.float()
-        variance = x32.pow(2).mean(-1, keepdim=True)
-        return (self.weight * x32 * torch.rsqrt(variance + RMS_NORM_EPS)).to(input_dtype)
-
-
-class _SwiGLU(nn.Module):
-    def __init__(self, d_model: int, d_ffn: int):
-        super().__init__()
-        self.w_gate = nn.Linear(d_model, d_ffn, bias=False)
-        self.w_up = nn.Linear(d_model, d_ffn, bias=False)
-        self.w_down = nn.Linear(d_ffn, d_model, bias=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.w_down(F.silu(self.w_gate(x)) * self.w_up(x))
-
-
-class _GroupedQueryAttention(nn.Module):
-    def __init__(self, d_model: int):
-        super().__init__()
-        self.w_q = nn.Linear(d_model, QUERY_HEADS * HEAD_DIM, bias=False)
-        self.w_k = nn.Linear(d_model, KEY_VALUE_HEADS * HEAD_DIM, bias=False)
-        self.w_v = nn.Linear(d_model, KEY_VALUE_HEADS * HEAD_DIM, bias=False)
-        self.w_o = nn.Linear(QUERY_HEADS * HEAD_DIM, d_model, bias=False)
-        self.q_norm = _RMSNorm(HEAD_DIM)
-        self.k_norm = _RMSNorm(HEAD_DIM)
-
-    def forward(self, x, mask, cos, sin, cache):
-        b, s, _ = x.shape
-        q = self.w_q(x).view(b, s, QUERY_HEADS, HEAD_DIM)
-        k = self.w_k(x).view(b, s, KEY_VALUE_HEADS, HEAD_DIM)
-        v = self.w_v(x).view(b, s, KEY_VALUE_HEADS, HEAD_DIM)
-        q = _rotate(self.q_norm(q), cos, sin)
-        k = _rotate(self.k_norm(k), cos, sin)
-        if cache is not None:
-            k = torch.cat([cache[0], k], dim=1)
-            v = torch.cat([cache[1], v], dim=1)
-        present = (k, v)
-        groups = QUERY_HEADS // KEY_VALUE_HEADS
-        k_exp = k.repeat_interleave(groups, dim=2).transpose(1, 2)
-        v_exp = v.repeat_interleave(groups, dim=2).transpose(1, 2)
-        context = F.scaled_dot_product_attention(q.transpose(1, 2), k_exp, v_exp, attn_mask=mask, is_causal=False)
-        context = context.transpose(1, 2).contiguous().view(b, s, -1)
-        return self.w_o(context), present
-
-
-class _DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_ffn: int):
-        super().__init__()
-        self.attn_norm = _RMSNorm(d_model)
-        self.attn = _GroupedQueryAttention(d_model)
-        self.ffn_norm = _RMSNorm(d_model)
-        self.ffn = _SwiGLU(d_model, d_ffn)
-        self.attn_res_scale = nn.Parameter(torch.ones(d_model))
-        self.ffn_res_scale = nn.Parameter(torch.ones(d_model))
-
-    def forward(self, x, mask, cos, sin, cache):
-        attn, present = self.attn(self.attn_norm(x), mask, cos, sin, cache)
-        x = x + self.attn_res_scale * attn
-        x = x + self.ffn_res_scale * self.ffn(self.ffn_norm(x))
-        return x, present
-
-
-class _Projector(nn.Module):
-    def __init__(self, d_vision: int, d_model: int):
-        super().__init__()
-        self.proj = nn.Sequential(nn.Linear(d_vision, d_model), nn.GELU(), nn.Linear(d_model, d_model))
-
-    def forward(self, x):
-        return self.proj(x)
-
-
-class _Decoder(nn.Module):
-    """upstream ``VisualCausalOCRDecoder`` (names kept for the checkpoint)."""
-
-    def __init__(self, vocab_size: int, d_model: int, d_vision: int, d_ffn: int, n_layers: int):
-        super().__init__()
-        self.projector = _Projector(d_vision, d_model)
-        self.token_embeddings = nn.Embedding(vocab_size, d_model)
-        self.layers = nn.ModuleList([_DecoderLayer(d_model, d_ffn) for _ in range(n_layers)])
-        self.final_norm = _RMSNorm(d_model)
-        self.output_head = nn.Linear(d_model, vocab_size, bias=False)
-
-    def logits(self, hidden_last: torch.Tensor) -> torch.Tensor:
-        return self.output_head(self.final_norm(hidden_last))
-
-
 @register
 class HayaiOcrProvider(OcrProvider):
     id = "hayai-ocr"
@@ -259,6 +139,8 @@ class HayaiOcrProvider(OcrProvider):
         from safetensors.torch import load_file
         from tokenizers import Tokenizer
         from transformers import Siglip2VisionConfig, Siglip2VisionModel
+
+        from .hayai_ocr_network import _Decoder
 
         runtime = self.runtime_instance()
         config_path, weights_path, tokenizer_path = self.resolve_weights()
@@ -313,6 +195,8 @@ class HayaiOcrProvider(OcrProvider):
         return int(token_id)
 
     def _text_rope(self, positions: int) -> tuple[torch.Tensor, torch.Tensor]:
+        import torch
+
         d_axis = HEAD_DIM // 2
         freqs = 1.0 / (ROPE_THETA ** (torch.arange(0, d_axis, 2, device=self._device).float() / d_axis))
         t = torch.arange(positions, device=self._device, dtype=torch.float32)
@@ -329,16 +213,20 @@ class HayaiOcrProvider(OcrProvider):
     def _recognize(self, crops: list[Image.Image]) -> list[str]:
         return [self._inference(crop) for crop in crops]
 
-    @torch.inference_mode()
+    @inference_mode
     def _inference(self, image: Image.Image) -> str:
         patches, attention, spatial, (height, width) = self._processor.preprocess(image)
         token_ids = self._generate(patches, attention, spatial, height, width)
         kept = [t for t in token_ids if t not in (self._eos, self._pad)]
         return self.tokenizer.decode(kept, skip_special_tokens=True)
 
-    @torch.inference_mode()
+    @inference_mode
     def _generate(self, patches, attention, spatial, height: int, width: int) -> list[int]:
         """model.rs ``generate``: prefill [visual | BOS] with a block-causal mask, then greedy steps."""
+        import torch
+
+        from .hayai_ocr_network import _visual_rope
+
         device = self._device
         dtype = self._dtype
         decoder = self._decoder

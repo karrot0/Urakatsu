@@ -774,3 +774,22 @@ def test_a_stale_cloud_listing_is_refreshed_without_waiting(monkeypatch):
     threading.Event().wait(0.2)
     assert cloud._hosted is None
     cloud.reset()
+
+
+def test_the_cloud_listing_is_asked_for_as_the_service_starts(monkeypatch):
+    # The UI's first request waits for the first listing: serve() starts it early, only with a key.
+    cloud.reset()
+    monkeypatch.delenv(cloud.KEY_ENV, raising=False)
+    monkeypatch.setattr(cloud, "_saved", lambda: {})
+    asked = []
+
+    def get(url, timeout):
+        asked.append(url)
+        return httpx.Response(200, json={"providers": [{"id": "echo-ocr"}]}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cloud.httpx, "get", get)
+    assert cloud.warm() is None and asked == []
+    monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")
+    cloud.warm().join(5)
+    assert len(asked) == 1 and cloud.hosted() == {"echo-ocr"} and len(asked) == 1
+    cloud.reset()

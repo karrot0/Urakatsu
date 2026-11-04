@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import gc
 import importlib.util
 import logging
@@ -65,6 +66,33 @@ class TorchRuntime(Runtime):
             "cuda": bool(self.torch.cuda.is_available()),
             "rocm": getattr(self.torch.version, "hip", None),
         }
+
+
+def inference_mode(fn):
+    """``@torch.inference_mode()`` that imports PyTorch when ``fn`` runs, not when its module loads:
+    the app imports every provider at startup, and importing PyTorch takes seconds."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import torch
+
+        with torch.inference_mode():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def no_grad(fn):
+    """``@torch.no_grad()``, importing PyTorch when ``fn`` runs (see ``inference_mode``)."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import torch
+
+        with torch.no_grad():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def release_cache(device=None) -> None:

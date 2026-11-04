@@ -109,6 +109,17 @@ def hosted() -> Optional[frozenset[str]]:
         return ids
 
 
+def warm() -> Optional[threading.Thread]:
+    """Asks for the first listing on a background thread when a key is set, as the service starts: the
+    UI's first request (the capabilities call) waits for that listing, and the window spends the time
+    loading the UI meanwhile."""
+    if api_key() is None:
+        return None
+    thread = threading.Thread(target=hosted, name="urakatsu-cloud-listing", daemon=True)
+    thread.start()
+    return thread
+
+
 def availability(provider: str) -> Availability:
     if api_key() is None:
         return Availability.no("add your Urakatsu Cloud key in Settings, Providers")

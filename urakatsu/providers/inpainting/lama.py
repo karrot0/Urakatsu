@@ -12,20 +12,24 @@ https://github.com/Sanster/IOPaint/blob/61a759fb3f332bacdce8b2813f4837495c9b86e0
 from __future__ import annotations
 
 import logging
-from typing import Optional, ClassVar
+from typing import TYPE_CHECKING, Optional, ClassVar
 
 import cv2
 import numpy as np
-import torch
 from PIL import Image
-from safetensors.torch import load_file
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import InpaintingProvider, ProviderSettings
 from urakatsu.runtimes.store import HuggingFaceFile
+from urakatsu.runtimes.torch_runtime import no_grad
 
 from .common import ceil_modulo, pad_symmetric
-from .lama_net import FFCResNetGenerator, FFCResNetGeneratorConfig, generator_forward
+
+if TYPE_CHECKING:  # pragma: no cover
+    # torch and the network are imported where used: the app imports every provider at startup.
+    import torch
+
+    from .lama_net import FFCResNetGenerator
 
 log = logging.getLogger(__name__)
 
@@ -75,8 +79,12 @@ class LamaProcessor:
             return result
         return self.pad_forward(image, mask)
 
-    @torch.no_grad()
+    @no_grad
     def pad_forward(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        import torch
+
+        from .lama_net import generator_forward
+
         height, width = mask.shape
         image_t = torch.from_numpy(np.ascontiguousarray(image)).to(self.device).permute(2, 0, 1).unsqueeze(0)
         mask_t = torch.from_numpy(np.ascontiguousarray(mask)).to(self.device).unsqueeze(0).unsqueeze(0)
@@ -191,6 +199,10 @@ class LamaProvider(InpaintingProvider):
         return (WEIGHTS,)
 
     def _load(self) -> None:
+        from safetensors.torch import load_file
+
+        from .lama_net import FFCResNetGenerator, FFCResNetGeneratorConfig
+
         runtime = self.runtime_instance()
         weights = self.resolve(WEIGHTS)
         device, dtype = runtime.torch_device, runtime.dtype()

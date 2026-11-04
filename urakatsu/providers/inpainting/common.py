@@ -8,9 +8,13 @@ is a plain bilinear sample (no antialiasing), which OpenCV's INTER_LINEAR matche
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
-import torch
 from PIL import Image
+
+if TYPE_CHECKING:  # pragma: no cover
+    import torch  # imported where used: the app imports every provider at startup, and torch takes seconds
 
 CATMULL_ROM = Image.Resampling.BICUBIC  # Keys cubic, a = -0.5 (Catmull-Rom)
 LANCZOS3 = Image.Resampling.LANCZOS
@@ -33,6 +37,8 @@ def ceil_modulo(value: int, modulo: int) -> int:
 
 def pad_symmetric(tensor: torch.Tensor, out_height: int, out_width: int) -> torch.Tensor:
     """Symmetric padding of an NCHW tensor to ``out_height x out_width`` (bottom and right)."""
+    import torch
+
     height, width = tensor.shape[2], tensor.shape[3]
     rows = torch.from_numpy(symmetric_indices(height, out_height)).to(tensor.device)
     cols = torch.from_numpy(symmetric_indices(width, out_width)).to(tensor.device)
@@ -60,6 +66,8 @@ def resize_bilinear_nonaliased(array: np.ndarray, width: int, height: int) -> np
 
 
 def to_device_tensor(array: np.ndarray, device: torch.device) -> torch.Tensor:
+    import torch
+
     return torch.from_numpy(np.ascontiguousarray(array)).to(device)
 
 

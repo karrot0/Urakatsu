@@ -7,7 +7,7 @@ import logging
 import os
 import signal
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import grpc
 import uvicorn
@@ -117,6 +117,14 @@ def build_app(
     return app
 
 
+async def _announce(server: uvicorn.Server, server_task: asyncio.Task, started: Callable[[], None]) -> None:
+    """Calls ``started`` once uvicorn has opened its socket (``serve``)."""
+    while not server.started and not server_task.done():
+        await asyncio.sleep(0.01)
+    if server.started:
+        started()
+
+
 async def serve(
     workspace: Workspace,
     host: str = "127.0.0.1",
@@ -127,12 +135,19 @@ async def serve(
     cors_origins: Optional[list[str]] = None,
     log_level: str = "info",
     shutdown: Optional[asyncio.Event] = None,
+    started: Optional[Callable[[], None]] = None,
 ) -> None:
-    """Runs until SIGINT / SIGTERM, or until ``shutdown`` is set (the desktop app runs this on a thread)."""
+    """Runs until SIGINT / SIGTERM, or until ``shutdown`` is set (the desktop app runs this on a thread).
+
+    ``started`` is called once HTTP requests are answered: the desktop app waits for it rather than asking
+    over HTTP, where each try before the socket is open costs about a second on Windows."""
     servicer = UrakatsuServicer(workspace)
     workspace.bind(asyncio.get_running_loop())
     workspace.systems.start_enabled()
     workspace.automations.start()  # the timer that runs scheduled automations
+    from urakatsu.remote import cloud
+
+    cloud.warm()  # the Urakatsu Cloud listing, which the UI's first request would otherwise wait for
     if not os.environ.get("URAKATSU_NO_UPDATE_CHECK"):
         from urakatsu.updates import updater
 
@@ -168,6 +183,7 @@ async def serve(
                 signal.signal(sig, _request_stop)
 
     server_task = asyncio.create_task(server.serve())
+    announce_task = asyncio.create_task(_announce(server, server_task, started)) if started is not None else None
     if app.state.network.settings.autostart:
         await app.state.network.start()
     stop_task = asyncio.create_task(stop_event.wait())
@@ -178,6 +194,8 @@ async def serve(
             await server_task
     finally:
         stop_task.cancel()
+        if announce_task is not None:
+            announce_task.cancel()
         await app.state.network.stop()
         if grpc_server is not None:
             await grpc_server.stop(grace=2.0)

@@ -142,6 +142,37 @@ def test_claiming_the_instance_records_when_this_process_started(monkeypatch, tm
     assert abs(record["started"] - psutil.Process().create_time()) < 1
 
 
+def test_the_window_opens_once_the_server_answers(monkeypatch):
+    # The server says when it answers; asking it over HTTP cost up to a second per try on Windows.
+    import socket
+
+    monkeypatch.setenv("URAKATSU_NO_UPDATE_CHECK", "1")
+    monkeypatch.setattr("urakatsu.runtimes.packages.start_updater", lambda: None)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = app.Server(port)
+    server.start()
+    try:
+        server.wait_ready(timeout=60)
+        assert httpx.get(f"{server.url}/api/health", timeout=5.0, trust_env=False).status_code == 200
+    finally:
+        server.stop()
+    assert server.error is None
+
+
+def test_a_server_that_fails_to_start_is_reported(monkeypatch):
+    server = app.Server(1)
+
+    async def broken() -> None:
+        raise OSError("port in use")
+
+    monkeypatch.setattr(server, "_main", broken)
+    server.start()
+    with pytest.raises(RuntimeError, match="port in use"):
+        server.wait_ready(timeout=10)
+
+
 def test_the_webview_cache_is_emptied_once_per_ui_build(monkeypatch, tmp_path):
     from urakatsu.service import app as service_app
 

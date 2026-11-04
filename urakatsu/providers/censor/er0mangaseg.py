@@ -27,14 +27,11 @@ from typing import Any, ClassVar, Optional
 import numpy as np
 from PIL import Image, ImageFilter
 from pydantic import Field
-from scipy import ndimage
 
 from urakatsu.core.errors import ProviderUnavailable
 from urakatsu.core.registry import register
 from urakatsu.providers.base import CensorDetectionProvider, ProviderSettings
 from urakatsu.runtimes.store import ContainerLayerFile
-
-from . import bars, white_bars
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +115,8 @@ def grow_and_blur(mask: np.ndarray, grow: int, blur: float) -> np.ndarray:
     if not mask.any():
         return mask
     if grow > 0:
+        from scipy import ndimage  # here: the app imports every provider at startup, and scipy takes half a second
+
         mask = ndimage.maximum_filter(mask, size=2 * grow + 1)
     if blur > 0:
         mask = np.asarray(Image.fromarray(mask, "L").filter(ImageFilter.GaussianBlur(blur)))
@@ -196,6 +195,8 @@ class Er0mangaSegProvider(CensorDetectionProvider):
         import torch
         from torch.nn import functional as F
 
+        from . import bars  # scipy: imported here, as the app imports every provider at startup
+
         height, width = rgb.shape[:2]
         scale = MODEL_SIZE / max(width, height)
         size = max(round(width * scale), 1), max(round(height * scale), 1)
@@ -212,6 +213,8 @@ class Er0mangaSegProvider(CensorDetectionProvider):
     def _detect_censorship(self, image: Image.Image) -> np.ndarray:
         if self._net is None:
             raise RuntimeError("Er0mangaSeg is not loaded")
+        from . import bars, white_bars
+
         rgb = np.array(image.convert("RGB"))
         found = bars.bar_mask(rgb, self.scores(rgb))
         mask = found if found is not None else np.zeros(rgb.shape[:2], dtype=np.uint8)

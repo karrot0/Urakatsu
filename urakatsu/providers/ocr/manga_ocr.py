@@ -21,17 +21,19 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import torch
 from PIL import Image
 
 from urakatsu.core.registry import register
 from urakatsu.providers.base import OcrProvider
 from urakatsu.runtimes.store import HuggingFaceFile, WeightSource
-from urakatsu.runtimes.torch_runtime import release_cache
+from urakatsu.runtimes.torch_runtime import inference_mode, release_cache
 
 from ._common import first_weights_dir, normalize, pillow_grayscale, raw_chw, read_lines, is_whitespace
+
+if TYPE_CHECKING:  # pragma: no cover
+    import torch  # imported where used: the app imports every provider at startup, and torch takes seconds
 
 REPOSITORY = "mayocream/manga-ocr"
 REVISION = "4380edba990b959c508752350955350c1c80c31c"
@@ -294,7 +296,7 @@ class MangaOcrProvider(OcrProvider):
     def _recognize(self, crops: list[Image.Image]) -> list[str]:
         return [self._inference(crop) for crop in crops]
 
-    @torch.inference_mode()
+    @inference_mode
     def _inference(self, image: Image.Image) -> str:
         pixel_values = self.processor.preprocess(image, self._device, self._dtype)
         token_ids = self._beam_search(pixel_values)
@@ -302,6 +304,8 @@ class MangaOcrProvider(OcrProvider):
 
     def _beam_search(self, pixel_values: torch.Tensor) -> list[int]:
         """``model.rs`` ``beam_search``: transformers' BeamSearchScorer order, one image at a time."""
+        import torch
+
         gen = self._gen
         device = pixel_values.device
         num_beams = gen["num_beams"]
