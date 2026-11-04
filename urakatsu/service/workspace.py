@@ -153,7 +153,7 @@ class Workspace:
         # The service's event loop (``bind``): restitching runs detection from worker threads.
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._restitching: set[str] = set()
-        registry.discover()
+        registry.sync(self.config.providers)  # discovers providers, then adds the settings' presets
 
     def bind(self, loop: asyncio.AbstractEventLoop) -> None:
         """Lets worker threads (source downloads) run models on ``loop``, the service's."""
@@ -173,6 +173,7 @@ class Workspace:
         return self.runtimes.describe()
 
     def providers(self) -> list:
+        registry.sync(self.config.providers)
         return registry.info()
 
     def loaded(self) -> dict[Stage, str]:
@@ -230,6 +231,7 @@ class Workspace:
         return self.config
 
     def set_config(self, config: PipelineConfig) -> PipelineConfig:
+        registry.sync(config.providers)  # OpenAI-compatible presets are providers of their own
         for stage in Stage.all():
             cls = registry.get(stage, config.provider_for(stage))
             runtime = config.runtime_for(cls.id)

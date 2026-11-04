@@ -2,7 +2,7 @@
 // automatically a moment after you stop editing.
 
 import { ArrowDown, ArrowLeft, ArrowUp, Boxes, Cloud, Cpu, Download, Eye, EyeOff, Info, Keyboard, KeyRound, Languages, Library, Monitor, Moon, Palette, Plus, Server, Sun, Trash2, TriangleAlert, Type, X } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { catalog, formatBytes, RUNTIME_LABEL, type InstalledModel, type LocalLora, type PendingDownload, type Release, type Runtimes as RuntimeList } from "../api/catalog";
 import { workers as workersApi, type Worker } from "../api/workers";
@@ -20,6 +20,7 @@ import { ColorizationPreview, type ColorizationMode } from "./ColorizationPrevie
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
 import { WatermarkPreview, type WatermarkMode } from "./WatermarkPreview";
 import { SourcesSettings } from "./SourcesSettings";
+import { confirm } from "./ConfirmDialog";
 import { AboutSettings } from "./Updates";
 import { WorkersSettings } from "./WorkersSettings";
 import { TOOL_INFO } from "./ToolBelt";
@@ -988,36 +989,94 @@ function SecretInput({ label, value, onChange }: { label: string; value: string;
 function Providers({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const remote = (ws.capabilities?.providers ?? [])
-    .filter((p) => p.stage === "translation" && p.id !== "local")
+    .filter((p) => p.stage === "translation" && p.id !== "local" && !p.id.startsWith(PRESET_PREFIX))
     .sort((a, b) => Number(b.id === CLOUD_PROVIDER) - Number(a.id === CLOUD_PROVIDER));
+  const presets = Object.keys(draft.providersJson).filter((id) => id.startsWith(PRESET_PREFIX) && id.length > PRESET_PREFIX.length);
+  const addPreset = () => {
+    let n = presets.length + 1;
+    while (draft.providersJson[`${PRESET_PREFIX}preset-${n}`] !== undefined) n += 1;
+    update({ providersJson: { ...draft.providersJson, [`${PRESET_PREFIX}preset-${n}`]: JSON.stringify({ name: `Preset ${n}` }) } });
+  };
   return (
     <PreferencePage title="Providers" description="Keys and endpoints for hosted translation services. Keys are stored in your local settings file.">
       {remote.map((provider) => {
         const settings = parseJson(draft.providersJson[provider.id]);
         const keys = apiKeyCount(settings.api_key);
         return (
-          <SchemaSection
-            key={provider.id}
-            provider={provider}
-            map="providersJson"
-            draft={draft}
-            update={update}
-            title={provider.name}
-            description={provider.description}
-            action={
-              <div className="flex items-center gap-2">
-                {provider.id === CLOUD_PROVIDER && (
-                  <a className={buttonVariants({ variant: "ghost", size: "sm" })} href={CLOUD_KEYS_URL} target="_blank" rel="noreferrer">
-                    Get a key
-                  </a>
-                )}
-                <Badge tone={keys > 0 ? "success" : "neutral"}>{keys > 1 ? `${keys} keys` : keys === 1 ? "Configured" : "Not configured"}</Badge>
-              </div>
-            }
-          />
+          <Fragment key={provider.id}>
+            <SchemaSection
+              provider={provider}
+              map="providersJson"
+              draft={draft}
+              update={update}
+              title={provider.name}
+              description={provider.description}
+              action={
+                <div className="flex items-center gap-2">
+                  {provider.id === CLOUD_PROVIDER && (
+                    <a className={buttonVariants({ variant: "ghost", size: "sm" })} href={CLOUD_KEYS_URL} target="_blank" rel="noreferrer">
+                      Get a key
+                    </a>
+                  )}
+                  {provider.id === OPENAI_COMPATIBLE && (
+                    <Button variant="ghost" size="sm" onClick={addPreset}>
+                      <Plus size={14} /> Add preset
+                    </Button>
+                  )}
+                  <Badge tone={keys > 0 ? "success" : "neutral"}>{keys > 1 ? `${keys} keys` : keys === 1 ? "Configured" : "Not configured"}</Badge>
+                </div>
+              }
+            />
+            {provider.id === OPENAI_COMPATIBLE && presets.map((id) => <PresetSection key={id} id={id} draft={draft} update={update} />)}
+          </Fragment>
         );
       })}
     </PreferencePage>
+  );
+}
+
+const OPENAI_COMPATIBLE = "openai-compatible";
+const PRESET_PREFIX = `${OPENAI_COMPATIBLE}:`;
+
+function PresetSection({ id, draft, update }: { id: string; draft: Config; update: (patch: Partial<Config>) => void }) {
+  const settings = parseJson(draft.providersJson[id]);
+  const name = typeof settings.name === "string" && settings.name ? settings.name : id.slice(PRESET_PREFIX.length);
+  const keys = apiKeyCount(settings.api_key);
+  const set = (key: string, value: string | null) => {
+    const next = { ...settings, [key]: value };
+    if (!value) delete next[key];
+    update({ providersJson: { ...draft.providersJson, [id]: JSON.stringify(next) } });
+  };
+  const remove = async () => {
+    if (!(await confirm({ title: `Remove the ${name} preset?`, description: "Its base URL and keys are deleted from your settings.", action: "Remove", danger: true }))) return;
+    const providersJson = { ...draft.providersJson };
+    delete providersJson[id];
+    const translation = draft.translation;
+    update({ providersJson, ...(translation?.provider === id ? { translation: { ...translation, provider: OPENAI_COMPATIBLE } } : {}) });
+  };
+  return (
+    <PreferenceSection
+      title={name}
+      description="OpenAI-compatible preset"
+      action={
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => void remove()}>
+            <Trash2 size={14} /> Remove
+          </Button>
+          <Badge tone={settings.base_url ? "success" : "neutral"}>{settings.base_url ? (keys > 1 ? `${keys} keys` : "Configured") : "No base URL"}</Badge>
+        </div>
+      }
+    >
+      <PreferenceRow title="Name" description="How the preset appears in the provider list.">
+        <CommitInput label="Preset name" value={typeof settings.name === "string" ? settings.name : ""} placeholder={name} onCommit={(next) => set("name", next || null)} />
+      </PreferenceRow>
+      <PreferenceRow title="Base URL" description="The server's OpenAI API root, usually ending in /v1.">
+        <CommitInput label="Base URL" value={typeof settings.base_url === "string" ? settings.base_url : ""} placeholder="http://localhost:11434/v1" onCommit={(next) => set("base_url", next || null)} />
+      </PreferenceRow>
+      <PreferenceRow title="API key" description="Optional. Separate several keys with commas to rotate between them.">
+        <SecretInput label="API key" value={typeof settings.api_key === "string" ? settings.api_key : ""} onChange={(next) => set("api_key", next || null)} />
+      </PreferenceRow>
+    </PreferenceSection>
   );
 }
 

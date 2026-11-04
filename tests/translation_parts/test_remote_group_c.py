@@ -397,3 +397,52 @@ def test_lm_studio_list_models_uses_base_url_key_and_propagates_errors():
         )
     assert caught.value.status == 401
     assert seen == {"url": "http://example.test:5000/api/v1/models", "auth": "Bearer k"}
+
+
+def test_presets_are_providers_of_their_own():
+    from urakatsu.core.registry import Registry
+    from urakatsu.core.stage import Stage
+    from urakatsu.providers.translation.remote.openai_compatible import sync_presets
+
+    target = Registry()
+    target.add(OpenAiCompatibleTranslator)
+    sync_presets(target, {"openai-compatible:groq": {"name": "Groq"}, "openai-compatible:vllm": {}, "openai": {}})
+    ids = {cls.id: cls.name for cls in target.list(Stage.TRANSLATION)}
+    assert ids == {"openai-compatible": "OpenAI-compatible", "openai-compatible:groq": "Groq", "openai-compatible:vllm": "vllm"}
+    groq = target.get(Stage.TRANSLATION, "openai-compatible:groq")
+    assert issubclass(groq, OpenAiCompatibleTranslator) and groq.env_key is None
+
+    # A rename re-registers the preset; a dropped table removes it; the base provider stays.
+    sync_presets(target, {"openai-compatible:groq": {"name": "Groq Cloud"}})
+    assert {cls.id: cls.name for cls in target.list(Stage.TRANSLATION)} == {
+        "openai-compatible": "OpenAI-compatible",
+        "openai-compatible:groq": "Groq Cloud",
+    }
+    sync_presets(target, {})
+    assert [cls.id for cls in target.list(Stage.TRANSLATION)] == ["openai-compatible"]
+
+
+async def test_a_preset_uses_its_own_url_and_key(monkeypatch):
+    from urakatsu.providers.translation.remote.openai_compatible import preset
+
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "shared-env-key")
+    groq = preset("openai-compatible:groq", "Groq")
+    seen = []
+
+    def handler(req):
+        seen.append((str(req.url), req.headers.get("authorization")))
+        if req.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "llama-3.3-70b"}]})
+        return chat_reply("x")
+
+    provider = make(groq, handler, api_key="gsk-1", base_url="https://api.groq.test/openai/v1")
+    assert await provider.translate(request(["a"])) == ["x"]
+    keyless = make(groq, handler, api_key=None, base_url="http://box.test:8000/v1")
+    assert await keyless.translate(request(["a"])) == ["x"]
+    models = groq.list_models({"base_url": "http://box.test:8000/v1"}, transport=httpx.MockTransport(handler))
+    assert seen == [
+        ("https://api.groq.test/openai/v1/chat/completions", "Bearer gsk-1"),
+        ("http://box.test:8000/v1/chat/completions", None),  # no fallback to the shared env key
+        ("http://box.test:8000/v1/models", None),
+    ]
+    assert [(m.provider, m.provider_name, m.model) for m in models] == [("openai-compatible:groq", "Groq", "llama-3.3-70b")]

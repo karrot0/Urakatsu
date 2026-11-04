@@ -565,6 +565,29 @@ def test_settings_accept_the_remote_runtime(workspace):
         workspace.set_config(config)
 
 
+
+def test_openai_compatible_presets_are_selectable_providers(workspace):
+    config = workspace.get_config().model_copy(deep=True)
+    config.providers["openai-compatible:groq"] = {"name": "Groq", "base_url": "https://api.groq.test/openai/v1", "api_key": "gsk"}
+    config.translation.model.provider = "openai-compatible:groq"
+    config.translation.model.model = "llama-3.3-70b"
+    try:
+        workspace.set_config(config)
+        listed = {p.id: p.name for p in workspace.providers() if p.stage is Stage.TRANSLATION}
+        assert listed["openai-compatible:groq"] == "Groq"
+        provider = workspace.pipeline.provider(Stage.TRANSLATION)
+        assert provider.id == "openai-compatible:groq"
+        assert provider.base_url() == "https://api.groq.test/openai/v1" and provider.api_keys() == ["gsk"]
+        # Removing the preset removes the provider.
+        config = config.model_copy(deep=True)
+        del config.providers["openai-compatible:groq"]
+        config.translation.model.provider = "fake-translator"
+        workspace.set_config(config)
+        assert "openai-compatible:groq" not in {p.id for p in workspace.providers()}
+    finally:
+        registry.sync({})
+
+
 def _detect_text(workspace, project, page, boxes):
     """Text regions written as the real detection stage writes them: region, text and layer."""
     import numpy as np

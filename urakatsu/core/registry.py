@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import logging
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
 from .stage import Stage
 
@@ -71,6 +71,7 @@ class Registry:
     def __init__(self) -> None:
         self._providers: dict[Stage, dict[str, type["Provider"]]] = {stage: {} for stage in Stage}
         self._discovered = False
+        self._syncers: list[Callable[["Registry", Mapping[str, Any]], None]] = []
 
     def add(self, cls: type["Provider"]) -> type["Provider"]:
         stage = Stage.parse(cls.stage)
@@ -81,6 +82,18 @@ class Registry:
             log.warning("provider %s/%s re-registered by %s", stage.value, cls.id, cls.__module__)
         self._providers[stage][cls.id] = cls
         return cls
+
+    def syncer(self, function: Callable[["Registry", Mapping[str, Any]], None]) -> Callable[["Registry", Mapping[str, Any]], None]:
+        """Adds a function that registers providers the settings define (``sync``)."""
+        self._syncers.append(function)
+        return function
+
+    def sync(self, providers: Mapping[str, Any]) -> None:
+        """Registers the providers the settings' ``providers`` table defines and drops those it
+        no longer does (OpenAI-compatible presets). Cheap; call it wherever settings apply."""
+        self.discover()
+        for function in self._syncers:
+            function(self, providers)
 
     def remove(self, stage: Stage | str, provider_id: str) -> None:
         self._providers[Stage.parse(stage)].pop(provider_id, None)

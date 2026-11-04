@@ -5,16 +5,22 @@ translation schema. Reasoning maps to ``reasoning_effort`` ("medium" / "none").
 ``base_url`` defaults to a local Ollama (``http://localhost:11434/v1``). The API key is
 optional: settings ``api_key`` or ``OPENAI_COMPATIBLE_API_KEY``; without one no
 ``Authorization`` header is sent.
+
+Presets (not in Koharu, which has one OpenAI-compatible endpoint): every
+``providers."openai-compatible:<slug>"`` table in the settings is a provider of its own,
+with a ``name``, ``base_url`` and ``api_key``, so several servers (Ollama, vLLM, Groq, a
+proxy) can be set up side by side and picked like any other provider. A preset has no
+environment-variable key fallback, and its key rotation is its own.
 """
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Mapping, Optional
 
 import httpx
 
 from urakatsu.core.config import GenerationConfig
-from urakatsu.core.registry import register
+from urakatsu.core.registry import Registry, register, registry
 from urakatsu.core.stage import Stage
 
 from .. import prompt
@@ -26,6 +32,7 @@ from .base import RemoteTranslator, credential, field, send_json_sync
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
 ENV_KEY = "OPENAI_COMPATIBLE_API_KEY"
+PRESET_PREFIX = "openai-compatible:"
 
 
 class OpenAiCompatibleSettings(TranslationSettings):
@@ -58,7 +65,7 @@ class OpenAiCompatibleTranslator(RemoteTranslator):
             "GET",
             endpoint(settings.get("base_url"), "models"),
             transport=transport,
-            headers=_auth_headers(credential(settings, "api_key", ENV_KEY)),
+            headers=_auth_headers(credential(settings, "api_key", cls.env_key or "")),
         )
         entries = field(cls.id, response, "data")
         return [
@@ -120,6 +127,43 @@ class OpenAiCompatibleTranslator(RemoteTranslator):
         if content is None:
             raise TranslationError("OpenAI-compatible backend returned no message content")
         return prompt.translations(self.id, content, request.segments)
+
+
+def preset(provider_id: str, name: str) -> type[OpenAiCompatibleTranslator]:
+    """The provider class for one preset: the OpenAI-compatible provider under its own id and name."""
+    return type(
+        "OpenAiCompatiblePreset",
+        (OpenAiCompatibleTranslator,),
+        {
+            "id": provider_id,
+            "name": name,
+            "description": "OpenAI-compatible preset",
+            "env_key": None,
+            "__module__": __name__,
+        },
+    )
+
+
+def preset_name(provider_id: str, settings: Any) -> str:
+    name = settings.get("name") if isinstance(settings, Mapping) else None
+    return name.strip() if isinstance(name, str) and name.strip() else provider_id[len(PRESET_PREFIX) :]
+
+
+@registry.syncer
+def sync_presets(target: Registry, providers: Mapping[str, Any]) -> None:
+    """Registers a provider per preset table and removes presets the settings dropped."""
+    wanted = {
+        provider_id: preset_name(provider_id, settings)
+        for provider_id, settings in providers.items()
+        if provider_id.startswith(PRESET_PREFIX) and len(provider_id) > len(PRESET_PREFIX)
+    }
+    for cls in target.list(Stage.TRANSLATION):
+        if cls.id.startswith(PRESET_PREFIX) and wanted.get(cls.id) != cls.name:
+            target.remove(Stage.TRANSLATION, cls.id)
+    registered = {cls.id for cls in target.list(Stage.TRANSLATION)}
+    for provider_id, name in wanted.items():
+        if provider_id not in registered:
+            target.add(preset(provider_id, name))
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

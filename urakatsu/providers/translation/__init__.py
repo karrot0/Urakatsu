@@ -54,6 +54,7 @@ def models(config: "PipelineConfig") -> list[Model]:
     A provider whose listing fails is logged and skipped.
     Hosted listings run concurrently.
     """
+    registry.sync(config.providers)
     providers = registry.list(Stage.TRANSLATION)
     if not providers:
         return []

@@ -155,6 +155,7 @@ class Pipeline:
             return existing
         if existing is not None:
             self._unload(existing)
+        self.registry.sync(self.config.providers)
         cls = self.registry.get(stage, wanted)
         provider = cls(self.config.settings_for(stage, wanted), self.runtimes, self.config.runtime_for(wanted))
         self._providers[stage] = provider
