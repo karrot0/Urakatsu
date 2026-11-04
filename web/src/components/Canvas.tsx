@@ -378,9 +378,9 @@ function regionClass({ selected, user, hidden }: { selected: boolean; user: bool
       : user
         ? "fill-[color-mix(in_oklab,var(--overlay-user)_8%,transparent)] [stroke:var(--overlay-user)] [stroke-width:1.5]"
         : cn(
-            "fill-[color-mix(in_oklab,var(--overlay-block)_8%,transparent)] [stroke:var(--overlay-block)] [stroke-width:1.5]",
-            !hidden && "hover:fill-[color-mix(in_oklab,var(--overlay-block)_14%,transparent)]",
-          ),
+          "fill-[color-mix(in_oklab,var(--overlay-block)_8%,transparent)] [stroke:var(--overlay-block)] [stroke-width:1.5]",
+          !hidden && "hover:fill-[color-mix(in_oklab,var(--overlay-block)_14%,transparent)]",
+        ),
     hidden && "fill-transparent [stroke-dasharray:4_3]",
   );
 }
@@ -616,10 +616,26 @@ export function Canvas() {
   }, [page, strip]);
 
   const hasPage = !!page;
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
   useLayoutEffect(() => {
     const el = scroll.current;
     if (!el) return;
-    const measure = () => setViewport((current) => (current.width === el.clientWidth && current.height === el.clientHeight ? current : { width: el.clientWidth, height: el.clientHeight }));
+    const measure = () => {
+      const shown = viewportRef.current;
+      const next = { width: el.clientWidth, height: el.clientHeight };
+      if (shown.width === next.width && shown.height === next.height) return;
+      const area = svg.current?.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      if (shown.width && area?.width && !center.current) {
+        const scale = svg.current!.viewBox.baseVal.width / area.width;
+        anchor.current = {
+          point: { x: (box.left + shown.width / 2 - area.left) * scale, y: (box.top + shown.height / 2 - area.top) * scale },
+          client: { x: box.left + next.width / 2, y: box.top + next.height / 2 },
+        };
+      }
+      setViewport(next);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
@@ -651,9 +667,8 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, viewport]);
 
-  // A page fits when it opens; a strip when its chapter opens, not as it is scrolled through.
   const fitKey = strip && chapter ? `strip:${chapter.id}` : page?.id;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (page && fitKey && fittedFor !== fitKey) {
       fit();
       setFittedFor(fitKey);
@@ -708,7 +723,6 @@ export function Canvas() {
     };
   }, [strip, zoom, padY]);
 
-  // Keep the page point under the cursor fixed while zooming.
   useLayoutEffect(() => {
     const pending = anchor.current;
     const bounds = svg.current?.getBoundingClientRect();
@@ -716,7 +730,7 @@ export function Canvas() {
     anchor.current = null;
     scroll.current.scrollLeft += bounds.left + pending.point.x * zoom - pending.client.x;
     scroll.current.scrollTop += bounds.top + pending.point.y * zoom - pending.client.y;
-  }, [zoom]);
+  }, [zoom, viewport]);
 
   const toImage = useCallback(
     (event: { clientX: number; clientY: number }): Pt => {
@@ -1032,20 +1046,16 @@ export function Canvas() {
     const pixels = pixelsOf(stroke.target);
     pixels.drawing--;
     const box = strokeBox.current ?? { x: 0, y: 0, width: page.width, height: page.height };
-    // Only what the stroke painted over is sent; a layer stroked before its first load is saved once
-    // the server image is under it.
     const patch = pixels.ready.then(() => patchOf(stroke.target, box));
     const save = saveQueue.current.then(async () => {
       const { png, at } = await patch;
       const saved = await ws.setRasterLayer(kind, stroke.target === pendingPaint.current ? undefined : stroke.layer?.id, png, at);
       if (!saved) return;
-      // The layer's canvas shows the version this save made, so it is not fetched back. First strokes
-      // land in the page's paint layer, whose canvas takes them over from `pendingPaint`.
       const id = stroke.target === pendingPaint.current ? [...saved.rasterLayers].reverse().find((l) => l.kind === "paint")?.id : stroke.layer?.id;
       const canvas = id && layerCanvases.current.get(id);
       if (canvas) pixelsOf(canvas).shown = assetVersion(saved, `layer:${id}`);
     });
-    saveQueue.current = save.catch(() => {});
+    saveQueue.current = save.catch(() => { });
     try {
       await save;
     } finally {
@@ -1427,198 +1437,198 @@ export function Canvas() {
               height: (strip?.height ?? page.height) * zoom + 2 * padY,
             }}
           >
-          {strip && (
-            <StripPages
-              strip={strip}
-              projectId={ws.project!.id}
-              view={ws.view}
-              zoom={zoom}
-              left={padX}
-              top={padY}
-              onPointerDown={(event, id) => {
-                if (event.button === 1 || ws.tool === "pan" || spaceHeld) {
-                  // Dragging the strip pans it, from any page.
-                  if (!scroll.current || !svg.current) return;
-                  event.preventDefault();
-                  svg.current.setPointerCapture(event.pointerId);
-                  setGesture({ kind: "pan", client: { x: event.clientX, y: event.clientY }, scroll: { x: scroll.current.scrollLeft, y: scroll.current.scrollTop } });
-                } else if (event.button === 0 && !holdPage) {
-                  showPage(id);
-                }
-              }}
-            />
-          )}
-          <div
-            className={cn("absolute", strip ? "" : "rounded-pill bg-surface shadow-floating")}
-            style={{ width: page.width * zoom, height: page.height * zoom, left: padX + pageLeft * zoom, top: padY + pageTop * zoom }}
-          >
-            {url && (!strip || urlPage === page.id) && (
-              <img
-                ref={baseImage}
-                className="block rounded-[inherit] select-none"
-                src={url}
-                width={page.width * zoom}
-                height={page.height * zoom}
-                alt={page.name}
-                draggable={false}
-                onLoad={() => setShown(urlVersion.current)}
+            {strip && (
+              <StripPages
+                strip={strip}
+                projectId={ws.project!.id}
+                view={ws.view}
+                zoom={zoom}
+                left={padX}
+                top={padY}
+                onPointerDown={(event, id) => {
+                  if (event.button === 1 || ws.tool === "pan" || spaceHeld) {
+                    // Dragging the strip pans it, from any page.
+                    if (!scroll.current || !svg.current) return;
+                    event.preventDefault();
+                    svg.current.setPointerCapture(event.pointerId);
+                    setGesture({ kind: "pan", client: { x: event.clientX, y: event.clientY }, scroll: { x: scroll.current.scrollLeft, y: scroll.current.scrollTop } });
+                  } else if (event.button === 0 && !holdPage) {
+                    showPage(id);
+                  }
+                }}
               />
             )}
-            {url && textUrl && (!strip || urlPage === page.id) && (
-              // The render's text as vectors over the art, drawn at the zoomed size rather than scaled up from the page's pixels.
-              <img
-                ref={textImage}
-                className="pointer-events-none absolute inset-0 max-w-none select-none"
-                src={textUrl}
-                width={page.width * zoom}
-                height={page.height * zoom}
-                alt=""
-                draggable={false}
-              />
-            )}
-            {showLayers &&
-              rasters.map((layer) => (
-                <LayerCanvas
-                  key={layer.id}
-                  page={page}
-                  layer={layer}
-                  projectId={ws.project!.id}
-                  version={assetVersion(page, `layer:${layer.id}`)}
-                  register={(canvas) => {
-                    if (canvas) layerCanvases.current.set(layer.id, canvas);
-                    else layerCanvases.current.delete(layer.id);
+            <div
+              className={cn("absolute", strip ? "" : "rounded-pill bg-surface shadow-floating")}
+              style={{ width: page.width * zoom, height: page.height * zoom, left: padX + pageLeft * zoom, top: padY + pageTop * zoom }}
+            >
+              {url && (!strip || urlPage === page.id) && (
+                <img
+                  ref={baseImage}
+                  className="block rounded-[inherit] select-none"
+                  src={url}
+                  width={page.width * zoom}
+                  height={page.height * zoom}
+                  alt={page.name}
+                  draggable={false}
+                  onLoad={() => setShown(urlVersion.current)}
+                />
+              )}
+              {url && textUrl && (!strip || urlPage === page.id) && (
+                // The render's text as vectors over the art, drawn at the zoomed size rather than scaled up from the page's pixels.
+                <img
+                  ref={textImage}
+                  className="pointer-events-none absolute inset-0 max-w-none select-none"
+                  src={textUrl}
+                  width={page.width * zoom}
+                  height={page.height * zoom}
+                  alt=""
+                  draggable={false}
+                />
+              )}
+              {showLayers &&
+                rasters.map((layer) => (
+                  <LayerCanvas
+                    key={layer.id}
+                    page={page}
+                    layer={layer}
+                    projectId={ws.project!.id}
+                    version={assetVersion(page, `layer:${layer.id}`)}
+                    register={(canvas) => {
+                      if (canvas) layerCanvases.current.set(layer.id, canvas);
+                      else layerCanvases.current.delete(layer.id);
+                    }}
+                  />
+                ))}
+              <canvas ref={pendingPaint} className={layerCanvasClass} width={page.width} height={page.height} />
+              <canvas ref={mask} className={cn(layerCanvasClass, "opacity-[0.45]")} width={page.width} height={page.height} />
+              {page.assets.includes("censor-mask") && ws.showRegions && (ws.tool === "decensor" || !rasters.some((layer) => layer.kind === "decensor")) && (
+                // The saved censor mask, in the colour of the brush: what a run would reconstruct. Like
+                // the balloon and panel outlines it shows once detected, until the art is rebuilt.
+                <div
+                  className={cn(layerCanvasClass, "bg-[#e5484d] opacity-[0.45]")}
+                  style={{
+                    maskImage: `url("${assetHref(ws.project!.id, page.id, "censor-mask", assetVersion(page, "censor-mask"))}")`,
+                    maskMode: "luminance",
+                    maskSize: "100% 100%",
                   }}
                 />
-              ))}
-            <canvas ref={pendingPaint} className={layerCanvasClass} width={page.width} height={page.height} />
-            <canvas ref={mask} className={cn(layerCanvasClass, "opacity-[0.45]")} width={page.width} height={page.height} />
-            {page.assets.includes("censor-mask") && ws.showRegions && (ws.tool === "decensor" || !rasters.some((layer) => layer.kind === "decensor")) && (
-              // The saved censor mask, in the colour of the brush: what a run would reconstruct. Like
-              // the balloon and panel outlines it shows once detected, until the art is rebuilt.
-              <div
-                className={cn(layerCanvasClass, "bg-[#e5484d] opacity-[0.45]")}
-                style={{
-                  maskImage: `url("${assetHref(ws.project!.id, page.id, "censor-mask", assetVersion(page, "censor-mask"))}")`,
-                  maskMode: "luminance",
-                  maskSize: "100% 100%",
-                }}
-              />
-            )}
-            {comparing && (
-              // The artwork before the fill, cut off at the divider: before on its left, the result on its right.
-              <img
-                className="pointer-events-none absolute select-none"
-                src={comparing.url}
-                alt=""
-                draggable={false}
-                style={{
-                  left: comparing.bounds.x * zoom,
-                  top: comparing.bounds.y * zoom,
-                  width: comparing.bounds.width * zoom,
-                  height: comparing.bounds.height * zoom,
-                  clipPath: `inset(0 ${(1 - comparing.position) * 100}% 0 0)`,
-                }}
-              />
-            )}
-            {ws.job?.previews
-              ?.filter((preview) => preview.page === page.id)
-              .map((preview, index, shown) => (
-                // A diffusion model's result so far, laid over its crop until the stage commits.
-                <div
-                  key={`${preview.box.x},${preview.box.y},${preview.box.width},${preview.box.height}`}
-                  className="pointer-events-none absolute"
-                  style={{ left: preview.box.x * zoom, top: preview.box.y * zoom, width: preview.box.width * zoom, height: preview.box.height * zoom }}
-                >
-                  <img className="h-full w-full select-none" src={preview.url} alt="" draggable={false} />
-                  {index === shown.length - 1 && preview.steps > 0 && (
-                    <span className="absolute left-1.5 top-1.5 rounded-pill bg-surface-over px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-fg-2 shadow-floating">
-                      {preview.step}/{preview.steps}
-                    </span>
-                  )}
-                </div>
-              ))}
-            {lifted && (
-              // The moving or turning block's text lifted off the render, over the render as it is without it.
-              <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" aria-hidden>
-                <img className="absolute max-w-none select-none" src={lifted.under} alt="" draggable={false} style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom }} />
+              )}
+              {comparing && (
+                // The artwork before the fill, cut off at the divider: before on its left, the result on its right.
                 <img
-                  ref={liftText}
-                  className="absolute max-w-none select-none will-change-transform"
-                  src={lifted.text}
+                  className="pointer-events-none absolute select-none"
+                  src={comparing.url}
                   alt=""
                   draggable={false}
                   style={{
-                    left: lifted.x * zoom,
-                    top: lifted.y * zoom,
-                    width: lifted.width * zoom,
-                    height: lifted.height * zoom,
-                    // Turned about the block's center, where a rotation turns it.
-                    transformOrigin: `${(lifted.box.cx - lifted.x) * zoom}px ${(lifted.box.cy - lifted.y) * zoom}px`,
-                    transform: liftAt,
+                    left: comparing.bounds.x * zoom,
+                    top: comparing.bounds.y * zoom,
+                    width: comparing.bounds.width * zoom,
+                    height: comparing.bounds.height * zoom,
+                    clipPath: `inset(0 ${(1 - comparing.position) * 100}% 0 0)`,
                   }}
                 />
-              </div>
-            )}
-            <svg
-              ref={svg}
-              // touch-none: a pen or finger drag draws instead of scrolling the page (which would cancel the stroke).
-              className="absolute inset-0 h-full w-full touch-none"
-              viewBox={`0 0 ${page.width} ${page.height}`}
-              style={{ cursor: svgCursor }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={() => !gesture && moveRing(null)}
-              onPointerCancel={cancelGesture}
-            >
-              <Overlays
-                page={page}
-                zoom={zoom}
-                gesture={gesture ?? (nudge ? { kind: "move", start: { x: 0, y: 0 }, ...nudge } : null)}
-                dragging={gesture?.kind === "move" ? gesture.id : undefined}
-                startMove={startMove}
-                startTransform={startTransform}
-                hoverBlock={hoverBlock}
-              />
-              {gesture?.kind === "select" ? <Marquee points={gesture.points} /> : selection && <Marquee points={selection.points} busy={filling} />}
-              {comparing && <CompareDivider bounds={comparing.bounds} position={comparing.position} zoom={zoom} onPointerDown={startCompare} />}
-            </svg>
-            {brushCursor && !osRing && (
-              // Too big for a cursor image: a ring on its own compositor layer, moved by transform (inside the SVG, every move repainted all the overlays).
-              <div
-                ref={brushRing}
-                className="pointer-events-none absolute left-0 top-0 rounded-full border-[1.5px] border-[var(--n-950)] shadow-[0_0_1px_white,inset_0_0_1px_white] will-change-transform"
-                style={{ width: ws.brush.diameter * zoom, height: ws.brush.diameter * zoom, ...ringPlacement(cursor.current, ws.brush.diameter, zoom) }}
-                aria-hidden
-              />
-            )}
-            {gesture?.kind === "move" && (
-              // The transform goes on a wrapper: on the <svg> itself it would re-lay-out the SVG text on every move.
-              <div ref={dragLayer} className="pointer-events-none absolute inset-0 will-change-transform" aria-hidden>
-                <svg className="h-full w-full" viewBox={`0 0 ${page.width} ${page.height}`}>
-                  {page.blocks.map((block, index) =>
-                    block.layerId === gesture.id ? <BlockOverlay key={block.layerId} block={block} index={index} points={gesture.origin} selected interactive={ws.tool === "select"} zoom={zoom} /> : null,
-                  )}
-                </svg>
-              </div>
-            )}
-            {editingBlock && (
-              <CanvasTextEditor key={editingBlock.layerId} block={editingBlock} page={page} projectId={ws.project.id} zoom={zoom} onDone={() => setEditing(null)} />
-            )}
-            {selection && (!gesture || gesture.kind === "compare") && (
-              <FillPrompt
-                bounds={boundsOf(selection.points)}
-                page={page}
-                zoom={zoom}
-                prompt={fillPrompt}
-                setPrompt={setFillPrompt}
-                filling={filling}
-                compare={comparing ? { position: comparing.position, set: (position) => setComparison((current) => current && { ...current, position }) } : undefined}
-                onGenerate={() => void generateFill()}
-                onCancel={() => (filling ? void ws.stop() : setSelection(null))}
-              />
-            )}
-          </div>
+              )}
+              {ws.job?.previews
+                ?.filter((preview) => preview.page === page.id)
+                .map((preview, index, shown) => (
+                  // A diffusion model's result so far, laid over its crop until the stage commits.
+                  <div
+                    key={`${preview.box.x},${preview.box.y},${preview.box.width},${preview.box.height}`}
+                    className="pointer-events-none absolute"
+                    style={{ left: preview.box.x * zoom, top: preview.box.y * zoom, width: preview.box.width * zoom, height: preview.box.height * zoom }}
+                  >
+                    <img className="h-full w-full select-none" src={preview.url} alt="" draggable={false} />
+                    {index === shown.length - 1 && preview.steps > 0 && (
+                      <span className="absolute left-1.5 top-1.5 rounded-pill bg-surface-over px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-fg-2 shadow-floating">
+                        {preview.step}/{preview.steps}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              {lifted && (
+                // The moving or turning block's text lifted off the render, over the render as it is without it.
+                <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" aria-hidden>
+                  <img className="absolute max-w-none select-none" src={lifted.under} alt="" draggable={false} style={{ left: lifted.x * zoom, top: lifted.y * zoom, width: lifted.width * zoom, height: lifted.height * zoom }} />
+                  <img
+                    ref={liftText}
+                    className="absolute max-w-none select-none will-change-transform"
+                    src={lifted.text}
+                    alt=""
+                    draggable={false}
+                    style={{
+                      left: lifted.x * zoom,
+                      top: lifted.y * zoom,
+                      width: lifted.width * zoom,
+                      height: lifted.height * zoom,
+                      // Turned about the block's center, where a rotation turns it.
+                      transformOrigin: `${(lifted.box.cx - lifted.x) * zoom}px ${(lifted.box.cy - lifted.y) * zoom}px`,
+                      transform: liftAt,
+                    }}
+                  />
+                </div>
+              )}
+              <svg
+                ref={svg}
+                // touch-none: a pen or finger drag draws instead of scrolling the page (which would cancel the stroke).
+                className="absolute inset-0 h-full w-full touch-none"
+                viewBox={`0 0 ${page.width} ${page.height}`}
+                style={{ cursor: svgCursor }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={() => !gesture && moveRing(null)}
+                onPointerCancel={cancelGesture}
+              >
+                <Overlays
+                  page={page}
+                  zoom={zoom}
+                  gesture={gesture ?? (nudge ? { kind: "move", start: { x: 0, y: 0 }, ...nudge } : null)}
+                  dragging={gesture?.kind === "move" ? gesture.id : undefined}
+                  startMove={startMove}
+                  startTransform={startTransform}
+                  hoverBlock={hoverBlock}
+                />
+                {gesture?.kind === "select" ? <Marquee points={gesture.points} /> : selection && <Marquee points={selection.points} busy={filling} />}
+                {comparing && <CompareDivider bounds={comparing.bounds} position={comparing.position} zoom={zoom} onPointerDown={startCompare} />}
+              </svg>
+              {brushCursor && !osRing && (
+                // Too big for a cursor image: a ring on its own compositor layer, moved by transform (inside the SVG, every move repainted all the overlays).
+                <div
+                  ref={brushRing}
+                  className="pointer-events-none absolute left-0 top-0 rounded-full border-[1.5px] border-[var(--n-950)] shadow-[0_0_1px_white,inset_0_0_1px_white] will-change-transform"
+                  style={{ width: ws.brush.diameter * zoom, height: ws.brush.diameter * zoom, ...ringPlacement(cursor.current, ws.brush.diameter, zoom) }}
+                  aria-hidden
+                />
+              )}
+              {gesture?.kind === "move" && (
+                // The transform goes on a wrapper: on the <svg> itself it would re-lay-out the SVG text on every move.
+                <div ref={dragLayer} className="pointer-events-none absolute inset-0 will-change-transform" aria-hidden>
+                  <svg className="h-full w-full" viewBox={`0 0 ${page.width} ${page.height}`}>
+                    {page.blocks.map((block, index) =>
+                      block.layerId === gesture.id ? <BlockOverlay key={block.layerId} block={block} index={index} points={gesture.origin} selected interactive={ws.tool === "select"} zoom={zoom} /> : null,
+                    )}
+                  </svg>
+                </div>
+              )}
+              {editingBlock && (
+                <CanvasTextEditor key={editingBlock.layerId} block={editingBlock} page={page} projectId={ws.project.id} zoom={zoom} onDone={() => setEditing(null)} />
+              )}
+              {selection && (!gesture || gesture.kind === "compare") && (
+                <FillPrompt
+                  bounds={boundsOf(selection.points)}
+                  page={page}
+                  zoom={zoom}
+                  prompt={fillPrompt}
+                  setPrompt={setFillPrompt}
+                  filling={filling}
+                  compare={comparing ? { position: comparing.position, set: (position) => setComparison((current) => current && { ...current, position }) } : undefined}
+                  onGenerate={() => void generateFill()}
+                  onCancel={() => (filling ? void ws.stop() : setSelection(null))}
+                />
+              )}
+            </div>
           </div>
         </ScrollArea>
       )}
@@ -1896,11 +1906,11 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
   const art = box.angle
     ? undefined
     : [
-        page.assets.includes("cleanup") && `url("${assetHref(projectId, page.id, "cleanup", assetVersion(page, "cleanup"))}")`,
-        `url("${assetHref(projectId, page.id, "source", assetVersion(page, "source"))}")`,
-      ]
-        .filter(Boolean)
-        .join(", ");
+      page.assets.includes("cleanup") && `url("${assetHref(projectId, page.id, "cleanup", assetVersion(page, "cleanup"))}")`,
+      `url("${assetHref(projectId, page.id, "source", assetVersion(page, "source"))}")`,
+    ]
+      .filter(Boolean)
+      .join(", ");
   return (
     <div
       className="absolute z-20 rounded-[2px] shadow-[0_0_0_1.5px_var(--overlay-block)]"
