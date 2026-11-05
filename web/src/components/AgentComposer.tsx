@@ -1,12 +1,12 @@
 // The Agent tab's prompt box: an auto-growing message field with the open page as context,
-// a searchable model picker, and one send / stop button.
+// a searchable model picker, what the agent may do (access), and one send / stop button.
 
-import { ArrowUp, Check, ChevronDown, Cloud, Cpu, FileImage, Search, Sparkles, Square } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Cloud, Cpu, Eye, FileImage, PenLine, Search, ShieldCheck, Sparkles, Square, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { cn } from "cn";
 
-import type { AgentCommand, AgentModel } from "../api/agent";
+import type { AgentAccess, AgentCommand, AgentModel } from "../api/agent";
 import { Popover, Tooltip } from "./primitives";
 
 const MIN_HEIGHT = 40;
@@ -25,6 +25,8 @@ export function AgentComposer({
   models,
   model,
   onModel,
+  access,
+  onAccess,
   commands,
 }: {
   value: string;
@@ -34,14 +36,13 @@ export function AgentComposer({
   running: boolean;
   disabled: boolean;
   placeholder: string;
-  /** The last message sent, recalled with the Up arrow in an empty box. */
   lastSent?: string;
-  /** The open page the assistant works on, shown as context. */
   page?: string;
   models: AgentModel[] | null;
   model: string;
   onModel: (model: string) => void;
-  /** Slash commands, offered while the message is just ``/`` and a partial name. */
+  access: AgentAccess;
+  onAccess: (access: AgentAccess) => void;
   commands: AgentCommand[];
 }) {
   const field = useRef<HTMLTextAreaElement>(null);
@@ -176,6 +177,7 @@ export function AgentComposer({
         />
         <div className="flex items-center gap-1 px-1.5 pb-1.5">
           <ModelPicker models={models} value={model} onChange={onModel} disabled={disabled} />
+          <AccessPicker value={access} onChange={onAccess} disabled={disabled || running} />
           <span className="min-w-0 flex-1" />
           <span className="hidden flex-none text-[11px] text-fg-3 @[320px]/agent:inline">{running ? "Esc to stop" : "Enter to send"}</span>
           {running ? (
@@ -205,6 +207,64 @@ export function AgentComposer({
         </div>
       </div>
     </div>
+  );
+}
+
+// ---- access picker -----------------------------------------------------------------------------
+
+const ACCESS: { value: AgentAccess; label: string; detail: string; icon: LucideIcon }[] = [
+  { value: "read", label: "Read only", detail: "Looks at the project, stages and models; changes nothing", icon: Eye },
+  { value: "edit", label: "Edit project", detail: "Edits text, typesetting and layers, and runs the pipeline", icon: PenLine },
+  { value: "full", label: "Full access", detail: "Also switches stage models and settings, and downloads models", icon: ShieldCheck },
+];
+
+function AccessPicker({ value, onChange, disabled }: { value: AgentAccess; onChange: (access: AgentAccess) => void; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const selected = ACCESS.find((a) => a.value === value) ?? ACCESS[2];
+  const Icon = selected.icon;
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      side="top"
+      align="start"
+      className="w-[280px] p-1"
+      trigger={
+        <button
+          type="button"
+          aria-label={`Access: ${selected.label}`}
+          disabled={disabled}
+          className="inline-flex h-7 min-w-0 flex-none cursor-pointer items-center gap-1 rounded-control px-1.5 text-xs text-fg-2 transition-colors duration-[20ms] ease-in hover:bg-hover hover:text-fg focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-hover data-[popup-open]:text-fg"
+        >
+          <Icon size={13} className="flex-none text-icon-2" />
+          <span className="hidden truncate @[360px]/agent:inline">{selected.label}</span>
+          <ChevronDown size={12} className="flex-none text-icon-2" />
+        </button>
+      }
+    >
+      <div role="listbox" aria-label="Access">
+        {ACCESS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="option"
+            aria-selected={option.value === value}
+            className="flex w-full cursor-pointer items-start gap-2 rounded-control px-2 py-1.5 text-left transition-colors duration-[20ms] ease-in hover:bg-hover focus-visible:bg-hover focus-visible:outline-none"
+            onClick={() => {
+              onChange(option.value);
+              setOpen(false);
+            }}
+          >
+            <option.icon size={14} className="mt-0.5 flex-none text-icon-2" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm leading-5 text-fg">{option.label}</span>
+              <span className="text-xs leading-4 text-fg-3">{option.detail}</span>
+            </span>
+            {option.value === value && <Check size={14} className="mt-0.5 flex-none text-brand" />}
+          </button>
+        ))}
+      </div>
+    </Popover>
   );
 }
 

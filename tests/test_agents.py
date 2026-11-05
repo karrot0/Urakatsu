@@ -996,3 +996,171 @@ async def test_the_cloud_editor_sends_one_1k_image_with_everything_editable(monk
     (size, lowest, prompt), = sent
     assert max(size) == CLOUD_SIDE and size == (1024, 683) and lowest == 255 and prompt == "translate it"
     assert result.size == (1536, 1024) and result.getpixel((10, 10)) == (0, 0, 255)
+
+
+# -- access levels and the stage tools ------------------------------------------------------------
+
+
+def test_access_levels_narrow_the_tools_and_refuse_calls_above_them(workspace, project):
+    from urakatsu.agents.agent import Assistant
+
+    project_id, page_id = project
+    toolset = Assistant().toolset()
+
+    def offered(access):
+        return {spec.name for spec in toolset.specs(ToolContext(workspace, project_id, page_id, access=access))}
+
+    read, edit, full = offered("read"), offered("edit"), offered("full")
+    assert {"get_page", "get_pipeline", "search_models"} <= read and not {"edit_text_blocks", "configure_stage"} & read
+    assert {"edit_text_blocks", "run_pipeline"} <= edit and not {"configure_stage", "install_model", "configure_translation"} & edit
+    assert {"configure_stage", "install_model", "unload_models", "configure_translation"} <= full
+    assert ToolContext(workspace).access == "full"
+    assert "read-only access" in Assistant().instructions(ToolContext(workspace, access="read"))
+
+    async def refused():
+        context = ToolContext(workspace, project_id, page_id, access="edit")
+        ok, text = await toolset.call(context, "configure_stage", {"stage": "ocr", "mode": "off"})
+        assert not ok and "needs full access" in json.loads(text)["error"]
+        block = workspace.page(project_id, page_id).blocks[0].layer_id
+        ok, text = await toolset.call(ToolContext(workspace, project_id, page_id, access="read"), "edit_text_blocks", {"edits": [{"layer_id": block, "translation": "x"}]})
+        assert not ok and "Edit project" in json.loads(text)["error"]
+        assert workspace.page(project_id, page_id).blocks[0].translation != "x"
+
+    asyncio.run(refused())
+    with pytest.raises(ValueError):
+        ToolContext(workspace, access="admin").allows("read")
+
+
+async def test_a_turn_offers_only_the_tools_its_access_allows(workspace, project):
+    project_id, page_id = project
+    agents = AgentService(workspace)
+    backend = ScriptedBackend([[TextDelta("ok")]])
+
+    async def resolve(ref):
+        return backend
+
+    agents.models.backend = resolve
+    conversation_id = await agents.send(None, "hi", backend.ref, project_id=project_id, page_id=page_id, access="read")
+    [event async for event in agents.turns.events(conversation_id)]
+    tools = backend.seen[0][2]
+    assert "get_page" in tools and "edit_text_blocks" not in tools and "configure_stage" not in tools
+    with pytest.raises(ValueError):
+        await agents.send(None, "hi", backend.ref, access="root")
+
+
+def test_stage_tools_read_and_change_the_pipeline(workspace, project, monkeypatch):
+    from urakatsu.agents import stage_tools
+
+    project_id, page_id = project
+    tools = get_agent("assistant").toolset()
+    context = ToolContext(workspace, project_id, page_id)
+
+    class FakeCatalog:
+        installed = [
+            {"id": "acme/det:Q4", "runtime": "onnx", "size": 10, "complete": True, "variant": "Q4", "files": [], "compatibility": {"status": "supported"},
+             "usable_by": [{"stage": "detection", "provider": "fake-detector", "runtime": "onnx", "name": "Fake detector"}]},
+            {"id": "acme/llm:Q8", "runtime": "llama", "size": 20, "complete": True, "variant": "Q8_0", "files": [{"role": "projector"}],
+             "usable_by": [{"stage": "translation", "provider": "fake-translator", "runtime": "llama", "name": "Fake"}]},
+        ]
+        started = []
+
+        def list_installed(self):
+            return self.installed
+
+        def install(self, runtime, repo, variant):
+            self.started.append((runtime, repo, variant))
+            return {"id": "dl1", "status": "queued", "position": 0, "done": 0, "total": 5, "model": {"id": f"{repo}:{variant}", "usable_by": []}}
+
+        def list_downloads(self):
+            return []
+
+    fake = FakeCatalog()
+    monkeypatch.setattr(stage_tools, "_catalog", lambda: fake)
+    monkeypatch.setattr(registry.get("detection", "fake-detector"), "uses_catalog", classmethod(lambda cls: True))
+
+    async def go(name, args, ok=True):
+        done, text = await tools.call(context, name, args)
+        assert done is ok, text
+        return json.loads(text)
+
+    async def scenario():
+        pipeline = await go("get_pipeline", {})
+        rows = {row["stage"]: row for row in pipeline["stages"]}
+        assert rows["detection"]["provider"] == "fake-detector" and rows["watermarks"]["mode"] == "off" and "fill" in rows
+
+        listed = await go("list_stage_providers", {"stage": "detection"})
+        mine = next(p for p in listed["providers"] if p["id"] == "fake-detector")
+        assert mine["selected"] and mine["installed_models"][0]["id"] == "acme/det:Q4"
+
+        changed = await go("configure_stage", {"stage": "detection", "model": "acme/det:Q4", "runtime": "onnx"})
+        assert set(changed["changed"]) == {"model", "runtime"} and changed["model"] == "acme/det:Q4"
+        assert workspace.config.processor["fake-detector"]["model"] == "acme/det:Q4" and workspace.config.runtimes["fake-detector"] == "onnx"
+        assert "config" in context.changed
+
+        await go("configure_stage", {"stage": "watermarks", "mode": "remove"})
+        assert workspace.config.watermarks.mode == "remove"
+        await go("configure_stage", {"stage": "translation", "model": "acme/llm:Q8"})
+        selection = workspace.config.translation.model
+        assert (selection.provider, selection.model, selection.quantization, selection.vision) == ("fake-translator", "acme/llm:Q8", "Q8_0", True)
+
+        assert "cannot run on" in (await go("configure_stage", {"stage": "detection", "runtime": "llama"}, ok=False))["error"]
+        assert "no ocr provider" in (await go("configure_stage", {"stage": "ocr", "provider": "nope"}, ok=False))["error"]
+        assert "has no modes" in (await go("configure_stage", {"stage": "ocr", "mode": "on"}, ok=False))["error"]
+        assert "no installed model" in (await go("configure_stage", {"stage": "detection", "model": "acme/missing"}, ok=False))["error"]
+        assert "nothing to change" in (await go("configure_stage", {"stage": "ocr"}, ok=False))["error"]
+
+        download = await go("install_model", {"runtime": "onnx", "repo": "acme/new", "variant": "snapshot"})
+        assert download["status"] == "queued" and fake.started == [("onnx", "acme/new", "snapshot")]
+        installed = await go("list_installed_models", {})
+        assert installed[0]["usable_by"] == ["detection/fake-detector"]
+
+    asyncio.run(scenario())
+
+
+def test_fill_region_runs_the_fill_model_on_a_mask_of_the_area(workspace, project, monkeypatch):
+    from fakes import FakeInpaintingStage
+
+    project_id, page_id = project
+    tools = get_agent("assistant").toolset()
+    context = ToolContext(workspace, project_id, page_id)
+    seen = []
+    original = FakeInpaintingStage.process
+
+    async def capture(self, input, provider):
+        seen.append(input.inpainting_mask)
+        return await original(self, input, provider)
+
+    monkeypatch.setattr(FakeInpaintingStage, "process", capture)
+    monkeypatch.setattr(FakeInpaintingStage, "skip", lambda self, input, provider: False)
+    monkeypatch.setattr(registry.get("inpainting", "fake-inpainter"), "prompted", True, raising=False)
+    first = workspace.page(project_id, page_id).blocks[0]
+
+    async def scenario():
+        ok, text = await tools.call(context, "fill_region", {"layer_ids": [first.layer_id], "prompt": "Replace it with BOOM"})
+        assert ok, text
+        result = json.loads(text)
+        assert result["status"] == "completed" and result["hidden_text_layers"] == [first.layer_id]
+        assert result["area"] == {"x": 10, "y": 10, "width": 40, "height": 20}
+        assert result["fill_model"]["provider"] == "fake-inpainter" and "note" not in result
+        mask = seen[-1]
+        assert mask.generative and mask.prompt == "Replace it with BOOM" and mask.page == page_id
+        pixels = Image.open(io.BytesIO(mask.png)).convert("L")
+        assert pixels.size == (workspace.page(project_id, page_id).width, workspace.page(project_id, page_id).height)
+        assert pixels.getpixel((10, 10)) == 255 and pixels.getpixel((49, 29)) == 255 and pixels.getpixel((50, 30)) == 0
+        assert not workspace.page(project_id, page_id).blocks[0].visible
+
+        ok, text = await tools.call(context, "fill_region", {"polygon": [{"x": 0, "y": 0}, {"x": 30, "y": 0}, {"x": 0, "y": 30}]})
+        assert ok, text
+        assert json.loads(text)["hidden_text_layers"] == []
+        assert seen[-1].generative and seen[-1].prompt is None  # an empty prompt removes
+        monkeypatch.setattr(registry.get("inpainting", "fake-inpainter"), "prompted", False)
+        ok, text = await tools.call(context, "fill_region", {"region": {"x": 0, "y": 0, "width": 20, "height": 20}, "prompt": "sky"})
+        assert ok, text
+        assert "note" in json.loads(text) and seen[-1].prompt is None  # like LaMa: the prompt is dropped, not refused
+        ok, text = await tools.call(context, "fill_region", {"region": {"x": 5000, "y": 5000, "width": 10, "height": 10}})
+        assert not ok and "outside the page" in json.loads(text)["error"]
+        ok, text = await tools.call(context, "fill_region", {})
+        assert not ok
+
+    asyncio.run(scenario())
+    assert "fill_region repaints part of a page" in get_agent("assistant").instructions(ToolContext(workspace))

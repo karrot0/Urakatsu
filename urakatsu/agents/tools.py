@@ -5,6 +5,12 @@ A ``Tool`` is a JSON-schema signature plus an async handler. Handlers receive a
 live events such as run progress) and return a JSON-serializable result. A handler that
 raises is reported to the model as ``{"error": ...}`` so it can correct itself; it never
 ends the turn.
+
+Every tool has an access level, and a conversation runs at one the user picks
+(``ACCESS``): ``read`` tools only look, ``edit`` tools change the open project, and
+``full`` tools change the app itself (settings for every stage, model downloads, loaded
+models). A tool above the conversation's level is not offered to the model, and calling
+it anyway is refused with a message telling the user how to allow it.
 """
 
 from __future__ import annotations
@@ -22,8 +28,17 @@ if TYPE_CHECKING:  # pragma: no cover
     from .image_edit import ImageEditor
 
 Handler = Callable[["ToolContext", dict[str, Any]], Any]
-# Results longer than this are cut before they go back to the model.
 RESULT_LIMIT = 60_000
+
+ACCESS = ("read", "edit", "full")
+DEFAULT_ACCESS = "full"
+
+
+def access_rank(level: str) -> int:
+    try:
+        return ACCESS.index(level)
+    except ValueError as error:
+        raise ValueError(f"unknown access level {level!r}; expected one of {list(ACCESS)}") from error
 
 
 @dataclass
@@ -32,10 +47,12 @@ class ToolContext:
     project_id: Optional[str] = None
     page_id: Optional[str] = None
     emit: Callable[[dict[str, Any]], None] = lambda event: None
-    # Set by tools that changed the project or the settings, so the UI reloads them.
     changed: set[str] = field(default_factory=set)
-    # The image model ``edit_image`` uses; ``None`` when there is none.
     image_editor: Optional["ImageEditor"] = None
+    access: str = DEFAULT_ACCESS
+
+    def allows(self, level: str) -> bool:
+        return access_rank(level) <= access_rank(self.access)
 
     def project(self) -> str:
         if not self.project_id:
@@ -55,10 +72,13 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     handler: Handler
-    # Tools that edit the project or settings; the UI reloads after them.
     mutates: bool = False
-    # Whether the model is offered the tool in this context (edit_image needs an image model).
     available: Optional[Callable[["ToolContext"], bool]] = None
+    access: str = ""
+
+    def __post_init__(self) -> None:
+        self.access = self.access or ("edit" if self.mutates else "read")
+        access_rank(self.access)
 
     def spec(self) -> ToolSpec:
         return ToolSpec(self.name, self.description, self.parameters)
@@ -77,6 +97,7 @@ def tool(
     required: tuple[str, ...] = (),
     mutates: bool = False,
     available: Optional[Callable[[ToolContext], bool]] = None,
+    access: str = "",
 ) -> Callable[[Handler], Tool]:
     """Declares a tool from a handler; ``properties`` are the argument JSON schema's properties."""
 
@@ -84,7 +105,7 @@ def tool(
         parameters: dict[str, Any] = {"type": "object", "properties": properties or {}, "additionalProperties": False}
         if required:
             parameters["required"] = list(required)
-        return Tool(name, description, parameters, handler, mutates, available)
+        return Tool(name, description, parameters, handler, mutates, available, access)
 
     return wrap
 
@@ -97,8 +118,12 @@ class Toolset:
         return iter(self._tools.values())
 
     def specs(self, context: Optional[ToolContext] = None) -> list[ToolSpec]:
-        """The tools to offer; with a ``context``, only those available in it."""
-        return [t.spec() for t in self._tools.values() if context is None or t.available is None or t.available(context)]
+        """The tools to offer; with a ``context``, only those available in it and within its access."""
+        return [t.spec() for t in self._tools.values() if context is None or self._offered(t, context)]
+
+    @staticmethod
+    def _offered(found: Tool, context: ToolContext) -> bool:
+        return context.allows(found.access) and (found.available is None or found.available(context))
 
     def get(self, name: str) -> Optional[Tool]:
         return self._tools.get(name)
@@ -108,6 +133,11 @@ class Toolset:
         found = self._tools.get(name)
         if found is None:
             return False, json.dumps({"error": f"unknown tool {name!r}"})
+        if not context.allows(found.access):
+            needed = "Full access" if found.access == "full" else "Edit project"
+            return False, json.dumps(
+                {"error": f"{name} needs {found.access} access and this chat has {context.access}; ask the user to switch the chat's access to {needed}"}
+            )
         try:
             result = await found.call(context, arguments)
         except Exception as error:  # reported to the model, which can retry differently
@@ -119,4 +149,3 @@ class Toolset:
         if len(text) > RESULT_LIMIT:
             text = text[:RESULT_LIMIT] + "… (truncated)"
         return True, text
-

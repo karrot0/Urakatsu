@@ -75,6 +75,8 @@ export type TurnEvent =
   | { type: "retry"; reason: "transient" | "overflow"; delay: number; message: string }
   | { type: "done"; status: "done" | "stopped" | "failed" };
 
+export type AgentAccess = "read" | "edit" | "full";
+
 export const agentApi = {
   /** The saved model list (instant); ``stale`` means a refresh (``refresh=true``) is worth doing. */
   models: (refresh = false) => call<{ models: AgentModel[]; stale: boolean }>(`/agent/models${refresh ? "?refresh=true" : ""}`),
@@ -87,8 +89,7 @@ export const agentApi = {
   deleteConversation: (id: string) => call<void>(`/agent/conversations/${id}`, { method: "DELETE" }),
   stop: (id: string) => call<void>(`/agent/conversations/${id}/stop`, { method: "POST" }),
   commands: () => call<AgentCommand[]>("/agent/commands"),
-  /** ``selection``: the text blocks selected in the editor, which slash commands act on. */
-  send: (body: { text: string; model: string; conversation_id?: string; project_id?: string; page_id?: string; selection?: string[] }) =>
+  send: (body: { text: string; model: string; conversation_id?: string; project_id?: string; page_id?: string; selection?: string[]; access?: AgentAccess }) =>
     call<{ conversation_id: string }>("/agent/messages", { method: "POST", body: JSON.stringify(body) }),
 };
 

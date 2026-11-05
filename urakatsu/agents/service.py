@@ -11,7 +11,7 @@ from .commands import COMMANDS, parse as parse_command
 from .image_edit import ChatGptImageEditor, ImageEditor, UrakatsuCloudImageEditor
 from .models import ModelDirectory
 from .session import ConversationStore, Turns
-from .tools import ToolContext
+from .tools import DEFAULT_ACCESS, ToolContext, access_rank
 
 if TYPE_CHECKING:  # pragma: no cover
     from urakatsu.service.workspace import Workspace
@@ -41,15 +41,18 @@ class AgentService:
         project_id: Optional[str] = None,
         page_id: Optional[str] = None,
         selection: Optional[list[str]] = None,
+        access: str = DEFAULT_ACCESS,
     ) -> str:
         """Starts a turn (creating the conversation when ``conversation_id`` is empty); returns its id.
 
         A message that starts with ``/`` is a slash command: it runs without the model, on the
-        open page and the text blocks ``selection`` names."""
+        open page and the text blocks ``selection`` names. ``access`` is what the user lets the
+        agent do in this turn (``tools.ACCESS``)."""
         text = text.strip()
         if not text:
             raise ValueError("the message is empty")
-        context = ToolContext(self.workspace, project_id=project_id, page_id=page_id, image_editor=await self.image_editor())
+        access_rank(access)
+        context = ToolContext(self.workspace, project_id=project_id, page_id=page_id, image_editor=await self.image_editor(), access=access)
         parsed = parse_command(text)
         command = None
         if parsed is not None:

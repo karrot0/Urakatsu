@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { cn } from "cn";
 
-import { agentApi, followTurn, type AgentCommand, type AgentModel, type ChatGptStatus, type ChatMessage, type ConversationSummary, type TurnEvent } from "../api/agent";
+import { agentApi, followTurn, type AgentAccess, type AgentCommand, type AgentModel, type ChatGptStatus, type ChatMessage, type ConversationSummary, type TurnEvent } from "../api/agent";
 import { assetHref, describeError } from "../api/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +16,8 @@ import { AgentComposer as Composer } from "./AgentComposer";
 import { ActionMenu, Select, Tooltip, type Option } from "./primitives";
 
 const MODEL_KEY = "urakatsu.agent.model";
+const ACCESS_KEY = "urakatsu.agent.access";
+const ACCESS_LEVELS: AgentAccess[] = ["read", "edit", "full"];
 const chatKey = (projectId: string) => `urakatsu.agent.chat.${projectId}`;
 
 function stored(key: string): string {
@@ -117,6 +119,10 @@ export function AgentPanel() {
   const [models, setModels] = useState<AgentModel[] | null>(null);
   const [account, setAccount] = useState<ChatGptStatus | null>(null);
   const [model, setModel] = useState(() => stored(MODEL_KEY));
+  const [access, setAccess] = useState<AgentAccess>(() => {
+    const saved = stored(ACCESS_KEY) as AgentAccess;
+    return ACCESS_LEVELS.includes(saved) ? saved : "full";
+  });
   const [chats, setChats] = useState<ConversationSummary[]>([]);
   const [chatId, setChatId] = useState<string | undefined>();
   const [items, setItems] = useState<Item[]>([]);
@@ -150,14 +156,12 @@ export function AgentPanel() {
     void loadModels();
   }, [loadModels]);
 
-  // Keep the chosen model valid: the stored one when it still exists, else the first offered.
   useEffect(() => {
     if (models && models.length && !models.some((m) => m.id === model)) setModel(models[0].id);
   }, [models, model]);
   useEffect(() => store(MODEL_KEY, model), [model]);
+  useEffect(() => store(ACCESS_KEY, access), [access]);
 
-  // ChatGPT sign-in: the server opens the sign-in page in the system browser and waits for its
-  // callback; the panel shows the link too and polls until the flow ends.
   const [signIn, setSignIn] = useState<{ url: string } | null>(null);
   const stopPolling = useRef<(() => void) | null>(null);
   useEffect(() => () => stopPolling.current?.(), []);
@@ -214,6 +218,7 @@ export function AgentPanel() {
       if (event.type === "tool_result") {
         if (event.changed.includes("project") && projectId) void ws.reloadProject(projectId);
         if (event.changed.includes("config")) void ws.refresh();
+        if (event.changed.includes("models")) void ws.refreshModels();
       }
       if (event.type === "ui" && event.action === "open_page") ws.selectPage(event.page_id);
     },
@@ -385,6 +390,8 @@ export function AgentPanel() {
         models={models}
         model={model}
         onModel={setModel}
+        access={access}
+        onAccess={setAccess}
         commands={commands}
       />
     </div>
@@ -418,21 +425,21 @@ function AccountMenu({
       actions={[
         account?.signed_in
           ? {
-              label: (
-                <span className="flex items-center gap-2">
-                  <LogOut size={14} /> Sign out of ChatGPT{account.email ? ` (${account.email})` : ""}
-                </span>
-              ),
-              onSelect: onSignOut,
-            }
+            label: (
+              <span className="flex items-center gap-2">
+                <LogOut size={14} /> Sign out of ChatGPT{account.email ? ` (${account.email})` : ""}
+              </span>
+            ),
+            onSelect: onSignOut,
+          }
           : {
-              label: (
-                <span className="flex items-center gap-2">
-                  <LogIn size={14} /> Sign in with ChatGPT
-                </span>
-              ),
-              onSelect: onSignIn,
-            },
+            label: (
+              <span className="flex items-center gap-2">
+                <LogIn size={14} /> Sign in with ChatGPT
+              </span>
+            ),
+            onSelect: onSignIn,
+          },
         {
           label: (
             <span className="flex items-center gap-2">

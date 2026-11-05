@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from urakatsu.agents import AgentService
 from urakatsu.agents.backends.base import AgentError
+from urakatsu.agents.tools import DEFAULT_ACCESS
 
 
 class MessageBody(BaseModel):
@@ -26,8 +27,8 @@ class MessageBody(BaseModel):
     conversation_id: Optional[str] = None
     project_id: Optional[str] = None
     page_id: Optional[str] = None
-    # Text blocks selected in the editor (layer ids), for slash commands.
     selection: list[str] = []
+    access: str = DEFAULT_ACCESS
 
 
 def _guard(fn, *args, **kwargs):
@@ -93,7 +94,7 @@ def agent_router(agents: AgentService) -> APIRouter:
     async def send_message(body: MessageBody):
         try:
             conversation_id = await agents.send(
-                body.conversation_id, body.text, body.model, body.agent, body.project_id, body.page_id, body.selection
+                body.conversation_id, body.text, body.model, body.agent, body.project_id, body.page_id, body.selection, body.access
             )
         except KeyError as error:
             raise HTTPException(404, str(error.args[0]) if error.args else "not found") from error

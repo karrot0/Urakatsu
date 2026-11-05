@@ -7,6 +7,7 @@ authorship (a later pipeline run never overwrites it) and is one undo step.
 from __future__ import annotations
 
 import asyncio
+import io
 import math
 from typing import Any, Optional
 
@@ -479,6 +480,115 @@ async def edit_image(context: ToolContext, args: dict[str, Any]) -> Any:
     }
 
 
+def fill_model(context: ToolContext) -> dict[str, Any]:
+    """The generative fill model and how it reads a prompt: ``prompted`` models follow one,
+    ``instructed`` ones take it as an edit instruction rather than a description (``None``
+    when it depends on the installed model, as for the diffusion-model provider)."""
+    from urakatsu.core.registry import registry
+
+    provider = context.workspace.config.fill_provider()
+    try:
+        cls = registry.get(Stage.INPAINTING, provider)
+    except KeyError:
+        return {"provider": provider, "name": provider, "prompted": False, "instructed": False}
+    prompted = bool(getattr(cls, "prompted", False))
+    instructed: Optional[bool] = bool(getattr(cls, "instructed", False))
+    if prompted and not instructed and cls.uses_catalog():
+        instructed = None
+    return {"provider": provider, "name": cls.name or cls.id, "prompted": prompted, "instructed": instructed}
+
+
+def _mask_png(width: int, height: int, box: tuple[int, int, int, int], polygon: Optional[list[dict[str, Any]]]) -> bytes:
+    """A page-sized mask, white where the fill model repaints (the canvas's selection mask)."""
+    from PIL import Image, ImageDraw
+
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    if polygon:
+        draw.polygon([(float(p["x"]), float(p["y"])) for p in polygon], fill=255)
+    else:
+        left, top, right, bottom = box
+        draw.rectangle((left, top, right - 1, bottom - 1), fill=255)
+    out = io.BytesIO()
+    mask.save(out, "PNG")
+    return out.getvalue()
+
+
+@tool(
+    "fill_region",
+    "Repaint part of a page's art with the generative fill model on this machine (or the worker it runs on): the "
+    "same as the canvas's selection + Generate. The fill model is the 'fill' stage (get_pipeline; change it with "
+    "configure_stage, e.g. to a diffusion model such as FLUX.2 Klein). Give the area as a region in page pixels, a "
+    "polygon, or the layer_ids of text blocks whose frames cover it. prompt: for a model that follows edit "
+    "instructions say what to change, e.g. \"Replace the sound effect with the English word BOOM, hand-lettered in "
+    "the same style\"; for one that takes a description, describe what belongs there, e.g. \"night sky with "
+    "stars\"; an empty prompt removes what is there. A model that is not prompted (LaMa, AOT) only removes. The "
+    "result goes into the page's Cleanup layer as a user edit; one undo removes it. hide_text (default true) hides "
+    "the text blocks named in layer_ids so typeset text does not cover the result.",
+    {
+        "page_id": _PAGE_ID,
+        "prompt": {"type": "string"},
+        "region": {
+            "type": "object",
+            "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number"}, "height": {"type": "number"}},
+            "required": ["x", "y", "width", "height"],
+            "additionalProperties": False,
+        },
+        "polygon": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}}, "required": ["x", "y"], "additionalProperties": False},
+            "description": "At least three points in page pixels; used instead of region for an irregular area.",
+        },
+        "layer_ids": _LAYER_IDS,
+        "hide_text": {"type": "boolean"},
+    },
+    mutates=True,
+)
+async def fill_region(context: ToolContext, args: dict[str, Any]) -> Any:
+    project, page_id = context.project(), context.page(args.get("page_id"))
+    page = context.workspace.page(project, page_id)
+    width, height = int(page.width), int(page.height)
+    polygon = args.get("polygon") or None
+    if polygon:
+        if len(polygon) < 3:
+            raise ValueError("a polygon needs at least three points")
+        xs, ys = [float(p["x"]) for p in polygon], [float(p["y"]) for p in polygon]
+        box = (math.floor(min(xs)), math.floor(min(ys)), math.ceil(max(xs)), math.ceil(max(ys)))
+    else:
+        box = _region_box(args, {b.layer_id: b for b in page.blocks})
+    left, top, right, bottom = max(box[0], 0), max(box[1], 0), min(box[2], width), min(box[3], height)
+    if right - left < 4 or bottom - top < 4:
+        raise ValueError(f"the area is outside the page or too small (the page is {width}x{height})")
+    model = fill_model(context)
+    asked = str(args.get("prompt") or "").strip()
+    prompt = asked if model["prompted"] else ""  # LaMa and AOT refuse a prompt; empty removes
+    job = await context.workspace.start_run(
+        project,
+        Operation.only(Stage.INPAINTING),
+        [page_id],
+        inpainting_mask=_mask_png(width, height, (left, top, right, bottom), polygon),
+        fill_prompt=prompt,
+    )
+    result = await _follow(context, job)
+    if result["status"] == "failed":
+        raise ValueError(result["error"] or "the fill failed")
+    hidden: list[str] = []
+    layer_ids = list(args.get("layer_ids") or [])
+    if result["status"] == "completed" and layer_ids and args.get("hide_text", True):
+        context.workspace.set_layer_visibility(project, page_id, layer_ids, False, None)
+        hidden = layer_ids
+    out: dict[str, Any] = {
+        **result,
+        "page_id": page_id,
+        "area": {"x": left, "y": top, "width": right - left, "height": bottom - top},
+        "fill_model": model,
+        "hidden_text_layers": hidden,
+    }
+    if asked and not model["prompted"]:
+        out["note"] = f"{model['name']} does not follow prompts, so it removed what was there"
+    return out
+
+
 @tool("undo", "Undo the last change to the open project.", mutates=True)
 def undo(context: ToolContext, args: dict[str, Any]) -> Any:
     view = context.workspace.undo(context.project())
@@ -531,6 +641,11 @@ async def run_pipeline(context: ToolContext, args: dict[str, Any]) -> Any:
     else:
         page_ids = None
     job = await context.workspace.start_run(project, operation, page_ids)
+    return await _follow(context, job)
+
+
+async def _follow(context: ToolContext, job) -> dict[str, Any]:
+    """Streams a run's progress to the UI until it ends; stopping the assistant stops the run."""
     try:
         async for progress in context.workspace.events(job.id):
             if progress.kind is ProgressKind.STEP:  # live previews are for the canvas, not the assistant
@@ -566,6 +681,7 @@ async def run_pipeline(context: ToolContext, args: dict[str, Any]) -> Any:
         "model": {"type": "string"},
     },
     mutates=True,
+    access="full",
 )
 def configure_translation(context: ToolContext, args: dict[str, Any]) -> Any:
     config = context.workspace.config.model_copy(deep=True)
@@ -609,6 +725,7 @@ APP_TOOLS: list[Tool] = [
     create_text_block,
     delete_text_blocks,
     edit_image,
+    fill_region,
     undo,
     redo,
     run_pipeline,
