@@ -20,6 +20,7 @@ import atexit
 import io
 import json
 import logging
+import re
 import shutil
 import threading
 import time
@@ -387,16 +388,7 @@ class ProjectStore:
         A project that never stored chapters loses its empty implicit "Chapter 1".
         In a webtoon project the pages are restitched first.
         """
-        format = self.format(project_id)
-        if format.kind == "webtoon" and pages:
-            images = [Image.open(io.BytesIO(data)) for _, data in pages]
-            lossless = all(image.format == "PNG" for image in images)
-            slices = restitch([_upright(image) for image in images], format.stitch, detect=_lenient(self.detector))
-            width = len(str(len(slices)))
-            pages = [(f"{number:0{width}d}", data) for number, (data, *_) in enumerate(_encode_slices(slices, lossless), start=1)]
-        # Pages that need converting do so in parallel: Pillow releases the GIL while encoding.
-        with ThreadPoolExecutor(min(8, max(1, len(pages)))) as pool:
-            decoded = [(label, *found) for (label, _), found in zip(pages, pool.map(partial(_normalize, lossless=self.lossless_pages), [data for _, data in pages]), strict=True)]
+        decoded = self._prepare(project_id, pages, self.format(project_id).kind == "webtoon")
         session = self.session(project_id)
         snapshot = session.snapshot()
         chapters = chapters_of(snapshot) if snapshot.project_component(Chapters) is not None or snapshot.pages() else []
@@ -409,6 +401,71 @@ class ProjectStore:
         session.commit(edit.finish())
         self.touch(project_id)
         return chapter.id
+
+    def import_chapters(
+        self,
+        project_id: str,
+        chapters: list[tuple[str, list[tuple[str, bytes]]]],
+        loose: list[tuple[str, bytes]] = (),  # type: ignore[assignment]
+        chapter_id: Optional[str] = None,
+    ) -> list[str]:
+        """Adds new ``chapters`` (name, pages) and ``loose`` pages in one undoable commit and returns
+        the new pages' ids in project order: an archive or folder import (``imports.gather``).
+
+        The pages go to ``chapter_id`` (default: the last chapter), the *target*: loose pages join
+        its end and the chapters follow it in the order given. An empty target is filled rather than
+        left behind: by the loose pages, else by the first chapter, which also gives it its name
+        unless the user named it (any name other than the default ``Chapter N``). In a webtoon
+        project each new chapter is restitched; loose pages are added as they are.
+        """
+        webtoon = self.format(project_id).kind == "webtoon"
+        prepared = [(name, self._prepare(project_id, pages, webtoon)) for name, pages in chapters if pages]
+        added = self._prepare(project_id, list(loose), restitched=False)
+        if not prepared and not added:
+            raise ValueError("found no images to import")
+        session = self.session(project_id)
+        snapshot = session.snapshot()
+        current = chapters_of(snapshot)
+        target = _find(current, chapter_id) if chapter_id else current[-1]
+        edit = snapshot.edit()
+        if added:
+            target.pages.extend(_add_page(edit, *page) for page in added)
+        elif prepared and not target.pages:
+            name, pages = prepared.pop(0)
+            target.pages = [_add_page(edit, *page) for page in pages]
+            if re.fullmatch(r"Chapter \d+", target.name):
+                target.name = name.strip() or target.name
+        position = current.index(target) + 1
+        for offset, (name, pages) in enumerate(prepared):
+            fresh = Chapter(id=uuid.uuid4().hex[:12], name=name.strip() or f"Chapter {len(current) + 1}")
+            fresh.pages = [_add_page(edit, *page) for page in pages]
+            current.insert(position + offset, fresh)
+        write_chapters(edit, current)
+        session.commit(edit.finish())
+        self.touch(project_id)
+        known = set(snapshot.pages())
+        return [page for chapter in current for page in chapter.pages if page not in known]
+
+    def _prepare(self, project_id: str, pages: list[tuple[str, bytes]], restitched: bool) -> list[tuple[str, bytes, str, int, int]]:
+        """Pages as stored, ``(label, data, media type, width, height)``: restitched first when
+        asked (webtoon chapters), then each normalized (:func:`_normalize`)."""
+        if restitched and pages:
+            images = [Image.open(io.BytesIO(data)) for _, data in pages]
+            lossless = all(image.format == "PNG" for image in images)
+            slices = restitch([_upright(image) for image in images], self.format(project_id).stitch, detect=_lenient(self.detector))
+            width = len(str(len(slices)))
+            pages = [(f"{number:0{width}d}", data) for number, (data, *_) in enumerate(_encode_slices(slices, lossless), start=1)]
+
+        def normalize(page: tuple[str, bytes]) -> tuple[str, bytes, str, int, int]:
+            label, data = page
+            try:
+                return (label, *_normalize(data, self.lossless_pages))
+            except (OSError, SyntaxError, ValueError) as error:  # Pillow's words for a file it cannot read
+                raise ValueError(f"{label} is not an image Urakatsu can read") from error
+
+        # Pages that need converting do so in parallel: Pillow releases the GIL while encoding.
+        with ThreadPoolExecutor(min(8, max(1, len(pages)))) as pool:
+            return list(pool.map(normalize, pages))
 
 
 # Formats stored as they arrive: every browser shows them and Pillow reads them.

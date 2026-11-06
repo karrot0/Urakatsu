@@ -637,3 +637,32 @@ async def test_app_page_is_revalidated(workspace, tmp_path):
             response = await client.get(path)
             assert response.status_code == 200 and "index-abc.js" in response.text
             assert response.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.asyncio
+async def test_import_takes_archives_and_folders_as_chapters_in_one_request(workspace):
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("2.png", page_png())
+        archive.writestr("1.png", page_png())
+    project = workspace.create_project("import")
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        files = [
+            ("files", ("Ch 1.cbz", buffer.getvalue(), "application/vnd.comicbook+zip")),
+            ("files", ("a.png", page_png(), "image/png")),
+            ("files", ("b.png", page_png(), "image/png")),
+        ]
+        data = {"paths": ["Ch 1.cbz", "Series/Ch 2/a.png", "Series/Ch 2/b.png"]}
+        response = await client.post(f"/api/v1/projects/{project.id}/import", files=files, data=data)
+        assert response.status_code == 201, response.text
+        assert len(response.json()["pages"]) == 4
+
+        response = await client.post(f"/api/v1/projects/{project.id}/import", files=[("files", ("notes.txt", b"x", "text/plain"))])
+        assert response.status_code == 400 and "found no images" in response.json()["detail"]
+
+    view = workspace.project_view(project.id)
+    assert [(chapter.name, len(chapter.page_ids)) for chapter in view.chapters] == [("Ch 1", 2), ("Series", 2)]
+    assert [view.pages[i].name for i in range(2)] == ["1.png", "2.png"]

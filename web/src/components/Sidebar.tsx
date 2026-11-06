@@ -32,6 +32,7 @@ import {
   Eye,
   EyeOff,
   FileDown,
+  FolderUp,
   GripVertical,
   ImagePlus,
   Link2,
@@ -52,6 +53,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttri
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import { assetHref, assetVersion, describeError, exportChapter, exportPage, saveBlob } from "../api/client";
+import { PAGE_ACCEPT } from "../api/imports";
 import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../api/sources";
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
 import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
@@ -172,6 +174,7 @@ export function Sidebar() {
   const [isOpen, toggle] = useExpanded(project.id);
   const [showRemote, toggleRemote] = useShowRemote(project.id);
   const upload = useRef<HTMLInputElement>(null);
+  const uploadFolder = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<string | undefined>(undefined);
   const [fileOver, setFileOver] = useState(false);
 
@@ -181,7 +184,6 @@ export function Sidebar() {
   const draggingChapter = active !== null && kindOf(active) === "chapter";
   const busy = ws.job?.status === "running";
   const currentChapter = chapterOf(ws, ws.pageId) ?? project.chapters[project.chapters.length - 1];
-  // Source rows are not sortable; they step aside while a chapter is dragged.
   const entries = useMemo(() => mergeChapters(layout, ws.link, showRemote && !draggingChapter), [layout, ws.link, showRemote, draggingChapter]);
   const waiting = ws.link?.chapters.filter((c) => !c.chapter_id).length ?? 0;
   const shared = useMemo(() => {
@@ -191,8 +193,6 @@ export function Sidebar() {
     return twice;
   }, [ws.link]);
 
-  // A long series lists a thousand chapters or more that are not downloaded. Their rows get these
-  // stable actions rather than the workspace, so a page change does not re-render every one.
   const wsRef = useRef(ws);
   wsRef.current = ws;
   const remoteActions = useMemo<RemoteActions>(
@@ -329,18 +329,18 @@ export function Sidebar() {
               entry.kind === "remote" ? (
                 <RemoteChapterRow key={`remote:${entry.chapter.id}`} chapter={entry.chapter} showGroup={shared.has(entry.chapter.name)} actions={remoteActions} />
               ) : (
-              <ChapterItem
-                key={entry.chapter.id}
-                chapter={entry.chapter}
-                name={names.get(entry.chapter.id) ?? `Chapter ${entry.index + 1}`}
-                pages={pages}
-                open={isOpen(entry.chapter.id) && !draggingChapter}
-                dropTarget={overChapter === entry.chapter.id && !isOpen(entry.chapter.id)}
-                disabled={busy}
-                onToggle={() => toggle(entry.chapter.id)}
-                onOpen={() => toggle(entry.chapter.id, true)}
-                onAddPages={() => addPagesTo(entry.chapter.id)}
-              />
+                <ChapterItem
+                  key={entry.chapter.id}
+                  chapter={entry.chapter}
+                  name={names.get(entry.chapter.id) ?? `Chapter ${entry.index + 1}`}
+                  pages={pages}
+                  open={isOpen(entry.chapter.id) && !draggingChapter}
+                  dropTarget={overChapter === entry.chapter.id && !isOpen(entry.chapter.id)}
+                  disabled={busy}
+                  onToggle={() => toggle(entry.chapter.id)}
+                  onOpen={() => toggle(entry.chapter.id, true)}
+                  onAddPages={() => addPagesTo(entry.chapter.id)}
+                />
               ),
             )}
           </SortableContext>
@@ -365,34 +365,63 @@ export function Sidebar() {
       </ScrollArea>
 
       <div className="flex flex-col gap-1 p-2 shadow-[inset_0_1px_0_var(--border-soft)]">
-        <div
-          className={cn(
-            "flex h-10 cursor-pointer items-center justify-center gap-2 rounded-control border border-dashed text-xs text-fg-3 [transition:background-color_var(--t-hover),color_var(--t-ui)]",
-            fileOver ? "border-brand bg-hover text-fg-2" : "border-line-strong hover:bg-hover hover:text-fg-2",
-          )}
-          role="button"
-          tabIndex={0}
-          onClick={() => addPagesTo(currentChapter?.id)}
-          onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && addPagesTo(currentChapter?.id)}
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-            setFileOver(true);
-          }}
-          onDragLeave={() => setFileOver(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setFileOver(false);
-            void ws.uploadPages(event.dataTransfer.files, currentChapter?.id);
-          }}
-        >
-          <Upload size={14} />
-          <span className="truncate">Add pages{currentChapter ? ` to ${currentChapter.name}` : ""}</span>
+        <div className="flex gap-1">
+          <div
+            className={cn(
+              "flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-control border border-dashed text-xs text-fg-3 [transition:background-color_var(--t-hover),color_var(--t-ui)]",
+              fileOver ? "border-brand bg-hover text-fg-2" : "border-line-strong hover:bg-hover hover:text-fg-2",
+            )}
+            role="button"
+            tabIndex={0}
+            onClick={() => addPagesTo(currentChapter?.id)}
+            onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && addPagesTo(currentChapter?.id)}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes("Files")) return;
+              event.preventDefault();
+              setFileOver(true);
+            }}
+            onDragLeave={() => setFileOver(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setFileOver(false);
+              void ws.uploadPages(event.dataTransfer, currentChapter?.id);
+            }}
+          >
+            {ws.importing ? (
+              <>
+                <LoaderCircle size={14} className="animate-spin text-brand motion-reduce:animate-none" aria-hidden />
+                <span className="truncate">
+                  Importing {ws.importing} file{ws.importing === 1 ? "" : "s"}…
+                </span>
+              </>
+            ) : (
+              <>
+                <Upload size={14} />
+                <span className="truncate">Add pages{currentChapter ? ` to ${currentChapter.name}` : ""}</span>
+              </>
+            )}
+          </div>
+          <Tooltip content="Add a folder: each folder of images becomes a chapter" side="top">
+            <Button variant="outline" className="h-10 w-10 shrink-0 px-0" aria-label="Add a folder" onClick={() => uploadFolder.current?.click()}>
+              <FolderUp size={16} />
+            </Button>
+          </Tooltip>
         </div>
+        <input
+          ref={uploadFolder}
+          type="file"
+          {...{ webkitdirectory: "" }}
+          multiple
+          hidden
+          onChange={(event) => {
+            if (event.target.files) void ws.uploadPages(event.target.files, currentChapter?.id);
+            event.target.value = "";
+          }}
+        />
         <input
           ref={upload}
           type="file"
-          accept="image/*"
+          accept={PAGE_ACCEPT}
           multiple
           hidden
           onChange={(event) => {
@@ -710,7 +739,7 @@ function ChapterItem({
         event.preventDefault();
         setFileOver(false);
         onOpen();
-        void ws.uploadPages(event.dataTransfer.files, chapter.id);
+        void ws.uploadPages(event.dataTransfer, chapter.id);
       }}
     >
       <ChapterRowView

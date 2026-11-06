@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "cn";
 
 import { assetHref, assetVersion, describeError, exportPage } from "../../api/client";
+import { PAGE_ACCEPT } from "../../api/imports";
 import { sources, type LinkedChapter } from "../../api/sources";
 import { plural } from "../../format";
 import type { Page } from "../../gen/urakatsu/v1/urakatsu_pb";
@@ -33,7 +34,6 @@ const TABS: TabItem<Tab>[] = [
 export function MobileApp() {
   const ws = useWorkspace();
   const tab: Tab = ws.settingsOpen ? "settings" : ws.modelsOpen ? "models" : ws.sourcesOpen ? "browse" : "library";
-  // The library's stack below the project: a chapter, then the editor on one of its pages.
   const [chapterId, setChapterId] = useState<string>();
   const [editing, setEditing] = useState(false);
   const [enter, setEnter] = useState<Enter>("none");
@@ -46,7 +46,6 @@ export function MobileApp() {
   const select = (next: Tab) => {
     setEnter("none");
     if (next === tab) {
-      // Tapping the current tab again goes to its root, as on iOS.
       if (next === "library") {
         if (editing) setEditing(false);
         else if (chapterId) setChapterId(undefined);
@@ -340,7 +339,7 @@ function ProjectScreen({ enter, onBack, onOpenChapter }: { enter: Enter; onBack:
       <input
         ref={upload}
         type="file"
-        accept="image/*"
+        accept={PAGE_ACCEPT}
         multiple
         hidden
         onChange={(event) => {
@@ -597,7 +596,7 @@ function ChapterScreen({ chapterId, enter, onBack, onOpenPage }: { chapterId: st
       <input
         ref={upload}
         type="file"
-        accept="image/*"
+        accept={PAGE_ACCEPT}
         multiple
         hidden
         onChange={(event) => {

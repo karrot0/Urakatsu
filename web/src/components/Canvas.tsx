@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { catalog, type InstalledModel } from "../api/catalog";
 import { assetHref, assetUrl, assetVersion } from "../api/client";
+import { PAGE_ACCEPT } from "../api/imports";
 import type { Page, RasterLayer, TextBlock } from "../gen/urakatsu/v1/urakatsu_pb";
 import { matches } from "../shortcuts";
 import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, chapterOf, currentPage, selectedPages, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
@@ -41,26 +42,18 @@ import { ToolBelt, isBrushTool, maxBrush } from "./ToolBelt";
 type Pt = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };
 type Gesture =
-  // A move is not re-rendered per pointer move: the block is drawn on its own layer, shifted by a CSS transform.
   | { kind: "move"; id: string; start: Pt; origin: Pt[]; points: Pt[] }
-  // Free transform, Photoshop style: `box` is the frame's oriented box when the drag started.
   | { kind: "transform"; id: string; mode: "resize" | "rotate"; handle: number; box: OBox; origin: Pt[]; start: Pt; points: Pt[]; readout: string }
   | { kind: "text"; start: Pt; rect: Rect }
   | { kind: "pan"; client: Pt; scroll: Pt }
-  // A stroke is not re-rendered per pointer move either: segments go straight onto `target`.
   | { kind: "stroke"; tool: "draw" | "eraser" | "remove" | "decensor"; target: HTMLCanvasElement; layer?: RasterLayer }
   | { kind: "select"; shape: FillShape; start: Pt; points: Pt[] }
   | { kind: "compare"; bounds: Rect };
-// A generative fill selection: a closed polygon in page pixels.
 type Selection = { pageId: string; points: Pt[] };
-// Before/after comparison of a selection's fills: the artwork under it before the first fill
-// (`url`, cropped to `bounds`), shown left of the divider at `position` (0 to 1) once a fill succeeds.
 type Comparison = { selection: Selection; bounds: Rect; url: string; ready: boolean; position: number };
 
 const NUDGE_DIRECTIONS: Record<(typeof NUDGES)[number], [number, number]> = { nudge_left: [-1, 0], nudge_right: [1, 0], nudge_up: [0, -1], nudge_down: [0, 1] };
 
-// Free transform handles in the box's own axes, clockwise from the top-left corner: u and v are
-// -1, 0 or 1 across the width and height, so 0 marks an edge's midpoint.
 const HANDLES = [
   [-1, -1],
   [0, -1],
@@ -72,7 +65,6 @@ const HANDLES = [
   [-1, 0],
 ] as const;
 const CORNERS = [0, 2, 4, 6];
-// Handle marks in screen pixels: square corners, bars along the edges, and the area that grabs them.
 const HANDLE_CORNER = 8;
 const HANDLE_BAR = 14;
 const HANDLE_THICK = 5;
@@ -82,7 +74,6 @@ const HANDLE_SHAPE =
 const MIN_FRAME = 4; // page pixels
 const ROTATE_SNAP = Math.PI / 12; // 15 degrees, with Shift
 
-/** A rotated rectangle: center, size and angle (radians, clockwise on screen). */
 type OBox = { cx: number; cy: number; w: number; h: number; angle: number };
 
 /**
@@ -208,16 +199,12 @@ const REGION_KIND = {
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
-// Camera clamp: the page can be scrolled until only this much of it is still on screen.
 const MIN_OVERLAP = 100;
-// Arrow keys move the selected block by 1 page pixel, 10 with Shift; one edit is saved once the keys rest.
 const NUDGE = 1;
 const NUDGE_FAST = 10;
 const NUDGE_COMMIT_MS = 400;
-// A selection smaller than this (page pixels) on either side is a click, which clears it.
 const MIN_SELECTION = 4;
 
-// Webtoon reader: room above a page scrolled to from the sidebar, and where the choice is kept.
 const STRIP_MARGIN = 24;
 const READER_KEY = "urakatsu.webtoon-reader";
 
@@ -300,27 +287,13 @@ function toPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   );
 }
 
-/**
- * Where a raster layer's canvas stands against the server. A stroke paints the canvas first and is
- * saved when it ends, and every page revision fetches the layer again: a fetch must never paint an
- * older server image over strokes the server has not got yet. (Koharu repaints unconditionally, so a
- * stroke drawn while the previous one saves is wiped, and saved without its wiped part.)
- */
 type LayerPixels = {
-  /** Strokes begun on the canvas: a fetch that started before one is stale. */
   strokes: number;
-  /** Strokes in progress on the canvas. */
   drawing: number;
-  /** Strokes in progress or saving: the canvas is ahead of the server. */
   busy: number;
-  /** The server image has been drawn once (or the layer has none); saves wait for it. */
   loaded: boolean;
   ready: Promise<void>;
   markLoaded: () => void;
-  /**
-   * The layer version (its blob's content address) the canvas shows: set when a fetch is drawn and
-   * when a save of the canvas lands. Only the current one: an undo can bring back an older blob.
-   */
   shown?: string;
 };
 
@@ -339,21 +312,14 @@ function pixelsOf(canvas: HTMLCanvasElement): LayerPixels {
 
 const layerCanvasClass = "absolute inset-0 h-full w-full pointer-events-none rounded-[inherit]";
 
-// Dabs are stamped this fraction of the brush size apart: close enough that a hard edge stays smooth.
 const DAB_SPACING = 0.12;
 
-/** A point of a stroke and how hard the pen pressed there (0 to 1). */
 type Sample = Pt & { pressure: number };
 
-/** Pen pressure; a mouse or finger counts as pressing fully. A pen's first touch can read 0. */
 function pressureOf(event: PointerEvent): number {
   return event.pointerType === "pen" ? clamp(event.pressure, 0.05, 1) : 1;
 }
 
-/**
- * The opacity of one dab for a stroke of opacity `target`: about 1 / DAB_SPACING dabs overlap at any
- * point of a line, so their opacities compound to the target (and going over it again builds it up).
- */
 function dabAlpha(target: number): number {
   return target >= 1 ? 1 : 1 - Math.pow(1 - target, DAB_SPACING);
 }
@@ -1440,7 +1406,7 @@ export function Canvas() {
         setFileOver(false);
         if (!event.dataTransfer.files.length) return;
         event.preventDefault();
-        void ws.uploadPages(event.dataTransfer.files, addTo?.id);
+        void ws.uploadPages(event.dataTransfer, addTo?.id);
       }}
     >
       {fileOver && (
@@ -2373,7 +2339,7 @@ function EmptyCanvas() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-1 bg-canvas p-8 text-center">
       <p className="text-base leading-6 text-fg">{project.pages.length ? "No page selected." : "No pages yet."}</p>
-      <p className="max-w-[42ch] text-fg-2">{project.pages.length ? "Choose a page in the sidebar to edit it." : "Drop or paste images here to add them as pages."}</p>
+      <p className="max-w-[42ch] text-fg-2">{project.pages.length ? "Choose a page in the sidebar to edit it." : "Drop or paste images here to add them as pages. A ZIP or CBZ archive, or a folder, becomes a chapter."}</p>
       {project.pages.length === 0 && chapter && (
         <>
           <Button variant="outline" className="mt-2" onClick={() => input.current?.click()}>
@@ -2382,7 +2348,7 @@ function EmptyCanvas() {
           <input
             ref={input}
             type="file"
-            accept="image/*"
+            accept={PAGE_ACCEPT}
             multiple
             hidden
             onChange={(event) => {

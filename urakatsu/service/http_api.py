@@ -7,6 +7,7 @@ and returns the rendered page.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -96,6 +97,10 @@ def operation(body: RunBody) -> Operation:
 
 def http_error(error: Exception) -> HTTPException:
     return HTTPException(HTTP_STATUS.get(status_for(error).name, 500), message_for(error))
+
+
+# Files one import request may carry.
+IMPORT_MAX_FILES = 100_000
 
 
 def api_router(ws: Workspace) -> APIRouter:
@@ -244,6 +249,26 @@ def api_router(ws: Workspace) -> APIRouter:
             position = index + offset if index is not None else None
             pages.append(guard(ws.add_page, project_id, upload.filename or "page", data, position, chapter_id))
         return pages
+
+    @router.post("/projects/{project_id}/import", status_code=201)
+    async def import_files(project_id: str, request: Request):
+        """Images, ZIP/CBZ archives and the files of picked folders in one undo step
+        (``Workspace.import_files``). Multipart: ``files``, with ``paths[i]`` the path ``files[i]``
+        had (a folder's files keep their folders; browsers drop them from file names), and an
+        optional ``chapter_id``."""
+        # A folder of a whole series is thousands of files: past Starlette's default 1000.
+        form = await request.form(max_files=IMPORT_MAX_FILES, max_fields=IMPORT_MAX_FILES + 16)
+        try:
+            files = [item for item in form.getlist("files") if not isinstance(item, str)]
+            paths = [str(path) for path in form.getlist("paths")]
+            if paths and len(paths) != len(files):
+                raise HTTPException(400, f"{len(paths)} paths for {len(files)} files")
+            uploads = [(paths[index] if paths else upload.filename or "page", await upload.read()) for index, upload in enumerate(files)]
+            chapter = form.get("chapter_id")
+            chapter_id = chapter if isinstance(chapter, str) and chapter else None
+        finally:
+            await form.close()
+        return await asyncio.to_thread(guard, ws.import_files, project_id, uploads, chapter_id)
 
     @router.get("/projects/{project_id}/pages/{page_id}")
     def get_page(project_id: str, page_id: str):

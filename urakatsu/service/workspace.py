@@ -41,6 +41,7 @@ from urakatsu.pipeline import (
     Request,
 )
 from urakatsu.core.results import LayoutDetections
+from urakatsu.pipeline import imports
 from urakatsu.pipeline.projects import chapters_of
 from urakatsu.pipeline.scope import Bounds
 from urakatsu.pipeline.stitch import ProjectFormat, stitch
@@ -407,6 +408,16 @@ class Workspace:
     ) -> PageView:
         page = self.store.import_page(project_id, name, data, index, chapter_id)
         return self.page(project_id, page)
+
+    def import_files(self, project_id: str, uploads: list[tuple[str, bytes]], chapter_id: str | None = None) -> dict:
+        """Images, ZIP/CBZ archives and folders' files, each ``(path it had, bytes)``, added in one
+        undo step: archives and folders as chapters, loose images to ``chapter_id``
+        (``imports.gather``, ``ProjectStore.import_chapters``). Returns the new pages' ids."""
+        batch = imports.gather(uploads)
+        if not batch.pages:
+            raise ValueError("found no images to import (Urakatsu imports images, folders of images, and ZIP or CBZ archives)")
+        pages = self.store.import_chapters(project_id, batch.chapters, batch.loose, chapter_id)
+        return {"pages": pages, "chapters": len(batch.chapters)}
 
     def remove_page(self, project_id: str, page_id: str) -> ProjectView:
         self._idle(project_id)

@@ -4,6 +4,7 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { assetUrl, assetVersion, client, describeError, forgetAssets, uploadPageSources } from "../api/client";
+import { collect, importFiles, needsImport, type Incoming, type PageSource } from "../api/imports";
 import { challengeOf, type CatalogRuntime, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
 import type { RichStyle } from "../richText";
@@ -152,9 +153,7 @@ interface State {
   projects: ProjectSummary[];
   project?: Project;
   pageId?: string;
-  /** Pages picked in the sidebar with Shift/Ctrl, in project order; see ``selectedPages``. */
   pageSelection: string[];
-  /** Where a Shift-click range starts: the last page clicked without Shift. */
   pageAnchor?: string;
   blockId?: string;
   rasterId?: string;
@@ -165,27 +164,21 @@ interface State {
   shortcuts: Record<ShortcutAction, string>;
   settingsOpen: boolean;
   settingsTab?: string;
-  /** Settings was opened from the Models page, so closing it goes back there. */
   settingsFromModels?: boolean;
-  /** Settings was opened from the source browser, so closing it goes back there. */
   settingsFromSources?: boolean;
   modelsOpen: boolean;
-  /** What the Models page searches for when it opens, when something sent the user there for a model. */
   modelsSearch?: { runtime: CatalogRuntime; query: string };
-  /** The source browser, linking a series to the open project or to a new one. */
   sourcesOpen: boolean;
-  /** The open project's source link; null when it has none, undefined while loading. */
   link?: LinkView | null;
-  /** The built-in browser, open on a site check (or any page); `resume` runs once it closes. */
   browser?: Challenge & { resume?: () => void };
   runScope: RunScope;
   runStages: StageName[];
   theme: Theme;
-  /** Color theme (neutral temperature and accent), independent of light/dark. */
   palette: Palette;
   showBlocks: boolean;
   showRegions: boolean;
   job?: JobState;
+  importing?: number;
   error?: string;
 }
 
@@ -198,9 +191,7 @@ export interface ChapterLayout {
 interface Actions {
   refresh(): Promise<void>;
   refreshModels(): Promise<void>;
-  /** Re-reads a project after the server changed it (an agent's edits). */
   reloadProject(projectId: string): Promise<void>;
-  /** Opens a project at ``pageId`` when it has that page, else at its first page. */
   openProject(id: string, pageId?: string): Promise<void>;
   closeProject(): void;
   createProject(name: string): Promise<void>;
@@ -208,14 +199,12 @@ interface Actions {
   deleteProject(id: string): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
-  uploadPages(files: FileList | File[], chapterId?: string): Promise<void>;
+  uploadPages(source: PageSource, chapterId?: string): Promise<void>;
   removePage(pageId: string): Promise<void>;
-  /** Replaces pages' source images in one undo step; each page keeps its text and layers, scaled to its new image. */
   swapPageSources(swaps: [pageId: string, file: File][]): Promise<void>;
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
   deleteChapter(chapterId: string): Promise<void>;
-  /** Webtoon: joins the chapter's pages and cuts them again where no text is cut. */
   restitchChapter(chapterId: string): Promise<void>;
   setProjectFormat(format: ProjectFormatInit): Promise<void>;
   arrange(layout: ChapterLayout[]): Promise<void>;
@@ -241,13 +230,8 @@ interface Actions {
   setRunStages(stages: StageName[]): void;
   setLayerVisibility(layerIds: string[], visible?: boolean, opacity?: number): Promise<void>;
   moveLayer(layerId: string, delta: number): Promise<void>;
-  /**
-   * Replaces a raster layer's pixels; with `at`, `png` is a patch replacing only its rectangle there.
-   * Resolves to the saved page, or undefined when the save failed (the error is reported).
-   */
   setRasterLayer(kind: "paint" | "cleanup", layerId: string | undefined, png: Uint8Array, at?: { x: number; y: number }): Promise<Page | undefined>;
   deleteLayer(layerId: string): Promise<void>;
-  /** A new, empty paint layer above the selected raster layer (or on top), which becomes the selected one. */
   addRasterLayer(): Promise<void>;
   setTheme(theme: Theme): void;
   setPalette(palette: Palette): void;
@@ -314,7 +298,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     brush: loadJson<Brush>(BRUSH_KEY, { color: "#000000", diameter: 24, pressureSize: true, pressureOpacity: true }),
     fillShape: loadJson<{ shape: FillShape }>(FILL_KEY, { shape: "rect" }).shape,
     shortcuts: loadJson(SHORTCUTS_KEY, DEFAULT_SHORTCUTS),
-    // The view the URL names (/settings, /models, /sources); a project opens once loaded.
     settingsOpen: initialRoute.view === "settings",
     settingsTab: initialRoute.tab,
     modelsOpen: initialRoute.view === "models",
@@ -390,10 +373,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     async (id: string, pageId?: string) => {
       try {
         const project = await client.getProject({ projectId: id });
-        // Start on the wanted page: selecting the first one first would load its image for nothing.
         const page = project.pages.some((p) => p.id === pageId) ? pageId : project.pages[0]?.id;
-        // Fetch that page's image while the workspace renders: the canvas asks for it only after mounting,
-        // and assetUrl hands it this same request. A failure is left to the canvas's own request.
         const first = project.pages.find((p) => p.id === page);
         if (first) void assetUrl(id, first.id, "source", assetVersion(first, "source")).catch(() => undefined);
         setState((s) => ({ ...s, project, link: undefined, pageId: page, blockId: undefined, job: undefined, view: "source" }));
@@ -506,12 +486,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const uploadPages = useCallback(
-    async (files: FileList | File[], chapterId?: string) => {
+    async (source: PageSource, chapterId?: string) => {
+      const picked = collect(source);
       const project = state.project;
       if (!project) return;
-      const list = Array.from(files).filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(f.name));
+      let items: Incoming[];
+      try {
+        items = await picked;
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (needsImport(items)) {
+        setState((s) => ({ ...s, importing: (s.importing ?? 0) + items.length }));
+        try {
+          const { pages } = await importFiles(project.id, items, chapterId);
+          await reloadProject(project.id);
+          setState((s) => ({ ...s, pageId: s.pageId ?? pages[0] }));
+        } catch (error) {
+          fail(error);
+        } finally {
+          setState((s) => ({ ...s, importing: Math.max(0, (s.importing ?? 0) - items.length) || undefined }));
+        }
+        return;
+      }
+      const list = items.map((item) => item.file);
       list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-      // Images dropped into an empty chapter of a webtoon project are one strip: restitch them.
       const target = chapterId ? project.chapters.find((c) => c.id === chapterId) : project.chapters[project.chapters.length - 1];
       const stitchAfter = project.format?.kind === "webtoon" && list.length > 1 && (!target || target.pageIds.length === 0);
       try {
