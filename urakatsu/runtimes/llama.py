@@ -66,6 +66,11 @@ class LlamaServer:
         tokens = response.raise_for_status().json().get("tokens") or []
         return tokens[0].get("piece", "") if tokens and isinstance(tokens[0], dict) else ""
 
+    def count_tokens(self, text: str) -> int:
+        """How many tokens ``text`` is for the loaded model (``POST /tokenize``)."""
+        response = self.process.client.post("/tokenize", json={"content": text, "add_special": True})
+        return len(response.raise_for_status().json().get("tokens") or [])
+
     def strip_bos(self, prompt: str) -> str:
         """A rendered chat template starts with BOS; the server adds its own, so drop ours (one BOS)."""
         bos = self.bos_text

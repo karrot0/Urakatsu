@@ -22,6 +22,8 @@ export interface KnowledgeEntry {
 
 export interface Knowledge {
   enabled: boolean;
+  /** Story so far: the translator summarizes each page and later pages read the summaries. */
+  story: boolean;
   entries: KnowledgeEntry[];
 }
 
@@ -29,8 +31,14 @@ export type KnowledgeInput = Pick<KnowledgeEntry, "kind" | "source" | "aliases" 
 
 export interface RetrievedKnowledge {
   glossary: { source: string; translation: string; note: string }[];
+  /** Pinned notes, sent with every page. */
+  background: string[];
   notes: string[];
+  /** Summaries of earlier pages, one string per chapter. */
+  story: string[];
   context: { source: string; translation: string }[];
+  /** This page's own summary, written when it was translated with Story so far on. */
+  summary: string;
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
@@ -42,5 +50,6 @@ export const knowledge = {
   update: (projectId: string, entryId: string, entry: KnowledgeInput) => call<Knowledge>(`${root(projectId)}/entries/${encodeURIComponent(entryId)}`, json("PATCH", entry)),
   remove: (projectId: string, entryId: string) => call<void>(`${root(projectId)}/entries/${encodeURIComponent(entryId)}`, { method: "DELETE" }),
   setEnabled: (projectId: string, enabled: boolean) => call<Knowledge>(`${root(projectId)}/enabled`, json("PUT", { enabled })),
+  setStory: (projectId: string, enabled: boolean) => call<Knowledge>(`${root(projectId)}/story`, json("PUT", { enabled })),
   page: (projectId: string, pageId: string) => call<RetrievedKnowledge>(`${root(projectId)}/pages/${encodeURIComponent(pageId)}`),
 };

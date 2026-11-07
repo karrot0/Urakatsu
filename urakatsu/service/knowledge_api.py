@@ -1,8 +1,9 @@
 """JSON routes for a project's knowledge (``urakatsu.pipeline.knowledge``), under ``/api/v1``.
 
-``/projects/{id}/knowledge`` is the glossary and notes; ``.../knowledge/pages/{page_id}`` is
-what retrieval picks for a page, so the user can see what the translator will get. Every
-route is a plain ``def``: changes write the project state to disk.
+``/projects/{id}/knowledge`` is the glossary and notes; ``.../knowledge/story`` turns Story so
+far on or off; ``.../knowledge/pages/{page_id}`` is what retrieval picks for a page, and the
+page's own summary, so the user can see what the translator will get. Every route is a plain
+``def``: changes write the project state to disk.
 """
 
 from __future__ import annotations
@@ -82,6 +83,10 @@ def knowledge_router(workspace: Workspace) -> APIRouter:
     def set_enabled(project_id: str, body: EnabledBody):
         return changed(project_id, _guard(lambda: knowledge.set_enabled(workspace.session(project_id), body.enabled)))
 
+    @router.put("/projects/{project_id}/knowledge/story")
+    def set_story(project_id: str, body: EnabledBody):
+        return changed(project_id, _guard(lambda: knowledge.set_story(workspace.session(project_id), body.enabled)))
+
     @router.get("/projects/{project_id}/knowledge/pages/{page_id}")
     def retrieved(project_id: str, page_id: str):
         from urakatsu.pipeline.stages.translation import retrieve  # the stage's imports are heavy; loaded on first use
@@ -96,7 +101,11 @@ def knowledge_router(workspace: Workspace) -> APIRouter:
                 if source is not None and source.text.value.strip():
                     targets.append((content, source.text.value))
             provider = registry.get(Stage.TRANSLATION, workspace.config.provider_for(Stage.TRANSLATION))
-            return asdict(retrieve(scene, page_id, targets, language(), provider.context_budget))
+            budget, _ = workspace.config.translation.prompt_limits(provider.context_budget)
+            picked = asdict(retrieve(scene, page_id, targets, language(), budget))
+            found = knowledge.summary(scene, page_id)
+            picked["summary"] = found.text if found is not None else ""
+            return picked
 
         return _guard(pick)
 

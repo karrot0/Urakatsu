@@ -81,6 +81,15 @@ class GenerationConfig(BaseModel):
         )
 
 
+# Prompt sizes (not in Koharu): (knowledge tokens per page, longest side of the page image).
+# A provider's own ``context_budget`` still caps the tokens (a local model's window is small).
+PROMPT_SIZES: dict[str, tuple[int, int]] = {
+    "lean": (1000, 1024),
+    "balanced": (2500, 1536),
+    "full": (6000, 2048),
+}
+
+
 class TranslationConfig(BaseModel):
     """``TranslationConfig``."""
 
@@ -88,6 +97,13 @@ class TranslationConfig(BaseModel):
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     target_language: str = "en-US"
     instructions: Optional[str] = None
+    # How much each request carries besides the page's text: "lean" costs least, "full" is upstream's.
+    prompt_size: Literal["lean", "balanced", "full"] = "balanced"
+
+    def prompt_limits(self, provider_budget: int) -> tuple[int, int]:
+        """``(knowledge tokens, image side)`` for a provider whose own budget is ``provider_budget``."""
+        tokens, side = PROMPT_SIZES.get(self.prompt_size, PROMPT_SIZES["balanced"])
+        return min(tokens, provider_budget), side
 
 
 class ModelChoice(BaseModel):

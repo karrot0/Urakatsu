@@ -113,7 +113,7 @@ class GeminiTranslator(RemoteTranslator):
         api_key = self.api_key()
         model = self.model_id()
         system, user = prompt.prompts(request)
-        schema = prompt.output_schema(len(request.segments))
+        schema = prompt.output_schema(len(request.segments), request.summarize)
         parts: list[dict[str, Any]] = [{"text": user}]
         if request.image is not None:
             parts.append(

@@ -165,7 +165,19 @@ class Knowledge(Component):
 
     KIND: ClassVar[str] = "dev.urakatsu.knowledge"
     enabled: bool = True
+    # Story so far: the translator summarizes each page and later pages get the summaries.
+    story: bool = False
     entries: list[KnowledgeEntry] = Field(default_factory=list)
+
+
+class PageSummary(Component):
+    """Urakatsu extension, on a page entity: what happens on the page, written by the translator
+    when Story so far is on (``urakatsu/pipeline/knowledge.py``). A user's edit is kept."""
+
+    KIND: ClassVar[str] = "dev.urakatsu.page.summary"
+    text: str = ""
+    language: Optional[str] = None
+    origin: Origin = Field(default_factory=UserOrigin)
 
 
 class Page(Component):
@@ -494,6 +506,7 @@ COMPONENTS: dict[str, type[Component]] = {
         Project,
         Chapters,
         Knowledge,
+        PageSummary,
         Page,
         EntityOrigin,
         OcrAnalysis,

@@ -182,13 +182,15 @@ def test_sound_effect_segments_are_tagged_and_explained():
     system, user = prompts(request)
     payload = json.loads(user)
     assert payload["segments"] == [{"id": 0, "text": "ドン", "kind": "sound_effect"}, {"id": 1, "text": "行くぞ"}]
-    assert "Sound effect requirements" in system
+    assert '"kind": "sound_effect"' in system
 
 
-def test_requests_without_sound_effects_are_unchanged():
-    system, user = prompts(TranslationRequest(segments=["行くぞ"], target_language="en-US"))
+def test_requests_without_sound_effects_keep_the_same_system_prompt():
+    plain = TranslationRequest(segments=["行くぞ"], target_language="en-US")
+    system, user = prompts(plain)
     assert json.loads(user)["segments"] == [{"id": 0, "text": "行くぞ"}]
-    assert "Sound effect" not in system
+    # One system prompt for every page of a run, so providers can cache it.
+    assert system == prompts(TranslationRequest(segments=["ドン"], target_language="en-US", sound_effects=frozenset({0})))[0]
 
 
 # ---- redraw stage ---------------------------------------------------------------------------------

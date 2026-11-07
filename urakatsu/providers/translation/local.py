@@ -17,7 +17,9 @@ Divergences, all in the inference plumbing:
   ``x-guidance`` whitespace options upstream sets are not sent.
 - The image is sent as PNG (lossless) instead of raw pixels.
 - The context window is fixed at ``N_CTX`` tokens when the model loads, instead of being
-  sized per request; a prompt that does not fit fails the request.
+  sized per request. Before a request, the prompt is counted with the server's tokenizer and
+  project knowledge is dropped, least useful first, until the prompt, the reply's
+  ``max_tokens`` and an image reserve fit; only a page whose own text is too long fails.
 - Chat templates also get ``strftime_now``, as in Transformers and llama.cpp; Mistral-style
   templates call it to date their default system prompt, and upstream does not define it.
 """
@@ -50,6 +52,9 @@ from .model import Model, Quantization
 
 # prompt plus generation must fit; one window for the loaded model.
 N_CTX = 8192
+# Tokens kept for a page image through a vision projector, and spare room for the count.
+IMAGE_RESERVE = 1600
+FIT_MARGIN = 64
 
 
 @dataclass
@@ -237,13 +242,26 @@ class LocalTranslator(TranslatorProvider):
         if not descriptor.supports_language(request.target_language):
             raise UnsupportedLanguage(self.id, request.target_language.display_name)
         enable_thinking = bool(generation.reasoning) and descriptor.reasoning
-        system, payload = prompt.prompts(request)
-        schema = prompt.output_schema(len(request.segments))
         options = sampling_options(descriptor, generation)
+        system, payload = await asyncio.to_thread(self._fit, request, enable_thinking, options.max_tokens)
+        schema = prompt.output_schema(len(request.segments), request.summarize)
         text = await asyncio.to_thread(
             self._infer, system, payload, request.image, enable_thinking, schema, options
         )
         return prompt.translations(self.id, text, request.segments)
+
+    def _fit(self, request: TranslationRequest, enable_thinking: bool, max_tokens: int) -> tuple[str, str]:
+        """The prompts, after dropping knowledge (``TranslationRequest.trim``) until they, the reply and
+        the image fit ``N_CTX``. A page whose own text does not fit is sent as is and fails in llama.cpp."""
+        server = self._server
+        room = N_CTX - max_tokens - FIT_MARGIN - (IMAGE_RESERVE if request.image is not None else 0)
+        while True:
+            system, payload = prompt.prompts(request)
+            if server is None:
+                return system, payload
+            rendered = self._render([{"role": "system", "content": system}, {"role": "user", "content": payload}], enable_thinking)
+            if server.count_tokens(server.strip_bos(rendered)) <= room or not request.trim():
+                return system, payload
 
     def _infer(
         self,

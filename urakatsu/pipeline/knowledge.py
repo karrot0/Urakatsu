@@ -10,12 +10,25 @@ undoable commit. It holds entries of two uses:
 
 The project's own pages are the third source and need no storage: lines around the page and
 earlier lines that resemble it become ``TranslationRequest.context``, and a line the user
-edited outranks a generated one, so a correction carries forward.
+edited outranks a generated one, so a correction carries forward. A line that names a glossary
+entry but does not use its translation is left out: it would teach the model a rendering the
+user has since replaced. Lines with no words in them ("…", "!?") and repeats are left out too.
 
 Retrieval is lexical (BM25 over words and CJK character bigrams): no model to load, and it
-finds proper nouns exactly. A note in another language than the page is found through the
-glossary, whose matched names and translations join the query. Everything is limited to the
-provider's ``context_budget``, spent glossary first.
+finds proper nouns exactly. A CJK name of four or more characters also matches with one
+character wrong, missing or extra, since OCR misreads one now and then. A note in another
+language than the page is found through the glossary, whose matched names and translations
+join the query, and through the translations of the pages just before it.
+
+Pinned notes are the ``background``: the same for every page, so providers put them in the
+system prompt, where prompt caching (hosted APIs) and KV reuse (llama.cpp) can keep them.
+
+Story so far (``Knowledge.story``, off by default): the translator also writes a sentence or
+two on what happens on the page (``PageSummary``), and later pages get the latest of those,
+grouped by chapter. It costs a few output tokens per page instead of a separate summary call,
+and needs nothing from a provider beyond the shared output schema.
+
+Everything is limited to the provider's ``context_budget``, spent glossary first.
 """
 
 from __future__ import annotations
@@ -34,7 +47,7 @@ from pydantic import BaseModel, Field
 
 from urakatsu.providers.translation.backend import TranslationContext, TranslationTerm
 from urakatsu.scene import Generation, Relations, Session, Snapshot, SourceText, TextGroup, TextRole, Translation, generated, is_user, user
-from urakatsu.scene.components import Knowledge, KnowledgeEntry
+from urakatsu.scene.components import Chapters, Knowledge, KnowledgeEntry, PageSummary
 
 PRODUCER = "dev.urakatsu.knowledge"
 SERIES_ENTRY = "series"  # the note written from the linked source's series facts
@@ -50,7 +63,15 @@ MEMORY_COMMON_MINIMUM = 50
 # Shares of the budget; what one leaves unused passes to the next.
 GLOSSARY_SHARE = 0.4
 NOTES_SHARE = 0.5
+STORY_SHARE = 0.3
 MEMORY_SHARE = 1 / 3
+# OCR misreads a character now and then; a CJK name this long still matches with one edit.
+FUZZY_MINIMUM = 4
+# A target-language word in more than this share of note chunks says nothing about which to pick.
+BRIDGE_COMMON = 0.5
+BRIDGE_WEIGHT = 0.5
+BRIDGE_PAGES = 2
+SUMMARY_CHARS = 300
 BM25_K1 = 1.2
 BM25_B = 0.75
 
@@ -86,15 +107,50 @@ def estimate_tokens(text: str) -> int:
     return wide * 3 // 2 + (len(text) - wide) // 4 + 1
 
 
-def mentioned(name: str, text: str, compact: str) -> bool:
+def mentioned(name: str, text: str, compact: str, fuzzy: bool = False) -> bool:
     """Whether normalized ``text`` names ``name``. OCR puts stray spaces in CJK, so that compares
-    without spaces (``compact``); a Latin name must stand alone, or "Al" would match "also"."""
+    without spaces (``compact``); a Latin name must stand alone, or "Al" would match "also".
+    ``fuzzy`` lets a CJK name of FUZZY_MINIMUM characters or more be one edit off."""
     name = normalize(name).strip()
     if not name:
         return False
     if name.isascii():
         return re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", text) is not None
-    return "".join(name.split()) in compact
+    name = "".join(name.split())
+    if name in compact:
+        return True
+    return fuzzy and len(name) >= FUZZY_MINIMUM and _near(name, compact)
+
+
+def _one_edit(a: str, b: str) -> bool:
+    """Whether ``a`` and ``b`` differ by at most one substitution, insertion or deletion."""
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    if len(a) > len(b):
+        a, b = b, a
+    for index, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return a[index:] == b[index + 1 :]
+    return True
+
+
+def _near(name: str, compact: str) -> bool:
+    """Whether ``compact`` holds ``name`` with one edit. One edit leaves a half of the name intact,
+    so only the windows around each place a half occurs are compared."""
+    half = len(name) // 2
+    left, right = name[:half], name[half:]
+    sizes = (len(name) - 1, len(name), len(name) + 1)
+    for part, anchored_left in ((left, True), (right, False)):
+        start = compact.find(part)
+        while start != -1:
+            for size in sizes:
+                begin = start if anchored_left else start + len(part) - size
+                if begin >= 0 and begin + size <= len(compact) and _one_edit(name, compact[begin : begin + size]):
+                    return True
+            start = compact.find(part, start + 1)
+    return False
 
 
 def _chunks(text: str) -> list[str]:
@@ -119,8 +175,9 @@ def _chunks(text: str) -> list[str]:
     return chunks
 
 
-def rank(documents: list[tuple[str, ...]], query: Iterable[str]) -> list[tuple[int, float]]:
-    """BM25: ``(document index, score)`` of the documents sharing a query token, best first."""
+def rank(documents: list[tuple[str, ...]], query: Iterable[str], weights: Optional[dict[str, float]] = None) -> list[tuple[int, float]]:
+    """BM25: ``(document index, score)`` of the documents sharing a query token, best first.
+    ``weights`` scales a token's part of the score (1 when absent)."""
     if not documents:
         return []
     frequency: Counter[str] = Counter()
@@ -129,13 +186,14 @@ def rank(documents: list[tuple[str, ...]], query: Iterable[str]) -> list[tuple[i
     average = sum(len(tokens) for tokens in documents) / len(documents)
     scored = []
     terms = set(query)
+    weights = weights or {}
     for index, tokens in enumerate(documents):
         counts = Counter(tokens)
         score = 0.0
         for term in terms & counts.keys():
             idf = math.log(1 + (len(documents) - frequency[term] + 0.5) / (frequency[term] + 0.5))
             denominator = counts[term] + BM25_K1 * (1 - BM25_B + BM25_B * len(tokens) / max(average, 1))
-            score += idf * counts[term] * (BM25_K1 + 1) / denominator
+            score += weights.get(term, 1.0) * idf * counts[term] * (BM25_K1 + 1) / denominator
         if score > 0:
             scored.append((index, score))
     return sorted(scored, key=lambda item: item[1], reverse=True)
@@ -147,8 +205,14 @@ def rank(documents: list[tuple[str, ...]], query: Iterable[str]) -> list[tuple[i
 @dataclass
 class Retrieved:
     glossary: list[TranslationTerm] = field(default_factory=list)
+    # Pinned notes: the same for every page.
+    background: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # What happened on earlier pages, oldest first, one string per chapter (Story so far).
+    story: list[str] = field(default_factory=list)
     context: list[TranslationContext] = field(default_factory=list)
+    # Whether the translator should write this page's summary.
+    summarize: bool = False
 
 
 @dataclass
@@ -185,14 +249,18 @@ def _lines(scene: Snapshot, page: str, language: str, ignore_role: Optional[str]
     return lines
 
 
-def _fits(items: list, cost: Callable, budget: int) -> tuple[list, int]:
-    """The leading ``items`` that fit ``budget``, and what they cost."""
+def _fits(items: list, cost: Callable, budget: int, ordered: bool = False) -> tuple[list, int]:
+    """The ``items`` that fit ``budget`` in turn, and what they cost. An item too large is passed
+    over so the smaller ones after it still go, unless the items are ``ordered`` (lines in reading
+    order, where a gap would mislead): those stop at the first that does not fit."""
     kept = []
     spent = 0
     for item in items:
         price = cost(item)
         if spent + price > budget:
-            break
+            if ordered:
+                break
+            continue
         kept.append(item)
         spent += price
     return kept, spent
@@ -210,7 +278,7 @@ def _glossary(entries: list[KnowledgeEntry], texts: list[str], language: str) ->
     """Entries the page names, as terms: a translation for another language is left out, its note kept."""
     text = normalize("\n".join(texts))
     compact = "".join(text.split())
-    matched = [entry for entry in entries if any(mentioned(name, text, compact) for name in _names(entry))]
+    matched = [entry for entry in entries if any(mentioned(name, text, compact, fuzzy=True) for name in _names(entry))]
     # The user's entries first, so they survive the budget.
     matched.sort(key=lambda entry: not is_user(entry.origin))
     terms = []
@@ -221,9 +289,13 @@ def _glossary(entries: list[KnowledgeEntry], texts: list[str], language: str) ->
     return terms, matched
 
 
-def _notes(entries: list[KnowledgeEntry], matched: list[KnowledgeEntry], texts: list[str]) -> list[str]:
-    """Pinned notes, then the chunks of other entries most like the page. An entry the page names
-    already sent its first chunk with its glossary term."""
+def _notes(entries: list[KnowledgeEntry], matched: list[KnowledgeEntry], texts: list[str], bridge: list[str]) -> tuple[list[str], list[str]]:
+    """``(pinned, ranked)``: pinned notes, and the chunks of other entries most like the page. An
+    entry the page names already sent its first chunk with its glossary term.
+
+    ``bridge`` is target-language text from just before the page: its words find a note written
+    in that language when the page names nothing in the glossary. They weigh half, and a word in
+    most chunks ("the", "and") is not used."""
     named = {entry.id for entry in matched}
 
     def rest(entry: KnowledgeEntry) -> list[str]:
@@ -231,9 +303,96 @@ def _notes(entries: list[KnowledgeEntry], matched: list[KnowledgeEntry], texts: 
 
     pinned = [chunk for entry in entries if entry.pinned for chunk in rest(entry)]
     chunks = [chunk for entry in entries if not entry.pinned for chunk in rest(entry)]
+    if not chunks:
+        return pinned, []
+    documents = [tokenize(chunk) for chunk in chunks]
     query = [*tokenize("\n".join(texts)), *(token for entry in matched for token in tokenize(" ".join((*_names(entry), entry.translation))))]
-    best = rank([tokenize(chunk) for chunk in chunks], query)[:NOTE_RESULTS]
-    return pinned + [chunks[index] for index, _ in best]
+    weights: dict[str, float] = {}
+    if bridge:
+        frequency: Counter[str] = Counter()
+        for tokens in documents:
+            frequency.update(set(tokens))
+        own = set(query)
+        for token in set(tokenize("\n".join(bridge))) - own:
+            if 0 < frequency[token] <= len(documents) * BRIDGE_COMMON:
+                weights[token] = BRIDGE_WEIGHT
+        query += list(weights)
+    best = rank(documents, query, weights)[:NOTE_RESULTS]
+    return pinned, [chunks[index] for index, _ in best]
+
+
+class _Renderings:
+    """The glossary's translations in one language, to tell which earlier lines still follow it."""
+
+    def __init__(self, entries: list[KnowledgeEntry], language: str):
+        self.entries = []
+        for entry in entries:
+            if entry.translation.strip() and entry.language in (None, language):
+                self.entries.append((_names(entry), _stem(normalize(entry.translation).strip())))
+
+    def follows(self, line: "_Line") -> bool:
+        """False when the line names an entry and its translation does not use the entry's."""
+        if not self.entries:
+            return True
+        source = normalize(line.source)
+        compact = "".join(source.split())
+        translation = normalize(line.translation)
+        for names, stem in self.entries:
+            if stem not in translation and any(mentioned(name, source, compact) for name in names):
+                return False
+        return True
+
+
+def _stem(translation: str) -> str:
+    """A translation without its last letters, so an inflected form still counts (Роза, Розы)."""
+    if len(translation) < 4:
+        return translation
+    return translation[: -1 if len(translation) < 7 else -2]
+
+
+def _useful(lines: Iterable["_Line"], renderings: _Renderings, seen: set[str]) -> list["_Line"]:
+    """``lines`` without wordless ones, repeats of a line in ``seen`` (which they join), and ones
+    that contradict the glossary."""
+    kept = []
+    for line in lines:
+        key = normalize(line.source).strip()
+        if key in seen or not tokenize(line.source) or not renderings.follows(line):
+            continue
+        seen.add(key)
+        kept.append(line)
+    return kept
+
+
+def summary(scene: Snapshot, page: str) -> Optional[PageSummary]:
+    state = scene.state.pages.get(page)
+    if state is None:
+        return None
+    return state.entities[page].components.get(PageSummary.KIND)
+
+
+def _story(scene: Snapshot, order: list[str], position: int, budget: int) -> list[str]:
+    """The latest page summaries before ``position`` that fit ``budget``, oldest first, one string per
+    chapter: "Chapter 3: summary summary ..."."""
+    chapters = scene.project_component(Chapters)
+    names = {each: chapter.name for chapter in (chapters.chapters if chapters else []) for each in chapter.pages}
+    picked: list[tuple[str, str]] = []
+    spent = 0
+    for each in reversed(order[:position]):
+        found = summary(scene, each)
+        if found is None or not found.text.strip():
+            continue
+        price = estimate_tokens(found.text) + 1
+        if spent + price > budget:
+            break
+        spent += price
+        picked.append((names.get(each, ""), found.text.strip()))
+    story: list[tuple[str, list[str]]] = []
+    for chapter, text in reversed(picked):
+        if story and story[-1][0] == chapter:
+            story[-1][1].append(text)
+        else:
+            story.append((chapter, [text]))
+    return [f"{chapter}: {' '.join(texts)}" if chapter else " ".join(texts) for chapter, texts in story]
 
 
 def _memory(segments: list[str], lines: list[_Line]) -> list[_Line]:
@@ -287,35 +446,49 @@ def retrieve(
     result = Retrieved()
     if not stored.enabled or not segments:
         return result
+    result.summarize = stored.story
+
+    def cost(line: _Line) -> int:
+        return estimate_tokens(line.source + line.translation) + 2
 
     terms, matched = _glossary(stored.entries, segments, language)
     result.glossary, spent = _fits(terms, lambda term: estimate_tokens(f"{term.source}{term.translation}{term.note}"), int(budget * GLOSSARY_SHARE))
     budget -= spent
-    result.notes, spent = _fits(_notes(stored.entries, matched, segments), estimate_tokens, int(budget * NOTES_SHARE))
-    budget -= spent
 
-    def cost(line: _Line) -> int:
-        return estimate_tokens(line.source + line.translation)
-
-    # The rest of this page, when only part of it is being translated, reads closest of all.
-    neighbours, spent = _fits(_lines(scene, page, language, ignore_role, targets), cost, budget)
-    budget -= spent
+    renderings = _Renderings(stored.entries, language)
+    seen: set[str] = set()
     order = scene.pages()
     position = order.index(page) if page in order else 0
     earlier = order[max(0, position - RECENT_PAGES) : position]
-    recent = [line for each in earlier for line in _lines(scene, each, language, ignore_role)]
-    known = {line.source for line in recent} | {line.source for line in neighbours}
+    # The rest of this page, when only part of it is being translated, reads closest of all.
+    neighbours = _useful(_lines(scene, page, language, ignore_role, targets), renderings, seen)
+    # Newest first, so a line said again keeps its latest place.
+    recent = _useful((line for each in reversed(earlier) for line in reversed(_lines(scene, each, language, ignore_role))), renderings, seen)
+
+    bridge = [line.translation for line in neighbours]
+    bridge += [line.translation for each in earlier[-BRIDGE_PAGES:] for line in _lines(scene, each, language, ignore_role)]
+    pinned, ranked = _notes(stored.entries, matched, segments, bridge)
+    share = int(budget * NOTES_SHARE)
+    result.background, spent = _fits(pinned, estimate_tokens, share)
+    result.notes, more = _fits(ranked, estimate_tokens, share - spent)
+    budget -= spent + more
+    if stored.story:
+        result.story =_story(scene, order, position, int(budget * STORY_SHARE))
+        budget -= sum(estimate_tokens(text) for text in result.story)
+
+    neighbours, spent = _fits(neighbours, cost, budget, ordered=True)
+    budget -= spent
     others = [
         line
         for each in order
         if each != page and each not in earlier
         for line in _lines(scene, each, language, ignore_role)
-        if line.source not in known
+        if normalize(line.source).strip() not in seen
     ]
-    memory, spent = _fits(_memory(segments, others), cost, int(budget * MEMORY_SHARE))
+    memory, spent = _fits(_useful(_memory(segments, others), renderings, seen), cost, int(budget * MEMORY_SHARE))
     budget -= spent
     # The lines nearest the page, kept in reading order.
-    kept, _ = _fits(list(reversed(recent)), cost, budget)
+    kept, _ = _fits(recent, cost, budget, ordered=True)
     lines = memory + list(reversed(kept)) + neighbours
     result.context = [TranslationContext(source=line.source, translation=line.translation) for line in lines]
     return result
@@ -415,6 +588,25 @@ def set_enabled(session: Session, enabled: bool) -> Knowledge:
         knowledge.enabled = enabled
 
     return _write(session, change)
+
+
+def set_story(session: Session, enabled: bool) -> Knowledge:
+    """Turns Story so far on or off. Summaries already written stay with their pages."""
+
+    def change(knowledge: Knowledge) -> None:
+        knowledge.story = enabled
+
+    return _write(session, change)
+
+
+def clean_summary(text: str) -> str:
+    """A summary as stored: one line, at most SUMMARY_CHARS, cut at a sentence end where it can be."""
+    text = " ".join(text.split())
+    if len(text) <= SUMMARY_CHARS:
+        return text
+    cut = text[:SUMMARY_CHARS]
+    end = max(cut.rfind(mark) for mark in (". ", "! ", "? ", "。"))
+    return cut[: end + 1] if end > SUMMARY_CHARS // 2 else cut.rstrip() + "…"
 
 
 def _series_text(series) -> str:

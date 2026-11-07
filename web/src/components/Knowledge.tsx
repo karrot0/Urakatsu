@@ -110,6 +110,12 @@ function KnowledgeDialog({ onClose }: { onClose: () => void }) {
             ]}
           />
           <label className="ml-auto flex items-center gap-2 text-xs text-fg-2">
+            <Tooltip content="The translator also writes a sentence on each page, and later pages read what happened so far. Adds a few output tokens per page.">
+              <span>Story so far</span>
+            </Tooltip>
+            <Switch label="Story so far" checked={data?.story ?? false} disabled={!data || !data.enabled} onChange={(story) => void act(() => api.setStory(projectId, story))} />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-fg-2">
             Use while translating
             <Switch label="Use while translating" checked={data?.enabled ?? true} disabled={!data} onChange={(enabled) => void act(() => api.setEnabled(projectId, enabled))} />
           </label>
@@ -264,7 +270,7 @@ function PageView({ projectId, pageId, enabled, revision }: { projectId: string;
     };
   }, [projectId, pageId, revision]);
 
-  const nothing = picked && !picked.glossary.length && !picked.notes.length && !picked.context.length;
+  const nothing = picked && !picked.glossary.length && !picked.background.length && !picked.notes.length && !picked.story.length && !picked.context.length;
   return (
     <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-4 px-5 pb-5">
       {error && <p className="text-xs text-danger">{error}</p>}
@@ -285,13 +291,33 @@ function PageView({ projectId, pageId, enabled, revision }: { projectId: string;
           ))}
         </Group>
       )}
-      {enabled && picked && picked.notes.length > 0 && (
-        <Group title={plural(picked.notes.length, "note")}>
+      {enabled && picked && picked.notes.length + picked.background.length > 0 && (
+        <Group title={plural(picked.notes.length + picked.background.length, "note")}>
+          {picked.background.map((note, index) => (
+            <p key={`pinned-${index}`} className="flex gap-1.5 rounded-control px-2 py-1 text-xs leading-4 whitespace-pre-wrap text-fg-2">
+              <Pin size={12} className="mt-0.5 shrink-0 text-fg-3" aria-label="Sent with every page" />
+              {note}
+            </p>
+          ))}
           {picked.notes.map((note, index) => (
             <p key={index} className="rounded-control px-2 py-1 text-xs leading-4 whitespace-pre-wrap text-fg-2">
               {note}
             </p>
           ))}
+        </Group>
+      )}
+      {enabled && picked && picked.story.length > 0 && (
+        <Group title="Story so far">
+          {picked.story.map((part, index) => (
+            <p key={index} className="rounded-control px-2 py-1 text-xs leading-4 text-fg-2">
+              {part}
+            </p>
+          ))}
+        </Group>
+      )}
+      {enabled && picked?.summary && (
+        <Group title="This page's summary">
+          <p className="rounded-control px-2 py-1 text-xs leading-4 text-fg-2">{picked.summary}</p>
         </Group>
       )}
       {enabled && picked && picked.context.length > 0 && (

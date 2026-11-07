@@ -82,7 +82,7 @@ class MiniMaxTranslator(RemoteTranslator):
                 "json_schema": {
                     "name": "manga_translation",
                     "strict": True,
-                    "schema": prompt.output_schema(len(request.segments)),
+                    "schema": prompt.output_schema(len(request.segments), request.summarize),
                 },
             }
         response = await self.post(URL, headers={"Authorization": f"Bearer {api_key}"}, json_body=body)

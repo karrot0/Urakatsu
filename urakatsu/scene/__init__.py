@@ -17,6 +17,7 @@ from .components import (
     Group,
     Knowledge,
     KnowledgeEntry,
+    PageSummary,
     OcrAnalysis,
     Page,
     Point,

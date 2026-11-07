@@ -4,6 +4,10 @@ Targets are the non-blank source texts of the page's text layers, in layer order
 restricted to the run's scope. The provider translates them as one request. Results are
 written as generated ``Translation`` values, except where the user already authored one.
 An ellipsis source keeps the ellipsis.
+
+Not in Koharu: the request carries the project's knowledge (``pipeline/knowledge.py``), sized by
+``TranslationConfig.prompt_size``; with Story so far on, a whole-page run also writes the page's
+``PageSummary`` from the reply, unless the user wrote that page's summary.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ import asyncio
 from urakatsu.pipeline import knowledge
 from urakatsu.providers.translation.backend import TranslationRequest
 from urakatsu.providers.translation.language import Language
-from urakatsu.scene import Authored, Patch, Snapshot, SourceText, Translation
+from urakatsu.scene import Authored, PageSummary, Patch, Snapshot, SourceText, Translation
 from urakatsu.scene.components import is_user
 
 from .base import StageInput, StageProcessor, finish, generation
@@ -44,17 +48,26 @@ class TranslationStage(StageProcessor):
             if source.text.value.strip():
                 targets.append((content, source.text.value))
 
-        target_language = Language.coerce(provider.settings.translation.target_language)
+        config = provider.settings.translation
+        target_language = Language.coerce(config.target_language)
+        budget, image_dimension = config.prompt_limits(provider.context_budget)
         # Other pages' text is read, not observed: an edit there must not reject this page's result.
         # Off the event loop: a long series means thousands of lines to read per page.
-        retrieved = await asyncio.to_thread(retrieve, scene, input.page, targets, target_language.tag, provider.context_budget)
+        retrieved = await asyncio.to_thread(retrieve, scene, input.page, targets, target_language.tag, budget)
+        # A summary covers the page: re-translating part of it keeps the one it has.
+        whole_page = len(targets) == len(_sources(scene, input.page))
+        summarize = retrieved.summarize and whole_page and not _user_summary(scene, input.page)
         request = TranslationRequest(
             segments=[text for _, text in targets],
             target_language=target_language,
-            instructions=provider.settings.translation.instructions,
+            instructions=config.instructions,
             context=retrieved.context,
             glossary=retrieved.glossary,
             notes=retrieved.notes,
+            background=retrieved.background,
+            story=retrieved.story,
+            summarize=summarize,
+            image_dimension=image_dimension,
             sound_effects=frozenset(i for i, (content, _) in enumerate(targets) if is_sound_effect(scene, content)),
         )
         if provider.vision_enabled():
@@ -81,4 +94,23 @@ class TranslationStage(StageProcessor):
                     language=target_language.tag,
                 ),
             )
+        written = knowledge.clean_summary(getattr(translated, "summary", "") or "") if summarize else ""
+        if written:
+            edit.set(input.page, PageSummary(text=written, language=target_language.tag))
         return finish(edit)
+
+
+def _sources(scene: Snapshot, page: str) -> list[str]:
+    """The page's text contents that have source text to translate."""
+    found = []
+    for layer in scene.text_layers(page):
+        content = scene.layer_content(layer)
+        source = scene.component(content, SourceText)
+        if source is not None and source.text.value.strip():
+            found.append(content)
+    return found
+
+
+def _user_summary(scene: Snapshot, page: str) -> bool:
+    existing = knowledge.summary(scene, page)
+    return existing is not None and is_user(existing.origin)

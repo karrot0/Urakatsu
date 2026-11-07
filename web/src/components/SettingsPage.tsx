@@ -1093,6 +1093,13 @@ const GENERATION: { key: string; title: string; integer?: boolean; min?: number;
   { key: "presence_penalty", title: "Presence penalty", min: -2, max: 2, step: 0.05 },
 ];
 
+// TranslationConfig.prompt_size (urakatsu/core/config.py PROMPT_SIZES).
+const PROMPT_SIZES: Option[] = [
+  { value: "lean", label: "Lean", detail: "~1k tokens · 1024 px" },
+  { value: "balanced", label: "Balanced", detail: "~2.5k tokens · 1536 px" },
+  { value: "full", label: "Full", detail: "~6k tokens · 2048 px" },
+];
+
 function Translation({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const translation = draft.translation!;
@@ -1165,6 +1172,9 @@ function Translation({ draft, update }: { draft: Config; update: (patch: Partial
         </PreferenceRow>
         <PreferenceRow title="Instructions" description="Added to every translation prompt." align="start">
           <CommitTextarea label="Instructions" value={draft.instructions} placeholder="Keep honorifics. Translate sound effects." onCommit={(instructions) => update({ instructions })} />
+        </PreferenceRow>
+        <PreferenceRow title="Prompt size" description="How much each page sends besides its text: project knowledge and the page image. Smaller costs less with a paid service; local models are capped to fit either way.">
+          <Select label="Prompt size" value={draft.promptSize || "balanced"} options={PROMPT_SIZES} onChange={(promptSize) => update({ promptSize })} />
         </PreferenceRow>
       </PreferenceSection>
       <PreferenceSection title="Sampling" description="Empty fields use the model's defaults.">

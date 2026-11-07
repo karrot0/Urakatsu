@@ -140,6 +140,7 @@ message Config {
   string decensor_model = 22;               // bar reconstruction model; empty keeps it
   string colorization = 23;                 // ColorizationConfig.mode: off | colorize (empty keeps it)
   string colorization_model = 24;           // colorizer; empty keeps it
+  string prompt_size = 25;                  // TranslationConfig.prompt_size: lean | balanced | full (empty keeps it)
 }
 
 message TranslationModel {

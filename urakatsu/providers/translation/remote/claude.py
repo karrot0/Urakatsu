@@ -2,7 +2,9 @@
 
 ``POST https://api.anthropic.com/v1/messages`` with ``x-api-key`` and
 ``anthropic-version: 2023-06-01``. Structured output: ``output_config.format`` =
-``json_schema`` with the shared translation schema. Reasoning maps to ``thinking``
+``json_schema`` with the shared translation schema. The system prompt is sent as one text
+block with an ephemeral ``cache_control`` breakpoint (not upstream: it sends a plain string,
+which is never cached). Reasoning maps to ``thinking``
 (``adaptive`` / ``disabled``). No retry. Models come from ``GET /v1/models``.
 API key: settings ``api_key`` or ``ANTHROPIC_API_KEY``.
 """
@@ -90,7 +92,10 @@ class ClaudeTranslator(RemoteTranslator):
         body: dict[str, Any] = {
             "model": self.model_id(),
             "max_tokens": generation.max_tokens if generation.max_tokens is not None else DEFAULT_MAX_TOKENS,
-            "system": system,
+            # The system prompt is the same for every page of a run (prompt.py), so it is cached:
+            # later pages read it at a tenth of the price. Below the model's minimum length the
+            # breakpoint does nothing and costs nothing.
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": content}],
         }
         # serde ``skip_serializing_if = "Option::is_none"``: unset options are omitted, not null.
@@ -99,7 +104,7 @@ class ClaudeTranslator(RemoteTranslator):
         if generation.reasoning is not None:
             body["thinking"] = {"type": "adaptive" if generation.reasoning else "disabled"}
         body["output_config"] = {
-            "format": {"type": "json_schema", "schema": prompt.output_schema(len(request.segments))}
+            "format": {"type": "json_schema", "schema": prompt.output_schema(len(request.segments), request.summarize)}
         }
         response = await self.post(URL, headers=_headers(api_key), json_body=body)
         text = None

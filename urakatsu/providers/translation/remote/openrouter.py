@@ -99,7 +99,7 @@ class OpenRouterTranslator(RemoteTranslator):
             "json_schema": {
                 "name": "manga_translation",
                 "strict": True,
-                "schema": prompt.output_schema(len(request.segments)),
+                "schema": prompt.output_schema(len(request.segments), request.summarize),
             },
         }
         body["provider"] = {"require_parameters": True}

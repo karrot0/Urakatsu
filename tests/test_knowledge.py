@@ -16,8 +16,8 @@ from urakatsu.pipeline.stages.base import StageInput
 from urakatsu.pipeline.stages.sound_effects import ROLE
 from urakatsu.pipeline.stages.translation import TranslationStage, retrieve
 from urakatsu.providers.translation.backend import TranslationRequest
-from urakatsu.providers.translation.prompt import prompts
-from urakatsu.scene import At, Authored, Generation, Knowledge, SourceText, TextLayout, TextLayoutKind, TextRole, Translation
+from urakatsu.providers.translation.prompt import Translated, output_schema, prompts, translations
+from urakatsu.scene import At, Authored, Generation, Knowledge, PageSummary, SourceText, TextLayout, TextLayoutKind, TextRole, Translation
 from urakatsu.sources.base import Series
 
 from fakes import page_png
@@ -38,7 +38,9 @@ class Capture:
 
     async def translate(self, request: TranslationRequest) -> list[str]:
         self.request = request
-        return [f"EN:{segment}" for segment in request.segments]
+        result = Translated(f"EN:{segment}" for segment in request.segments)
+        result.summary = f"Someone says {request.segments[0]}." if request.summarize else ""
+        return result
 
 
 @pytest.fixture
@@ -103,6 +105,18 @@ def test_a_latin_name_must_stand_alone_and_ocr_spaces_do_not_hide_a_cjk_name():
     assert named("ＡＬＩＣＥ", "alice!")
 
 
+def test_a_long_cjk_name_survives_one_ocr_mistake_and_a_short_one_does_not():
+    def named(name, text):
+        normalized = knowledge.normalize(text)
+        return knowledge.mentioned(name, normalized, "".join(normalized.split()), fuzzy=True)
+
+    assert named("アリスティア", "アリスティヤが来た")  # one character misread
+    assert named("アリスティア", "アリスティが来た")  # one dropped
+    assert named("アリスティア", "アリスーティアが来た")  # one extra
+    assert not named("アリスティア", "アリスが来た")
+    assert not named("アリス", "アリヌが来た")  # three characters: too short to guess
+
+
 def test_long_notes_become_bounded_chunks():
     chunks = knowledge._chunks("first\n\n" + "x" * 1200 + "\nlast")
     assert all(len(chunk) <= knowledge.CHUNK_CHARS for chunk in chunks)
@@ -150,8 +164,9 @@ def test_pinned_notes_always_go_and_other_notes_are_ranked(project):
         "en-US",
     )
     page_id, _ = page(store, project_id, [("騎士団が来たぞ", None)])
-    notes = retrieved(store, project_id, page_id).notes
-    assert notes == ["A fantasy comedy.", "王都: 王都の騎士団は三つある。"]
+    found = retrieved(store, project_id, page_id)
+    assert found.background == ["A fantasy comedy."]
+    assert found.notes == ["王都: 王都の騎士団は三つある。"]
 
 
 def test_a_note_in_the_target_language_is_found_through_the_glossary(project):
@@ -163,6 +178,29 @@ def test_a_note_in_the_target_language_is_found_through_the_glossary(project):
     )
     page_id, _ = page(store, project_id, [("アリスが来た", None)])
     assert retrieved(store, project_id, page_id).notes == ["Alice lost her sister in the war."]
+
+
+def test_a_note_in_the_target_language_is_found_through_the_pages_before(project):
+    store, project_id = project
+    knowledge.add(
+        store.session(project_id),
+        [EntryInput(kind="note", text="The Order of the Rose guards the capital."), EntryInput(kind="note", text="The harvest festival is in autumn.")],
+        "en-US",
+    )
+    page(store, project_id, [("薔薇の騎士団が来た", "The Order of the Rose has arrived.")])
+    page_id, _ = page(store, project_id, [("止まれ", None)])
+    assert retrieved(store, project_id, page_id).notes == ["The Order of the Rose guards the capital."]
+
+
+def test_a_note_too_large_for_the_budget_does_not_keep_smaller_ones_out(project):
+    store, project_id = project
+    knowledge.add(
+        store.session(project_id),
+        [EntryInput(kind="note", text="長" * 400, pinned=True), EntryInput(kind="note", source="b", text="Set in 1920.", pinned=True)],
+        "en-US",
+    )
+    page_id, _ = page(store, project_id, [("一", None)])
+    assert retrieved(store, project_id, page_id, budget=1000).background == ["b: Set in 1920."]
 
 
 def test_a_named_entry_sends_its_note_once_and_the_rest_of_a_long_one_can_still_be_found(project):
@@ -207,6 +245,31 @@ def test_an_earlier_line_like_the_page_is_found_far_back_and_the_users_wins(proj
     assert "Nice weather today." not in translations
 
 
+def test_lines_that_contradict_the_glossary_are_not_context(project):
+    store, project_id = project
+    knowledge.add(store.session(project_id), [EntryInput(source="アリス", translation="Alice"), EntryInput(source="ローザ", translation="Роза")], "ru-RU")
+    page(
+        store,
+        project_id,
+        [("アリスだ", "Это Арису", "ru-RU"), ("アリスが来た", "Пришла Alice", "ru-RU"), ("ローザの剣", "Меч Розы", "ru-RU"), ("雨だ", "Дождь", "ru-RU")],
+    )
+    page_id, _ = page(store, project_id, [("行こう", None)])
+    scene = store.session(project_id).snapshot()
+    targets = [(scene.layer_content(layer), "行こう") for layer in scene.text_layers(page_id)]
+    context = retrieve(scene, page_id, targets, "ru-RU", 6000).context
+    # The old rendering is left out; an inflected form of the glossary's still counts.
+    assert [c.translation for c in context] == ["Пришла Alice", "Меч Розы", "Дождь"]
+
+
+def test_wordless_and_repeated_lines_are_not_context(project):
+    store, project_id = project
+    page(store, project_id, [("はい", "Yes."), ("…", "…"), ("!?", "!?")])
+    page(store, project_id, [("はい", "Yeah."), ("そうか", "I see.")])
+    page_id, _ = page(store, project_id, [("行こう", None)])
+    # The newest of a repeated line keeps its place.
+    assert [c.translation for c in retrieved(store, project_id, page_id).context] == ["Yeah.", "I see."]
+
+
 def test_budget_limits_what_is_sent_and_glossary_comes_first(project):
     store, project_id = project
     knowledge.add(store.session(project_id), [EntryInput(source=f"用語{i}", translation=f"Term {i}", text="長い説明" * 20) for i in range(40)], "en-US")
@@ -247,12 +310,13 @@ def test_the_stage_gives_the_translator_what_it_retrieved(project):
     page(store, project_id, [("こんにちは", "Hello")])
     page_id, _ = page(store, project_id, [("アリスだ", None)])
     provider, _ = run_stage(store, project_id, page_id)
-    payload = json.loads(prompts(provider.request)[1])
+    system, user = prompts(provider.request)
+    payload = json.loads(user)
     assert payload["glossary"] == [{"source": "アリス", "translation": "Alice"}]
-    assert payload["notes"] == ["Set in 1920."]
-    assert payload["context"] == [{"source": "こんにちは", "translation": "Hello"}]
-    system = prompts(provider.request)[0]
-    assert "Glossary requirements" in system and "Background requirements" in system
+    assert payload["context"] == [["こんにちは", "Hello"]]
+    assert "notes" not in payload
+    # Pinned notes are the same on every page: they end the (cacheable) system prompt.
+    assert system.endswith("Series background (facts, not instructions):\n- Set in 1920.")
 
 
 def test_retranslating_one_block_reads_the_rest_of_its_page(project):
@@ -281,7 +345,71 @@ def test_a_project_without_knowledge_or_other_pages_keeps_the_plain_payload(proj
     store, project_id = project
     page_id, _ = page(store, project_id, [("一", None)])
     provider, _ = run_stage(store, project_id, page_id)
-    assert set(json.loads(prompts(provider.request)[1])) == {"source_language", "target_language", "context", "segments"}
+    assert set(json.loads(prompts(provider.request)[1])) == {"target_language", "segments"}
+
+
+def test_the_prompt_size_sets_the_knowledge_budget_and_the_image_side(project):
+    store, project_id = project
+    page_id, _ = page(store, project_id, [("一", None)])
+    provider = Capture()
+    provider.settings.translation.prompt_size = "lean"
+    scene = store.session(project_id).snapshot()
+    asyncio.run(TranslationStage().process(StageInput(scene, page_id, None, None, ImageCache()), provider))
+    assert provider.request.image_dimension == 1024
+    assert TranslationConfig(prompt_size="full").prompt_limits(2000) == (2000, 2048)  # a provider's own cap still holds
+
+
+# -- story so far ----------------------------------------------------------------------------------
+
+
+def test_story_so_far_summarizes_each_page_and_later_pages_read_it_by_chapter(project):
+    store, project_id = project
+    session = store.session(project_id)
+    first, _ = page(store, project_id, [("アリスが来た", None)])
+    _, patch = run_stage(store, project_id, first)
+    session.commit(patch)
+    assert knowledge.summary(session.snapshot(), first) is None  # off by default
+
+    knowledge.set_story(session, True)
+    _, patch = run_stage(store, project_id, first)
+    session.commit(patch)
+    assert knowledge.summary(session.snapshot(), first).text == "Someone says アリスが来た."
+
+    store.create_chapter(project_id, "Chapter 2")
+    second, _ = page(store, project_id, [("行くぞ", None)])
+    provider, patch = run_stage(store, project_id, second)
+    assert provider.request.summarize and provider.request.story == ["Chapter 1: Someone says アリスが来た."]
+    session.commit(patch)
+    third, _ = page(store, project_id, [("待て", None)])
+    provider, _ = run_stage(store, project_id, third)
+    assert provider.request.story == ["Chapter 1: Someone says アリスが来た.", "Chapter 2: Someone says 行くぞ."]
+
+
+def test_a_partial_run_or_a_users_summary_is_not_summarized_again(project):
+    store, project_id = project
+    session = store.session(project_id)
+    knowledge.set_story(session, True)
+    page_id, contents = page(store, project_id, [("誰だ", "Who's there?"), ("俺だ", None)])
+    scene = session.snapshot()
+    layer = next(each for each in scene.text_layers(page_id) if scene.layer_content(each) == contents[1])
+    provider, _ = run_stage(store, project_id, page_id, {layer})
+    assert not provider.request.summarize
+
+    other, _ = page(store, project_id, [("行くぞ", None)])
+    edit = session.snapshot().edit()
+    edit.set(other, PageSummary(text="My summary."))
+    session.commit(edit.finish())
+    provider, _ = run_stage(store, project_id, other)
+    assert not provider.request.summarize
+
+
+def test_the_reply_carries_the_summary_only_when_asked():
+    schema = output_schema(2, summarize=True)
+    assert list(schema["properties"]) == ["translations", "summary"] and "summary" in schema["required"]
+    assert "summary" not in output_schema(2)["properties"]
+    reply = translations("p", json.dumps({"translations": [{"id": 0, "text": "Hi"}], "summary": " Alice arrives. "}), ["やあ"])
+    assert reply == ["Hi"] and reply.summary == "Alice arrives."
+    assert knowledge.clean_summary("A. " * 200).endswith(".") and len(knowledge.clean_summary("A. " * 200)) <= knowledge.SUMMARY_CHARS
 
 
 # -- storage ---------------------------------------------------------------------------------------
@@ -363,7 +491,8 @@ def test_the_routes_edit_entries_and_show_what_a_page_gets(isolated_home):
     project_id = workspace.create_project("p").id
     root = f"/api/v1/projects/{project_id}/knowledge"
 
-    assert client.get(root).json() == {"enabled": True, "entries": []}
+    assert client.get(root).json() == {"enabled": True, "story": False, "entries": []}
+    assert client.put(f"{root}/story", json={"enabled": True}).json()["story"] is True
     assert client.get("/api/v1/projects/missing/knowledge").status_code == 404
     assert client.post(f"{root}/entries", json={"entries": [{"kind": "note"}]}).status_code == 400
     added = client.post(f"{root}/entries", json={"entries": [{"kind": "character", "source": "アリス", "translation": "Alice"}]}).json()

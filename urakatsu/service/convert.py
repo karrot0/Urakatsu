@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
+from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, PROMPT_SIZES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -238,6 +238,7 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         generation_json=config.translation.generation.model_dump_json(),
         target_language=config.translation.target_language,
         instructions=config.translation.instructions or "",
+        prompt_size=config.translation.prompt_size,
         font_families=list(config.typesetting.font_families),
         lossless_pages=config.storage.lossless_pages,
         sound_effects=config.sound_effects.mode,
@@ -300,6 +301,10 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
     if message.target_language:
         config.translation.target_language = message.target_language
     config.translation.instructions = message.instructions or None
+    if message.prompt_size:
+        if message.prompt_size not in PROMPT_SIZES:
+            raise ValueError(f"unknown prompt size {message.prompt_size!r}; expected one of {list(PROMPT_SIZES)}")
+        config.translation.prompt_size = message.prompt_size
     if message.font_families:
         config.typesetting = TypesettingConfig(font_families=list(message.font_families))
     config.storage = config.storage.model_copy(update={"lossless_pages": message.lossless_pages})

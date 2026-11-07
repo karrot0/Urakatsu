@@ -55,3 +55,37 @@ def test_strftime_now_is_the_current_local_time():
 def test_raise_exception_reaches_the_caller():
     with pytest.raises(ValueError, match="no tools"):
         render("{{ raise_exception('no tools') }}")
+
+
+def test_knowledge_is_dropped_until_the_prompt_fits_the_window():
+    from PIL import Image
+
+    from urakatsu.providers.translation import local
+    from urakatsu.providers.translation.backend import TranslationContext, TranslationRequest, TranslationTerm
+
+    class Server:
+        """Counts a character as a token; the room is set so only part of the context fits."""
+
+        def strip_bos(self, text: str) -> str:
+            return text
+
+        def count_tokens(self, text: str) -> int:
+            return len(text)
+
+    translator = LocalTranslator()
+    translator._template = "{% for m in messages %}{{ m['content'] }}{% endfor %}"
+    translator._server = Server()
+    lines = [TranslationContext(source=f"line {i}", translation=f"Line {i}") for i in range(200)]
+    request = TranslationRequest(
+        segments=["こんにちは"],
+        target_language="en-US",
+        context=list(lines),
+        glossary=[TranslationTerm(source="アリス", translation="Alice", note="A knight.")],
+        image=Image.new("RGB", (4, 4)),
+    )
+    room = local.N_CTX - 1000 - local.FIT_MARGIN - local.IMAGE_RESERVE
+    system, payload = translator._fit(request, enable_thinking=False, max_tokens=1000)
+    assert len(system) + len(payload) <= room
+    # The oldest lines go first; the newest context and the glossary stay.
+    assert 0 < len(request.context) < len(lines) and request.context[-1] == lines[-1]
+    assert request.glossary[0].note == "A knight."

@@ -1,8 +1,9 @@
 """Translation requests and page-image preparation.
 
-the longest side is capped at 2048 with Lanczos
-resampling, and hosted providers receive a JPEG (quality 88) data URL. Local models
-receive the prepared pixels losslessly (see ``local.py``).
+The longest side is capped with Lanczos resampling, and hosted providers receive a JPEG
+(quality 88) data URL. Local models receive the prepared pixels losslessly (see ``local.py``).
+Upstream caps at 2048; here the cap follows ``TranslationConfig.prompt_size`` (2048 at "full"),
+since the image is often the largest part of a paid request.
 """
 
 from __future__ import annotations
@@ -40,12 +41,42 @@ class TranslationRequest:
     source_language: Optional[Language] = None
     instructions: Optional[str] = None
     context: list[TranslationContext] = field(default_factory=list)
-    # From the project's knowledge (not in Koharu). Providers without a model prompt ignore these two.
+    # From the project's knowledge (not in Koharu). Providers without a model prompt ignore these.
     glossary: list[TranslationTerm] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Pinned notes: the same for every page, so they go in the (cacheable) system prompt.
+    background: list[str] = field(default_factory=list)
+    # Story so far: summaries of earlier pages; ``summarize`` asks for this page's in the reply.
+    story: list[str] = field(default_factory=list)
+    summarize: bool = False
     image: Optional[Image.Image] = None
+    # The longest side the page image is sent at (``TranslationConfig.prompt_size``).
+    image_dimension: int = MAX_IMAGE_DIMENSION
     # Indexes of segments that are sound effects drawn into the art (not in Koharu).
     sound_effects: frozenset[int] = frozenset()
+
+    def trim(self) -> bool:
+        """Drops the least useful piece of knowledge, for a prompt that does not fit a local model's
+        window: the oldest context line, then ranked notes, the story, glossary notes, and glossary
+        terms last. False when nothing is left to drop."""
+        if self.context:
+            self.context.pop(0)
+        elif self.notes:
+            self.notes.pop()
+        elif self.story:
+            self.story.pop(0)
+        elif self.background:
+            self.background.pop()
+        elif any(term.note for term in self.glossary):
+            for term in reversed(self.glossary):
+                if term.note:
+                    term.note = ""
+                    break
+        elif self.glossary:
+            self.glossary.pop()
+        else:
+            return False
+        return True
 
     def __post_init__(self) -> None:
         self.segments = [str(segment) for segment in self.segments]
@@ -54,15 +85,16 @@ class TranslationRequest:
             self.source_language = Language.coerce(self.source_language)
 
     def prepare_image(self) -> None:
-        """Caps the longest side at ``MAX_IMAGE_DIMENSION``."""
+        """Caps the longest side at ``image_dimension`` (``MAX_IMAGE_DIMENSION`` upstream)."""
         if self.image is None:
             return
         width, height = self.image.size
         longest = max(width, height)
-        if longest <= MAX_IMAGE_DIMENSION:
+        limit = min(self.image_dimension, MAX_IMAGE_DIMENSION)
+        if longest <= limit:
             return
-        resized_width = max(width * MAX_IMAGE_DIMENSION // longest, 1)
-        resized_height = max(height * MAX_IMAGE_DIMENSION // longest, 1)
+        resized_width = max(width * limit // longest, 1)
+        resized_height = max(height * limit // longest, 1)
         self.image = self.image.convert("RGB").resize((resized_width, resized_height), Image.Resampling.LANCZOS)
 
     def remove_image(self) -> None:

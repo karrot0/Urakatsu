@@ -95,6 +95,9 @@ async def test_claude_request_shape_and_parsing():
     assert body["temperature"] == 0.2
     assert body["thinking"] == {"type": "adaptive"}
     assert "top_p" not in body
+    # The system prompt is one cached block: the same for every page of a run.
+    [system] = body["system"]
+    assert system["type"] == "text" and system["cache_control"] == {"type": "ephemeral"} and system["text"]
     assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
     assert [block["type"] for block in body["messages"][0]["content"]] == ["text"]
     payload = json.loads(body["messages"][0]["content"][0]["text"])
