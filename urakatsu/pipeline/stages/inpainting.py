@@ -12,6 +12,10 @@ Urakatsu also flat-fills text that is in no bubble when the background around it
 the model, and a generative model with a crop of almost nothing but lettering on one colour
 paints a scene into it.
 
+Urakatsu also flat-fills a bubble that is one colour but for a little else in it (white blocks
+over a black bubble's rim, a stroke of art across it), which Koharu's strict check sends to the
+model (``dominant_region_color``).
+
 Urakatsu also fills text on a smooth gradient without the model, where the flat fill finds no one
 colour (a chapter title on a banner that fades from white to black). The same model paints a pale
 blob over such a gradient. ``fill_smooth_background`` carries the pixels around the text across it
@@ -24,6 +28,13 @@ tiles; a model that edits the crop it is given (``crop_edits``) gets only a rim 
 surroundings, since its instruction applies to everything in view. LaMa and AOT go through
 the tiling like the remove tool. Either way the result is
 committed to the Cleanup layer as a user edit.
+
+Difference from Koharu: inside a generative fill's selection the model sees the original page,
+not the Cleanup layer over it (``prepare``); outside it, the Cleanup layer stays as context. A
+retry then starts from the page as drawn instead of from the last attempt (half-drawn lettering).
+Measured on one sound effect with FLUX.2 Klein (8 runs each), this made no clear difference: the
+word came out whole in about one run in four from either input. A fill cannot build on the one
+before it; the remove tool still does.
 """
 
 from __future__ import annotations
@@ -87,6 +98,11 @@ SMOOTH_MIN_ANCHORED = 0.5
 # ran onto art the fill must not erase, so the rim keeps this far from it.
 SMOOTH_MAX_OVERFLOW = 0.1
 SMOOTH_OVERFLOW_CLEARANCE = 8
+# dominant_region_color: a bubble is one colour when this share of it (and DOMINANT_RIM_SHARE of
+# what borders its text) lies within DOMINANT_TOLERANCE of the median on every channel.
+DOMINANT_TOLERANCE = 24
+DOMINANT_SHARE = 0.9
+DOMINANT_RIM_SHARE = 0.95
 # Context around a generative fill selection, as a share of its longer side (at least TILE_CONTEXT).
 FILL_CONTEXT = 0.5
 # The same for a model that edits the whole crop it sees from an instruction (Qwen Image, FLUX.2
@@ -218,6 +234,13 @@ def prepare(input: StageInput) -> _Prepared:
 
     if input.region is not None:
         _clear_outside(mask, text_mask, input.region)
+
+    if input.inpainting_mask is not None and input.inpainting_mask.generative and cleanup is not None:
+        # Under the selection the fill model sees the page as drawn, not an earlier attempt.
+        selected = mask >= 127
+        pixels = np.asarray(source.convert("RGBA")).copy()
+        pixels[selected] = np.asarray(original.convert("RGBA"))[selected]
+        source = Image.fromarray(pixels, "RGBA")
 
     return _Prepared(
         original=original,
@@ -452,7 +475,12 @@ def fill_uniform_regions(output: np.ndarray, pending: np.ndarray, text_mask: np.
             continue
         color = uniform_region_color(output, pending, region)
         if color is None:
+            before = np.count_nonzero(pending_view >= 127)
             fill_smooth_background(output, pending, targets, region, text_area)
+            if np.count_nonzero(pending_view >= 127) != before:
+                continue  # carried across a gradient; what it left past the text is the model's
+            color = dominant_region_color(output, pending, region, targets)
+        if color is None:
             continue
         output[top:bottom, left:right][targets] = color
         pending_view[targets] = 0
@@ -665,6 +693,45 @@ def uniform_region_color(image: np.ndarray, mask: np.ndarray, region: FlatFillRe
     if max(deviations) < threshold:
         return np.array(medians, dtype=np.uint8)
     return None
+
+
+def dominant_region_color(image: np.ndarray, mask: np.ndarray, region: FlatFillRegion, targets: np.ndarray) -> Optional[np.ndarray]:
+    """One colour that nearly all of a bubble shows, and all but a little of what borders the text.
+
+    ``uniform_region_color`` rejects a bubble when anything else is in it: a black caption bubble
+    with white blocks drawn over its rim, or a stroke of art crossing it. The model then gets a
+    crop of lettering on one colour and paints a scene into it. Here the odd pixels are set aside:
+    at least DOMINANT_SHARE of the bubble, and DOMINANT_RIM_SHARE of the pixels around ``targets``
+    (the bubble's window), must lie within DOMINANT_TOLERANCE of the median, and those must be as
+    even as the strict check asks.
+    """
+    left, top, right, bottom = region.bounds
+    ys, xs = np.mgrid[top:bottom, left:right]
+    px = xs.astype(np.float32) + np.float32(0.5)
+    py = ys.astype(np.float32) + np.float32(0.5)
+    valid = (
+        (mask[top:bottom, left:right] < 127)
+        & point_in_polygon(px, py, region.polygon)
+        & (polygon_edge_distance_squared(px, py, region.polygon) >= np.float32(FLAT_FILL_EDGE_MARGIN * FLAT_FILL_EDGE_MARGIN))
+    )
+    view = image[top:bottom, left:right].astype(np.int16)
+    values = view[valid]
+    if values.shape[0] < UNIFORM_BACKGROUND_MIN_PIXELS:
+        return None
+    median = np.array([_median(values[:, channel]) for channel in range(3)], dtype=np.int16)
+    inliers = (np.abs(values - median) <= DOMINANT_TOLERANCE).all(axis=1)
+    if inliers.mean() < DOMINANT_SHARE:
+        return None
+    rim = ndimage.binary_dilation(targets, SQUARE, iterations=SMOOTH_RIM) & valid
+    rim_values = view[rim]
+    if rim_values.shape[0] < UNIFORM_BACKGROUND_MIN_PIXELS:
+        return None
+    if (np.abs(rim_values - median) <= DOMINANT_TOLERANCE).all(axis=1).mean() < DOMINANT_RIM_SHARE:
+        return None
+    deviations = np.sqrt(np.mean((values[inliers] - median).astype(np.float64) ** 2, axis=0))
+    if deviations.max() >= 10.0:
+        return None
+    return median.astype(np.uint8)
 
 
 def _median(values: np.ndarray) -> int:

@@ -89,6 +89,41 @@ def test_transient_inpainting_mask_replaces_persistent_page_masks(tmp_path):
     assert not prepared.text_mask.any()
 
 
+def _page_with_earlier_attempt(tmp_path):
+    """A black page whose Cleanup layer is opaque white everywhere: an earlier fill."""
+    session = Session(tmp_path)
+    edit = session.snapshot().edit()
+    page = edit.add_page(Page(label="page", width=8.0, height=8.0))
+    edit.set_asset(page, "source", AssetInput(data=encode_png(Image.new("RGB", (8, 8))), media_type="image/png", metadata=AssetMetadata(width=8, height=8)))
+    entity = edit.add_entity(page)
+    edit.set(entity, RasterLayer(origin=user(), name="Cleanup", kind=RasterLayerKind.CLEANUP))
+    edit.set_asset(entity, "source", AssetInput(data=encode_png(Image.new("RGBA", (8, 8), (255, 255, 255, 255))), media_type="image/png", metadata=AssetMetadata(width=8, height=8)))
+    session.commit(edit.finish())
+    selection = Image.new("L", (8, 8), 0)
+    selection.paste(255, (2, 2, 6, 6))
+    return session, page, encode_png(selection)
+
+
+def test_a_generative_fill_sees_the_original_page_under_its_selection(tmp_path):
+    # An earlier attempt in the Cleanup layer reads to an edit model as marks to erase, not as
+    # the sound effect it was asked to replace.
+    session, page, selection = _page_with_earlier_attempt(tmp_path)
+    inp = StageInput(session.snapshot(), page, None, None, ImageCache(), InpaintingMask(page=page, png=selection, prompt="CLENCH", generative=True))
+
+    pixels = np.asarray(prepare(inp).image.convert("RGB"))
+
+    assert tuple(pixels[3, 3]) == (0, 0, 0)  # the page, under the selection
+    assert tuple(pixels[0, 0]) == (255, 255, 255)  # the Cleanup layer around it
+
+
+def test_the_remove_tool_still_works_on_the_cleanup_layer(tmp_path):
+    session, page, selection = _page_with_earlier_attempt(tmp_path)
+
+    pixels = np.asarray(prepare(make_input(session.snapshot(), page, selection)).image.convert("RGB"))
+
+    assert tuple(pixels[3, 3]) == (255, 255, 255)
+
+
 def test_automatic_inpainting_skips_committed_cleanup(tmp_path):
     session, page = make_page_session(tmp_path, cleanup=True)
     snapshot = session.snapshot()
@@ -125,6 +160,36 @@ def test_uniform_mask_background_is_filled_without_inference():
 
     assert calls == []
     assert tuple(output[48, 48]) == (240, 241, 242)
+
+
+def test_a_dark_bubble_with_a_few_white_blocks_on_its_rim_is_filled_without_inference():
+    # A black caption bubble with white blocks drawn over its edge (魔法陣構築): the strict check
+    # fails on the blocks, and the model paints a scene into a crop of white lettering on black.
+    image = np.zeros((96, 96, 3), dtype=np.uint8)
+    image[10:18, 20:28] = 255
+    image[10:16, 60:70] = 255
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    image[40:56, 32:64] = 250
+    mask[38:58, 30:66] = 255
+    calls = []
+
+    output = np.asarray(inpaint_tiled(Image.fromarray(image), mask, mask, [rectangle_region((0, 0, 96, 96))], noop_inference(calls)))
+
+    assert calls == []
+    assert tuple(output[48, 48]) == (0, 0, 0)
+
+
+def test_text_bordered_by_art_in_a_mostly_flat_bubble_still_goes_to_the_model():
+    image = np.full((96, 96, 3), 245, dtype=np.uint8)
+    image[30:70, 20:36] = 30  # art right beside the lettering
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    image[40:56, 36:64] = 10
+    mask[40:56, 36:64] = 255
+    calls = []
+
+    inpaint_tiled(Image.fromarray(image), mask, mask, [rectangle_region((0, 0, 96, 96))], noop_inference(calls))
+
+    assert len(calls) == 1
 
 
 def test_uniform_bubbles_are_filled_independently_inside_one_textured_tile():
@@ -576,6 +641,22 @@ def test_text_on_a_gradient_bubble_is_carried_across_without_inference(tmp_path)
 def test_free_text_on_a_gradient_is_carried_across_without_inference(tmp_path):
     background, mask = _gradient_page()
     snapshot, page = _free_text_session(tmp_path, background)
+    calls = []
+
+    output = np.asarray(
+        inpaint_tiled(Image.fromarray(_with_lettering(background, mask)), mask, mask, flat_fill_regions(snapshot, page, 96, 96), noop_inference(calls))
+    )
+
+    assert calls == []
+    assert np.abs(output.astype(int) - background.astype(int)).max() <= 3
+
+
+def test_a_faint_gradient_is_carried_across_not_flat_filled(tmp_path):
+    # Close enough to one colour for dominant_region_color; flat filling it would leave a step.
+    _, mask = _gradient_page()
+    fade = np.linspace(250, 200, 96).astype(np.uint8)
+    background = np.repeat(np.repeat(fade[:, None, None], 96, axis=1), 3, axis=2)
+    snapshot, page = _free_text_session(tmp_path, background, inside_bubble=True)
     calls = []
 
     output = np.asarray(

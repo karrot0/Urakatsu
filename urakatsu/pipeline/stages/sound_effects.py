@@ -23,7 +23,8 @@ Koharu's layout detector finds onomatopoeia but nothing downstream uses them. Wi
   not redone while it exists, so a re-run never paints over it; a forced run (Redo) draws it again
   in place, unless the user edited the layer.
 
-Readings with no letters (art, speed lines and punctuation the detector boxed) are not redrawn.
+Readings with no letters (art, speed lines and punctuation the detector boxed) are not redrawn,
+nor readings with as many digits as letters (a clock face or a sign read as onomatopoeia).
 """
 
 from __future__ import annotations
@@ -241,8 +242,11 @@ class _Target:
 
 
 def readable(text: str) -> bool:
-    """A reading worth redrawing: it has at least one letter (kana, hangul, latin...)."""
-    return any(ch.isalpha() for ch in text)
+    """A reading worth redrawing: it has a letter (kana, hangul, latin...), and more letters than
+    digits. The detector boxes clock faces, page numbers and signs as onomatopoeia too; read as
+    "23.4つ" they would be redrawn as a sound effect over the art."""
+    letters = sum(ch.isalpha() for ch in text)
+    return letters > 0 and letters > sum(ch.isdigit() for ch in text)
 
 
 def is_sound_effect(scene, content: str) -> bool:
@@ -337,7 +341,8 @@ def instruction(target: _Target, instructed: bool) -> str:
     if instructed:
         return (
             f'Replace the sound effect "{target.source}" in the middle of this image with the {language} sound effect '
-            f'"{target.translation}". Hand-letter it in the same style, outline, colour, size and angle as the original, '
+            f'"{target.translation}". Hand-letter it in the same style, outline, colour and angle as the original, '
+            "fitted into the space the original lettering takes up, however many letters it has; "
             "remove the original lettering completely, and keep all the artwork around it unchanged."
         )
     return f'manga sound effect lettering "{target.translation}", bold hand-drawn comic letters matching the surrounding artwork'

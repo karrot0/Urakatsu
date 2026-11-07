@@ -17,7 +17,7 @@ from urakatsu.pipeline.images import ImageCache
 from urakatsu.pipeline.stages import sound_effects as sfx
 from urakatsu.pipeline.stages.base import StageInput, generation
 from urakatsu.pipeline.stages.detection import DetectionStage
-from urakatsu.pipeline.stages.sound_effects import SoundEffectsStage
+from urakatsu.pipeline.stages.sound_effects import SoundEffectsStage, readable
 from urakatsu.providers.translation.backend import TranslationRequest
 from urakatsu.providers.translation.prompt import prompts
 from urakatsu.scene import At, AssetInput, AssetMetadata, Page, Session
@@ -397,3 +397,12 @@ def test_the_lettering_never_leaves_the_band():
     redrawn[40:60, 120:160] = 0
     alpha = sfx.redraw_alpha(source, redrawn, box, room)
     assert alpha[50, 115] == 255 and alpha[50, 120:].max() == 0
+
+
+def test_a_clock_read_as_onomatopoeia_is_not_redrawn():
+    # The detector boxed a wall clock (23:45) as onomatopoeia; read as "23.4つ" it was redrawn as FWOSH.
+    assert not readable("23.4つ")
+    assert not readable("10")
+    assert readable("アウ...")
+    assert readable("ドーン!!")
+    assert readable("3ドン")
