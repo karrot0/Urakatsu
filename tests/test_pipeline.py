@@ -58,6 +58,135 @@ def test_scheduler_moves_on_after_a_failed_page():
     assert scheduler.start_next(set()) == ("b", Stage.DETECTION)
 
 
+def test_next_redoes_a_finished_page_after_the_running_stage():
+    stages = [Stage.DETECTION, Stage.OCR]
+    scheduler = Scheduler(["a", "b", "c"], stages)
+    for stage in stages:
+        assert scheduler.start_next(set()) == ("a", stage)
+        scheduler.complete("a", stage)
+    assert scheduler.start_next(set()) == ("b", Stage.DETECTION)
+    # b's detection is running; a is put first again, forced (Redo).
+    assert scheduler.prioritize("a", stages, force=True) == stages
+    assert scheduler.total == 8
+    assert scheduler.start_next({Stage.DETECTION}) is None  # a waits for the detection lane, b does not go on
+    scheduler.complete("b", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("a", Stage.DETECTION)
+    assert scheduler.forced("a", Stage.DETECTION) and not scheduler.forced("b", Stage.OCR)
+    scheduler.complete("a", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("a", Stage.OCR)
+    assert scheduler.complete("a", Stage.OCR)
+    # Then the run goes on where it left off: b's OCR, then c.
+    assert scheduler.start_next(set()) == ("b", Stage.OCR)
+    assert scheduler.complete("b", Stage.OCR)
+    assert scheduler.start_next(set()) == ("c", Stage.DETECTION)
+    scheduler.complete("c", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("c", Stage.OCR)
+    scheduler.complete("c", Stage.OCR)
+    assert scheduler.done() and scheduler.completed == scheduler.total == 8
+
+
+def test_next_moves_a_waiting_page_up_in_the_order_asked():
+    scheduler = Scheduler(["a", "b", "c", "d"], [Stage.DETECTION])
+    assert scheduler.start_next(set()) == ("a", Stage.DETECTION)
+    assert scheduler.prioritize("d", [Stage.DETECTION], force=False) == []  # already queued: nothing added
+    scheduler.prioritize("c", [Stage.DETECTION], force=False)
+    assert scheduler.total == 4 and not scheduler.forced("d", Stage.DETECTION)
+    scheduler.complete("a", Stage.DETECTION)
+    order = []
+    while (job := scheduler.start_next(set())) is not None:
+        order.append(job[0])
+        scheduler.complete(*job)
+    assert order == ["d", "c", "b"] and scheduler.done()
+
+
+def test_next_adds_a_page_outside_the_run_and_repeats_a_running_stage():
+    scheduler = Scheduler(["a"], [Stage.DETECTION, Stage.OCR])
+    assert scheduler.start_next(set()) == ("a", Stage.DETECTION)
+    assert scheduler.prioritize("z", [Stage.OCR, Stage.DETECTION], force=True) == [Stage.OCR, Stage.DETECTION]
+    assert scheduler.prioritize("a", [Stage.DETECTION], force=True) == [Stage.DETECTION]  # running: once more after
+    assert scheduler.total == 5
+    scheduler.complete("a", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("z", Stage.DETECTION)  # in stage order, though asked OCR first
+    scheduler.complete("z", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("z", Stage.OCR)
+    assert scheduler.complete("z", Stage.OCR)
+    assert scheduler.start_next(set()) == ("a", Stage.DETECTION)  # the repeat
+    scheduler.complete("a", Stage.DETECTION)
+    assert scheduler.start_next(set()) == ("a", Stage.OCR)
+    assert scheduler.complete("a", Stage.OCR)
+    assert scheduler.done() and scheduler.completed == scheduler.total == 5
+
+
+@pytest.mark.asyncio
+async def test_next_in_a_running_job_redoes_a_page_then_goes_on(project):
+    store, project_id, pages = project
+    first, second = pages
+    pipeline = make_pipeline()
+    request = Request(operation=Operation.through(Stage.INPAINTING))
+    events: list[Progress] = []
+
+    def sink(event: Progress):
+        events.append(event)
+        # As the second page starts, the user asks for the first again.
+        if event.kind is ProgressKind.FINISHED and event.page == second and not any(e.kind is ProgressKind.REQUEUED for e in events):
+            assert pipeline.prioritize(request.stop, first, None, force=True)
+
+    request.progress = sink
+    report = await pipeline.execute(store.session(project_id), request)
+    assert report.status is RunStatus.COMPLETED
+    assert report.completed == report.total == 6
+    done = [(e.page, e.stage) for e in events if e.kind in (ProgressKind.FINISHED, ProgressKind.SKIPPED)]
+    assert done == [
+        (first, Stage.DETECTION), (first, Stage.INPAINTING),
+        (second, Stage.DETECTION),
+        (first, Stage.DETECTION), (first, Stage.INPAINTING),  # forced: done again, not skipped
+        (second, Stage.INPAINTING),
+    ]
+    assert not any(e.kind is ProgressKind.SKIPPED for e in events if e.page == first)
+    (requeued,) = [e for e in events if e.kind is ProgressKind.REQUEUED]
+    assert requeued.page == first and requeued.total == 6
+    # Once the run is over, Next is refused: the caller runs the page on its own.
+    assert not pipeline.prioritize(request.stop, first)
+
+
+@pytest.mark.asyncio
+async def test_a_fill_while_a_job_runs_goes_first_in_it(project):
+    import io
+
+    from PIL import Image
+
+    from urakatsu.pipeline.stages import InpaintingMask
+
+    store, project_id, pages = project
+    first, second = pages
+    buffer = io.BytesIO()
+    mask_image = Image.new("L", (400, 300), 0)
+    mask_image.paste(255, (40, 40, 120, 120))
+    mask_image.save(buffer, format="PNG")
+    mask = InpaintingMask(page=first, png=buffer.getvalue())
+    pipeline = make_pipeline()
+    # Inpainting is not one of this run's stages: the fill runs it once all the same.
+    request = Request(operation=Operation.through(Stage.TRANSLATION))
+    events: list[Progress] = []
+
+    def sink(event: Progress):
+        events.append(event)
+        if event.kind is ProgressKind.FINISHED and event.page == second and not any(e.kind is ProgressKind.REQUEUED for e in events):
+            assert pipeline.prioritize(request.stop, first, [Stage.INPAINTING], mask=mask)
+
+    request.progress = sink
+    report = await pipeline.execute(store.session(project_id), request)
+    assert report.status is RunStatus.COMPLETED
+    assert report.completed == report.total == 7
+    done = [(e.page, e.stage) for e in events if e.kind in (ProgressKind.FINISHED, ProgressKind.SKIPPED)]
+    assert done == [
+        (first, Stage.DETECTION), (first, Stage.OCR), (first, Stage.TRANSLATION),
+        (second, Stage.DETECTION),
+        (first, Stage.INPAINTING),  # the fill, then the run goes on
+        (second, Stage.OCR), (second, Stage.TRANSLATION),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_full_run_commits_each_stage(project):
     store, project_id, pages = project

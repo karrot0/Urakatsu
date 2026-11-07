@@ -45,6 +45,8 @@ service Urakatsu {
 
   rpc Run(RunRequest) returns (stream ProgressEvent);
   rpc Stop(JobRef) returns (Empty);
+  // Next: a page runs as soon as the job's running stage finishes (pipeline/scheduler.py).
+  rpc Prioritize(PrioritizeRequest) returns (PrioritizeReply);
   rpc ListJobs(Empty) returns (JobList);
 
   rpc ListFonts(Empty) returns (FontList);
@@ -492,6 +494,7 @@ message RunRequest {
 message ProgressEvent {
   string job_id = 1;
   string kind = 2;                  // started | loading | running | step | finished | skipped | failed | stopped | completed
+                                    // | requeued (Next: page_id put first with stages, the new total)
                                     // a skipped stage's message: "done" (already done), "kept" (a forced run kept user edits)
   string page_id = 3;
   string stage = 4;
@@ -513,6 +516,21 @@ message ProgressEvent {
 
 message JobRef {
   string job_id = 1;
+}
+
+message PrioritizeRequest {
+  string job_id = 1;
+  string page_id = 2;
+  repeated string stages = 3;       // empty -> the run's own stages
+  bool force = 4;                   // Redo: stages run again on a page that already did them
+  // A masked job instead (one stage, inpainting or decensor), as RunRequest's fields of the
+  // same names: it runs once on page_id, first.
+  bytes inpainting_mask = 5;
+  optional string fill_prompt = 6;
+}
+
+message PrioritizeReply {
+  bool accepted = 1;                // false: the job is not running; start a run of its own
 }
 
 message Job {

@@ -50,6 +50,12 @@ class RunBody(BaseModel):
     force: bool = False
 
 
+class NextBody(BaseModel):
+    page_id: str
+    stages: list[str] = Field(default_factory=list)  # empty: the run's own stages
+    force: bool = False
+
+
 class TextBlockPatch(BaseModel):
     model_config = {"extra": "forbid"}
     source_text: Optional[str] = None
@@ -378,6 +384,13 @@ def api_router(ws: Workspace) -> APIRouter:
     def stop(job_id: str):
         guard(ws.stop, job_id)
         return {"job_id": job_id, "stopping": True}
+
+    @router.post("/jobs/{job_id}/next")
+    def prioritize(job_id: str, body: NextBody):
+        """Next: ``page_id`` runs as soon as the job's running stage finishes (``force``: Redo).
+        ``accepted`` is false when the job is not running; start a run of its own then."""
+        accepted = guard(lambda: ws.prioritize(job_id, body.page_id, [Stage.parse(s) for s in body.stages], body.force))
+        return {"accepted": accepted}
 
     # -- one-shot processing ---------------------------------------------------------------------------
 

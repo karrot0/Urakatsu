@@ -961,6 +961,29 @@ class Workspace:
     def stop(self, job_id: str) -> None:
         self.jobs[job_id].stop.stop()
 
+    def prioritize(
+        self,
+        job_id: str,
+        page_id: str,
+        stages: list[Stage] | None = None,
+        force: bool = False,
+        inpainting_mask: Optional[bytes] = None,
+        fill_prompt: Optional[str] = None,
+    ) -> bool:
+        """Next: puts ``page_id`` first in the running job ``job_id`` (``pipeline/scheduler.py``).
+        With ``inpainting_mask`` (and ``fill_prompt`` for a generative fill), the masked job goes
+        first instead, as ``start_run`` would run it. False when the job is not the one running
+        now; the caller then starts a run of its own."""
+        job = self.jobs[job_id]
+        if job.status != "running":
+            return False
+        mask = None
+        if fill_prompt is not None and not inpainting_mask:
+            raise ValueError("generative fill requires a selection mask")
+        if inpainting_mask:
+            mask = InpaintingMask(page=page_id, png=inpainting_mask, prompt=fill_prompt.strip() if fill_prompt else None, generative=fill_prompt is not None)
+        return self.pipeline.prioritize(job.stop, page_id, stages or None, force, mask)
+
     def job_info(self) -> list[JobInfo]:
         return [
             JobInfo(id=j.id, project_id=j.project_id, status=j.status, completed=j.completed, total=j.total, started_at=j.started_at, error=j.error)

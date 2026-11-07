@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 class ProgressKind(str, Enum):
     QUEUED = "queued"
     STARTED = "started"
+    # A page put first in a running job (Next): ``page`` with the ``stages`` it will run, and
+    # the new ``total``. Those not running now are queued until they start.
+    REQUEUED = "requeued"
     LOADING = "loading"
     RUNNING = "running"
     STEP = "step"

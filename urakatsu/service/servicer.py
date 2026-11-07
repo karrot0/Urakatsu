@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 import grpc
 
 from urakatsu.core.errors import ProjectBusy, ProviderUnavailable, UrakatsuError
+from urakatsu.core.stage import Stage
 from urakatsu.pipeline import PipelineError
 from urakatsu.pipeline.scope import Bounds
 from urakatsu.scene import AuthorshipError, SceneError, StalePatch
@@ -271,6 +272,13 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
     async def Stop(self, request, context):
         self.workspace.stop(request.job_id)
         return pb.Empty()
+
+    @guarded
+    async def Prioritize(self, request, context):
+        stages = [Stage.parse(s) for s in request.stages]
+        fill_prompt = request.fill_prompt if request.HasField("fill_prompt") else None
+        accepted = self.workspace.prioritize(request.job_id, request.page_id, stages, request.force, request.inpainting_mask or None, fill_prompt)
+        return pb.PrioritizeReply(accepted=accepted)
 
     @guarded
     async def ListJobs(self, request, context):

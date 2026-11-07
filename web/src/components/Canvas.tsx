@@ -388,6 +388,8 @@ export function Canvas() {
   // Kept across selections, as Photoshop keeps the last prompt.
   const [fillPrompt, setFillPrompt] = useState("");
   const [filling, setFilling] = useState(false);
+  /** The fill went first in a run that was going: stopping it would stop that whole run. */
+  const [fillJoined, setFillJoined] = useState(false);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   // The text block being edited on the canvas (Photoshop's text tool), and whether the next selected
   // block is one the text tool just drew, which opens straight into editing.
@@ -551,12 +553,6 @@ export function Canvas() {
   useEffect(() => {
     if (comparison && comparison.selection !== selection) setComparison(null);
   }, [selection, comparison]);
-
-  // The comparison opens once a fill of its selection has succeeded.
-  useEffect(() => {
-    if (!filling && comparison && !comparison.ready && ws.job?.status === "completed") setComparison({ ...comparison, ready: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filling]);
 
   // Clear the remove-tool mask once the inpainting run it started has finished.
   useEffect(() => {
@@ -1031,7 +1027,14 @@ export function Canvas() {
       context.fillStyle = "#000000";
       context.fillRect(0, 0, out.width, out.height);
       setMaskDirty(true);
-      void ws.run({ kind: "only", stage: stroke.tool === "remove" ? "inpainting" : "decensor", scope: "page", mask: await toPng(out) });
+      // While a run goes, the stroke's job goes first in it; its mask clears once that job is done.
+      const joined = ws.job?.status === "running";
+      void ws.run({ kind: "only", stage: stroke.tool === "remove" ? "inpainting" : "decensor", scope: "page", mask: await toPng(out) }).then(() => {
+        if (!joined) return; // a run of its own: cleared when the run ends (below)
+        const context = mask.current?.getContext("2d");
+        if (context && mask.current) context.clearRect(0, 0, mask.current.width, mask.current.height);
+        setMaskDirty(false);
+      });
       return;
     }
     const kind = stroke.layer?.kind === "cleanup" ? "cleanup" : "paint";
@@ -1094,10 +1097,15 @@ export function Canvas() {
       setComparison(before && { selection, ...before, ready: false, position: 0.5 });
     }
     setFilling(true);
+    // While a run goes, the fill goes first in it (Next) and the run carries on after.
+    setFillJoined(ws.job?.status === "running");
     try {
-      await ws.run({ kind: "only", stage: "inpainting", scope: "page", mask: await toPng(out), fillPrompt: fillPrompt.trim() });
+      const ok = await ws.run({ kind: "only", stage: "inpainting", scope: "page", mask: await toPng(out), fillPrompt: fillPrompt.trim() });
+      // The comparison opens once a fill of its selection has succeeded.
+      if (ok) setComparison((c) => (c && c.selection === selection ? { ...c, ready: true } : c));
     } finally {
       setFilling(false);
+      setFillJoined(false);
     }
   };
 
@@ -1615,6 +1623,7 @@ export function Canvas() {
                   prompt={fillPrompt}
                   setPrompt={setFillPrompt}
                   filling={filling}
+                  joined={fillJoined}
                   compare={comparing ? { position: comparing.position, set: (position) => setComparison((current) => current && { ...current, position }) } : undefined}
                   onGenerate={() => void generateFill()}
                   onCancel={() => (filling ? void ws.stop() : setSelection(null))}
@@ -1964,6 +1973,7 @@ function FillPrompt({
   prompt,
   setPrompt,
   filling,
+  joined,
   compare,
   onGenerate,
   onCancel,
@@ -1974,6 +1984,8 @@ function FillPrompt({
   prompt: string;
   setPrompt: (prompt: string) => void;
   filling: boolean;
+  /** The fill went first in a run that was going (Next): it waits for that run's stage, and stopping it would stop the run. */
+  joined: boolean;
   /** The before/after divider, once a fill of the selection has succeeded. */
   compare?: { position: number; set: (position: number) => void };
   onGenerate: () => void;
@@ -1988,8 +2000,11 @@ function FillPrompt({
   const prompted = !!model?.prompted;
   // An installed image model edits by instruction when its recipe does; built-in models say so themselves.
   const instructed = prompted && (installed?.model?.recipe ? !!installed.model.edits : !!model?.instructed);
-  const busy = filling || ws.job?.status === "running";
-  const loading = filling && ws.job?.current?.kind === "loading";
+  const busy = filling;
+  // Joined to a run, the fill is under way once that run's current step is it.
+  const current = ws.job?.current;
+  const started = !joined || (current?.page === page.id && current.stage === "inpainting");
+  const loading = filling && started && current?.kind === "loading";
   const removes = !prompted || !prompt.trim();
 
   useEffect(() => input.current?.focus({ preventScroll: true }), []);
@@ -2034,7 +2049,7 @@ function FillPrompt({
           {busy ? <LoaderCircle size={14} className="animate-spin" /> : <CornerDownLeft size={14} />}
           {removes ? "Remove" : "Generate"}
         </Button>
-        <Button size="icon-sm" variant="ghost" aria-label={filling ? "Stop" : "Clear selection"} title={filling ? "Stop" : "Clear selection (Esc)"} onClick={onCancel}>
+        <Button size="icon-sm" variant="ghost" aria-label={filling ? "Stop" : "Clear selection"} title={filling ? (joined ? "Runs inside the running job: stop that job in Activity" : "Stop") : "Clear selection (Esc)"} disabled={filling && joined} onClick={onCancel}>
           <X size={14} />
         </Button>
       </div>
@@ -2049,7 +2064,7 @@ function FillPrompt({
       )}
       <p className="flex items-center gap-1 truncate px-2 pb-0.5 text-xs tracking-[0.005em] text-fg-3">
         {filling ? (
-          <span className="truncate">{loading ? `Loading ${name}…` : `Painting with ${name}…`}</span>
+          <span className="truncate">{!started ? `Next, once the running step finishes…` : loading ? `Loading ${name}…` : `Painting with ${name}…`}</span>
         ) : (
           <>
             <span className="truncate" title={name}>

@@ -811,6 +811,28 @@ class JobRef(_message.Message):
     job_id: str
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
+class PrioritizeRequest(_message.Message):
+    __slots__ = ("job_id", "page_id", "stages", "force", "inpainting_mask", "fill_prompt")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    PAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    STAGES_FIELD_NUMBER: _ClassVar[int]
+    FORCE_FIELD_NUMBER: _ClassVar[int]
+    INPAINTING_MASK_FIELD_NUMBER: _ClassVar[int]
+    FILL_PROMPT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    page_id: str
+    stages: _containers.RepeatedScalarFieldContainer[str]
+    force: bool
+    inpainting_mask: bytes
+    fill_prompt: str
+    def __init__(self, job_id: _Optional[str] = ..., page_id: _Optional[str] = ..., stages: _Optional[_Iterable[str]] = ..., force: _Optional[bool] = ..., inpainting_mask: _Optional[bytes] = ..., fill_prompt: _Optional[str] = ...) -> None: ...
+
+class PrioritizeReply(_message.Message):
+    __slots__ = ("accepted",)
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    accepted: bool
+    def __init__(self, accepted: _Optional[bool] = ...) -> None: ...
+
 class Job(_message.Message):
     __slots__ = ("id", "project_id", "status", "completed", "total", "started_at", "error")
     ID_FIELD_NUMBER: _ClassVar[int]

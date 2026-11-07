@@ -106,6 +106,7 @@ class Pipeline:
         self._stage_processors = stage_processors
         self._accelerator = asyncio.Semaphore(1)
         self._execution = asyncio.Lock()
+        self._current: Optional[_Execution] = None  # the request running now
         self._last_used = time.monotonic()
         self._users = 0  # ``in_use`` blocks open now
         self._idle_watch: Optional[asyncio.Task] = None
@@ -212,9 +213,23 @@ class Pipeline:
     async def execute(self, session: Session, request: Request) -> Report:
         async with self._execution:
             try:
-                return await _Execution(self, session, request).run()
+                self._current = _Execution(self, session, request)
+                return await self._current.run()
             finally:
+                self._current = None
                 self.touch()
+
+    def prioritize(
+        self, stop: StopToken, page: str, stages: Optional[list[Stage]] = None, force: bool = False, mask: Optional[InpaintingMask] = None
+    ) -> bool:
+        """Puts ``page`` first in the running request whose stop token is ``stop`` (Next,
+        ``scheduler.py``): ``stages`` (the run's own when None) run on it as soon as the stage
+        running now finishes. False when that request is not running (finished, or still
+        waiting for the run before it); the caller starts a run of its own instead."""
+        current = getattr(self, "_current", None)
+        if current is None or current.stop is not stop:
+            return False
+        return current.prioritize(page, stages, force, mask)
 
     async def detect_layout(self, images: list, stop: StopToken | None = None) -> list:
         """The detection provider's ``LayoutDetections`` for each image, outside a stage: webtoon
@@ -482,11 +497,16 @@ class _Execution:
             )
         self.inpainting_mask = mask
         self.force = request.force
+        self.stages = stages
         self.scheduler = Scheduler(pages, stages)
         self.images: dict[str, ImageCache] = {}
         self.busy: set[Stage] = set()
         self.completed = 0
         self.failure: Optional[PipelineError] = None
+        # Masked jobs put first in this run (a generative fill or the remove brush while it runs,
+        # ``prioritize``): each runs one stage on one page once, outside the scheduler's pages.
+        self._once: list[tuple[str, Stage, InpaintingMask]] = []
+        self._once_running: set[tuple[str, Stage]] = set()
         _emit(self.progress, Progress(kind=ProgressKind.STARTED, pages=pages, stages=stages, total=self.scheduler.total))
 
     async def run(self) -> Report:
@@ -514,6 +534,17 @@ class _Execution:
     def _take_ready_job(self) -> Optional[tuple[Stage, StageInput]]:
         if self.stop.stopped or self.failure is not None:
             return None
+        sound_effects = self.pipeline.config.sound_effects.mode
+        if self._once:
+            # A masked job put first waits for its stage's lane; nothing else starts before it.
+            page, stage, mask = self._once[0]
+            if stage in self.busy:
+                return None
+            self._once.pop(0)
+            self.busy.add(stage)
+            self._once_running.add((page, stage))
+            # Its own image cache: the page's cache is dropped when it commits (``_mark_complete``).
+            return stage, StageInput(self.scene, page, None, None, ImageCache(), mask, sound_effects, False)
         job = self.scheduler.start_next(self.busy)
         if job is None:
             return None
@@ -521,13 +552,49 @@ class _Execution:
         self.busy.add(stage)
         images = self.images.setdefault(page, ImageCache())
         mask = self.inpainting_mask if (stage in MASKED_STAGES and self.inpainting_mask and self.inpainting_mask.page == page) else None
-        sound_effects = self.pipeline.config.sound_effects.mode
-        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, self.force)
+        force = self.force or self.scheduler.forced(page, stage)
+        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, force)
+
+    def prioritize(self, page: str, stages: Optional[list[Stage]], force: bool, mask: Optional[InpaintingMask] = None) -> bool:
+        """Next on ``page`` (``Pipeline.prioritize``). Only whole-page runs take it: a run limited
+        to some text blocks, a region or a painted mask has no meaning on another page.
+
+        With ``mask``, a masked job (a generative fill, the remove brush) is put first instead:
+        its one stage (inpainting or decensor) runs on the page once, with the mask, as a run of
+        its own would, whether or not the stage is in this run. If it fails, the run goes on."""
+        if self.stop.stopped or self.failure is not None:
+            return False
+        if self.scope.entities is not None or self.inpainting_mask is not None or any(self.scope.region(p) for p in self.scope.pages):
+            raise ValueError("only a run over whole pages can take a page next")
+        if page not in self.scene.pages():
+            raise ValueError(f"no page {page} in this project")
+        if mask is not None:
+            if mask.page != page or not stages or len(stages) != 1 or stages[0] not in MASKED_STAGES:
+                raise ValueError("a masked job runs inpainting or decensor on the mask's page")
+            (stage,) = stages
+            if stage is Stage.DECENSOR and self.pipeline.config.censorship.mode not in ("remove", "detect"):
+                raise ValueError("censorship is off (Settings, Pipeline, Censorship)")
+            self._once.append((page, stage, mask))
+            self.scheduler.total += 1
+            _emit(self.progress, Progress(kind=ProgressKind.REQUEUED, page=page, stages=[stage], completed=self.completed, total=self.scheduler.total))
+            return True
+        wanted = self.stages if stages is None else [stage for stage in self.stages if stage in stages]
+        if not wanted:
+            raise ValueError("none of those stages are in this run")
+        self.scheduler.prioritize(page, wanted, force)
+        _emit(
+            self.progress,
+            Progress(kind=ProgressKind.REQUEUED, page=page, stages=wanted, completed=self.completed, total=self.scheduler.total),
+        )
+        return True
 
     def _apply(self, completion: _Completion) -> None:
         outcome = completion.outcome
         if isinstance(outcome, PipelineError):
             _emit(self.progress, Progress(kind=ProgressKind.FAILED, page=completion.page, stage=completion.stage, model=completion.model, message=str(outcome)))
+            if (completion.page, completion.stage) in self._once_running:
+                self._mark_complete(completion.page, completion.stage)  # a failed masked job does not fail the run
+                return
             raise outcome
         if outcome is _STOPPED:
             return
@@ -557,7 +624,11 @@ class _Execution:
         )
 
     def _mark_complete(self, page: str, stage: Stage) -> None:
-        if self.scheduler.complete(page, stage):
+        if (page, stage) in self._once_running:
+            # A masked job is outside the scheduler's pages; the page's cached images may predate it.
+            self._once_running.discard((page, stage))
+            self.images.pop(page, None)
+        elif self.scheduler.complete(page, stage):
             self.images.pop(page, None)
         self.completed += 1
 

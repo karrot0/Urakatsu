@@ -236,8 +236,12 @@ interface Actions {
   setTheme(theme: Theme): void;
   setPalette(palette: Palette): void;
   toggleOverlay(kind: "blocks" | "regions"): void;
-  run(options: RunOptions): Promise<void>;
+  /** True once the run, or a masked job it put first in the running job, has succeeded. */
+  run(options: RunOptions): Promise<boolean>;
   stop(): Promise<void>;
+  /** Next: `stages` run on `pageId` as soon as the running job's stage finishes (`force`: Redo);
+   * a run of its own when no job is running. */
+  runNext(pageId: string, stages: StageName[], force: boolean): Promise<void>;
   updateBlock(layerId: string, patch: BlockPatch): Promise<void>;
   createBlock(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
   deleteBlock(layerId: string): Promise<void>;
@@ -311,6 +315,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     showRegions: true,
   });
   const jobRef = useRef<JobState | undefined>(undefined);
+  /** Called after each event of the running job, and when it ends (masked jobs waiting on it). */
+  const jobListeners = useRef(new Set<() => void>());
+  const notifyJob = () => jobListeners.current.forEach((listener) => listener());
   const linkRef = useRef<LinkView | null | undefined>(undefined);
   linkRef.current = state.link;
 
@@ -654,15 +661,63 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [restructure],
   );
 
+  /** A masked job (generative fill, remove brush) while a job runs: it goes first in that job
+   * (Next with a mask) and resolves once it has run, true when it did. */
+  const runMaskedNext = useCallback(
+    async (job: JobState, pageId: string, options: RunOptions): Promise<boolean | undefined> => {
+      const stage = options.stage ?? "inpainting";
+      const from = job.events.length;
+      const reply = await client.prioritize({ jobId: job.id, pageId, stages: [stage], inpaintingMask: options.mask, fillPrompt: options.fillPrompt });
+      if (!reply.accepted) return undefined;
+      return new Promise<boolean>((resolve) => {
+        const check = () => {
+          // Ours is the first start of the stage on the page after it was put first (nothing
+          // else starts before it), and the step that settles after that.
+          let queued = false;
+          let started = false;
+          for (let i = from; i < job.events.length; i++) {
+            const event = job.events[i];
+            if (event.pageId !== pageId) continue;
+            if (event.kind === "requeued" && event.stages.includes(stage)) queued = true;
+            else if (queued && event.stage === stage && (event.kind === "loading" || event.kind === "running")) started = true;
+            else if (started && event.stage === stage && (event.kind === "finished" || event.kind === "skipped" || event.kind === "failed")) {
+              done(event.kind !== "failed");
+              return;
+            }
+          }
+          if (job.status !== "running") done(false);
+        };
+        const done = (ok: boolean) => {
+          jobListeners.current.delete(check);
+          resolve(ok);
+        };
+        jobListeners.current.add(check);
+        check();
+      });
+    },
+    [],
+  );
+
   const run = useCallback(
-    async (options: RunOptions) => {
+    async (options: RunOptions): Promise<boolean> => {
       const project = state.project;
-      if (!project || jobRef.current?.status === "running") return;
+      if (!project) return false;
+      const busy = jobRef.current;
+      if (busy?.status === "running") {
+        // A painted mask joins the running job as its next work; anything else waits its turn.
+        const pageId = options.pageIds?.[0] ?? state.pageId;
+        if (!options.mask || !busy.id || !pageId) return false;
+        const ok = await runMaskedNext(busy, pageId, options);
+        if (ok !== undefined) return ok;
+        // The job is ending: run on its own once it has.
+        for (let i = 0; i < 50 && jobRef.current?.status === "running"; i++) await new Promise((r) => setTimeout(r, 100));
+        if (jobRef.current?.status === "running") return false;
+      }
       const chapterPages = project.chapters.find((c) => c.pageIds.includes(state.pageId ?? ""))?.pageIds ?? [];
       const pageIds =
         options.pageIds ??
         (options.scope === "selection" ? selectedPages(state) : options.scope === "page" && state.pageId ? [state.pageId] : options.scope === "chapter" ? chapterPages : []);
-      if ((options.scope === "chapter" || options.scope === "selection") && pageIds.length === 0) return;
+      if ((options.scope === "chapter" || options.scope === "selection") && pageIds.length === 0) return false;
       // A redo adds to the run it was started from, so the Activity trace keeps that run in one place.
       const earlier = options.force ? jobRef.current : undefined;
       const base = { completed: earlier?.completed ?? 0, total: earlier?.total ?? 0 };
@@ -701,8 +756,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             job.current = undefined;
           }
           setState((s) => ({ ...s, job: { ...job, events: [...job.events] } }));
+          notifyJob();
         }
         if (job.status === "running") job.status = "completed";
+        notifyJob();
         job.current = undefined;
         clearPreviews(job);
         const fresh = await client.getProject({ projectId: project.id });
@@ -712,16 +769,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           project: fresh,
           view: s.view === "source" && job.status === "completed" ? "render" : s.view,
         }));
+        return job.status === "completed";
       } catch (error) {
         job.status = "failed";
+        notifyJob();
         job.message = describeError(error);
         job.current = undefined;
         clearPreviews(job);
         setState((s) => ({ ...s, job: { ...job, events: [...job.events] } }));
         fail(error);
+        return false;
       }
     },
-    [state.project, state.pageId, replacePage, fail],
+    [state.project, state.pageId, replacePage, fail, runMaskedNext],
   );
 
   const stop = useCallback(async () => {
@@ -733,6 +793,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       fail(error);
     }
   }, [fail]);
+
+  const runNext = useCallback(
+    async (pageId: string, stages: StageName[], force: boolean) => {
+      const job = jobRef.current;
+      try {
+        if (job?.status === "running" && job.id) {
+          const reply = await client.prioritize({ jobId: job.id, pageId, stages, force });
+          if (reply.accepted) return;
+          // The run is ending: wait for its stream to close, then run the page on its own.
+          for (let i = 0; i < 50 && jobRef.current?.status === "running"; i++) await new Promise((r) => setTimeout(r, 100));
+        }
+        await run({ kind: "stages", stages, scope: "page", pageIds: [pageId], force });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [run, fail],
+  );
 
   const updateBlock = useCallback(
     async (layerId: string, patch: BlockPatch) => {
@@ -1025,6 +1103,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toggleOverlay: (kind) => setState((s) => (kind === "blocks" ? { ...s, showBlocks: !s.showBlocks } : { ...s, showRegions: !s.showRegions })),
       run,
       stop,
+      runNext,
       updateBlock,
       createBlock,
       deleteBlock,
@@ -1053,6 +1132,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       arrange,
       run,
       stop,
+      runNext,
       updateBlock,
       createBlock,
       deleteBlock,

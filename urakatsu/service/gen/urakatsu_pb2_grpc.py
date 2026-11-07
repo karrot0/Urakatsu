@@ -191,6 +191,11 @@ class UrakatsuStub:
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.JobRef.SerializeToString,
                 response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Empty.FromString,
                 _registered_method=True)
+        self.Prioritize = channel.unary_unary(
+                '/urakatsu.v1.Urakatsu/Prioritize',
+                request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeRequest.SerializeToString,
+                response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeReply.FromString,
+                _registered_method=True)
         self.ListJobs = channel.unary_unary(
                 '/urakatsu.v1.Urakatsu/ListJobs',
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Empty.SerializeToString,
@@ -397,6 +402,13 @@ class UrakatsuServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Prioritize(self, request, context):
+        """Next: a page runs as soon as the job's running stage finishes (pipeline/scheduler.py).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListJobs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -566,6 +578,11 @@ def add_UrakatsuServicer_to_server(servicer, server):
                     servicer.Stop,
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.JobRef.FromString,
                     response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Empty.SerializeToString,
+            ),
+            'Prioritize': grpc.unary_unary_rpc_method_handler(
+                    servicer.Prioritize,
+                    request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeRequest.FromString,
+                    response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeReply.SerializeToString,
             ),
             'ListJobs': grpc.unary_unary_rpc_method_handler(
                     servicer.ListJobs,
@@ -1417,6 +1434,33 @@ class Urakatsu:
             '/urakatsu.v1.Urakatsu/Stop',
             urakatsu_dot_v1_dot_urakatsu__pb2.JobRef.SerializeToString,
             urakatsu_dot_v1_dot_urakatsu__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Prioritize(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/urakatsu.v1.Urakatsu/Prioritize',
+            urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeRequest.SerializeToString,
+            urakatsu_dot_v1_dot_urakatsu__pb2.PrioritizeReply.FromString,
             options,
             channel_credentials,
             insecure,
