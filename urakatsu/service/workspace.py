@@ -375,6 +375,41 @@ class Workspace:
         name = files.safe_stem(f"{self.store.name(project_id)} - {chapter.name}") or "chapter"
         return buffer.getvalue(), f"{name}.{format}"
 
+    def export_chapters(self, project_id: str, chapter_ids: list[str], format: str) -> tuple[bytes, str]:
+        """Several chapters in one ZIP named after the project, each chapter as
+        :meth:`export_chapter` makes it: ``<chapter>.cbz``, a ``<chapter>/`` folder of PNGs
+        (``zip``), or ``<chapter>.png`` (``strip``). Chapters go in project order; empty ones
+        are skipped and named in the error if none is left. Importing the ZIP gives the
+        chapters back (``urakatsu/pipeline/imports.py``)."""
+        if format not in ("cbz", "zip", "strip"):
+            raise ValueError("format must be cbz, zip or strip")
+        known = {ch.id: ch for ch in chapters_of(self.session(project_id).snapshot())}
+        missing = [cid for cid in chapter_ids if cid not in known]
+        if missing:
+            raise KeyError(f"chapter {missing[0]} does not exist")
+        wanted = [cid for cid in known if cid in set(chapter_ids)]
+        filled = [cid for cid in wanted if known[cid].pages]
+        if not filled:
+            raise ValueError("the selected chapters have no pages to export")
+        project = self.store.name(project_id)
+        taken: set[str] = set()
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+            for chapter_id in filled:
+                stem = files.safe_stem(known[chapter_id].name) or "chapter"
+                name, n = stem, 1
+                while name.casefold() in taken:
+                    n += 1
+                    name = f"{stem} ({n})"
+                taken.add(name.casefold())
+                if format == "zip":
+                    for page, data in self.chapter_pages(project_id, chapter_id)[1]:
+                        archive.writestr(f"{name}/{page}", data)
+                else:
+                    data, _ = self.export_chapter(project_id, chapter_id, format)
+                    archive.writestr(f"{name}.{'png' if format == 'strip' else 'cbz'}", data)
+        return buffer.getvalue(), f"{files.safe_stem(project) or 'chapters'}.zip"
+
     def chapter_pages(self, project_id: str, chapter_id: str) -> tuple[Chapter, list[tuple[str, bytes]]]:
         """A chapter and its pages as rendered, in chapter order, as ``(file name, PNG)``:
         ``0001_<page>.png``, numbered so any reader sorts them right."""

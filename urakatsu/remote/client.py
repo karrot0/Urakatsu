@@ -155,10 +155,9 @@ class RemoteModel:
         self.provider = provider
         self.client: Optional[httpx.Client] = None
         self.model_id: Optional[str] = None
-        # One of the app's workers, when the settings name no address (``pooled``).
         self.endpoint: Optional[workers.Endpoint] = None
-        # Set once a request moved to the worker's new address: its jobs did not move along.
         self.moved = False
+        self.cloud_models: Optional[frozenset[str]] = None
 
     # -- connection -----------------------------------------------------------------------------
 
@@ -200,6 +199,9 @@ class RemoteModel:
         since the cloud runs its models with its own settings."""
         if self.on_cloud:
             model = getattr(self.provider.settings, "model", None)
+            if model and self.cloud_models is not None and not self.cloud_models:
+                log.info("Urakatsu Cloud runs %s with its default weights, not the installed %s", self.provider.id, model)
+                return {}
             return {"model": model} if model else {}
         return self.provider.settings.model_dump(mode="json", exclude=CONNECTION_SETTINGS)
 
@@ -229,6 +231,9 @@ class RemoteModel:
                 f"the worker at {url} speaks protocol {info.get('protocol')}, this app {PROTOCOL}; update Urakatsu on one of them"
             )
         offered = {entry.get("id") for entry in info.get("providers") or []}
+        if self.on_cloud:
+            entry = next((e for e in info.get("providers") or [] if e.get("id") == self.provider.id), None)
+            self.cloud_models = None if entry is None else frozenset(str(m.get("id")) for m in entry.get("models") or [])
         if not self.on_cloud and offered and self.provider.id not in offered:
             self.close()
             raise ProviderUnavailable(f"the worker at {url} cannot run {self.provider.name or self.provider.id}; update Urakatsu on the worker (restart its notebook)")

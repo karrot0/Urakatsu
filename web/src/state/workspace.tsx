@@ -10,6 +10,7 @@ import { sources, type LinkView } from "../api/sources";
 import type { RichStyle } from "../richText";
 import { applyPalette, loadPalette, type Palette } from "../theme";
 import { initialRoute, useHistorySync, type Route } from "./history";
+import { features } from "../edition";
 import type {
   Capabilities,
   Chapter,
@@ -121,8 +122,8 @@ export interface RunOptions {
   kind: "full" | "through" | "only" | "stages";
   stage?: RunStage;
   stages?: StageName[];
-  /** "selection" runs the sidebar's multi-selection (the Run button, when one is active). */
-  scope: RunScope | "selection";
+  /** "selection" runs the sidebar's page multi-selection, "chapters" its selected chapters (the Run button, when one is active). */
+  scope: RunScope | "selection" | "chapters";
   /** Remove or Decensor strokes: a page-sized PNG, white where the model should repaint. */
   mask?: Uint8Array;
   /** Generative fill of `mask` by the fill model; empty removes what is selected. */
@@ -155,6 +156,9 @@ interface State {
   pageId?: string;
   pageSelection: string[];
   pageAnchor?: string;
+  /** Chapters picked in the sidebar with Ctrl/Shift; while any are, Run and Export use them. */
+  chapterSelection: string[];
+  chapterAnchor?: string;
   blockId?: string;
   rasterId?: string;
   view: ViewMode;
@@ -209,6 +213,9 @@ interface Actions {
   setProjectFormat(format: ProjectFormatInit): Promise<void>;
   arrange(layout: ChapterLayout[]): Promise<void>;
   selectPage(pageId: string, mode?: SelectMode): void;
+  /** Ctrl/Shift picks chapters as pages are picked; "replace" (a plain click) clears the pick. */
+  selectChapter(chapterId: string, mode?: SelectMode): void;
+  clearChapterSelection(): void;
   selectBlock(blockId?: string): void;
   selectRaster(rasterId?: string): void;
   setView(view: ViewMode): void;
@@ -307,6 +314,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     modelsOpen: initialRoute.view === "models",
     sourcesOpen: initialRoute.view === "sources",
     pageSelection: [],
+    chapterSelection: [],
     runScope: loadJson<{ scope: RunScope }>(RUN_KEY, { scope: "page" }).scope,
     runStages: loadJson<{ stages: StageName[] }>(RUN_KEY, { stages: [...STAGES] }).stages,
     theme: loadTheme(),
@@ -384,7 +392,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const first = project.pages.find((p) => p.id === page);
         if (first) void assetUrl(id, first.id, "source", assetVersion(first, "source")).catch(() => undefined);
         setState((s) => ({ ...s, project, link: undefined, pageId: page, blockId: undefined, job: undefined, view: "source" }));
-        const link = await sources.link(id);
+        const link = features.sources ? await sources.link(id) : null;
         setState((s) => (s.project?.id === id ? { ...s, link } : s));
       } catch (error) {
         fail(error);
@@ -716,8 +724,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const chapterPages = project.chapters.find((c) => c.pageIds.includes(state.pageId ?? ""))?.pageIds ?? [];
       const pageIds =
         options.pageIds ??
-        (options.scope === "selection" ? selectedPages(state) : options.scope === "page" && state.pageId ? [state.pageId] : options.scope === "chapter" ? chapterPages : []);
-      if ((options.scope === "chapter" || options.scope === "selection") && pageIds.length === 0) return false;
+        (options.scope === "selection"
+          ? selectedPages(state)
+          : options.scope === "chapters"
+            ? selectedChapters(state).flatMap((c) => c.pageIds)
+            : options.scope === "page" && state.pageId
+              ? [state.pageId]
+              : options.scope === "chapter"
+                ? chapterPages
+                : []);
+      if (options.scope !== "page" && options.scope !== "project" && pageIds.length === 0) return false;
       // A redo adds to the run it was started from, so the Activity trace keeps that run in one place.
       const earlier = options.force ? jobRef.current : undefined;
       const base = { completed: earlier?.completed ?? 0, total: earlier?.total ?? 0 };
@@ -781,7 +797,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [state.project, state.pageId, replacePage, fail, runMaskedNext],
+    [state.project, state.pageId, state.pageSelection, state.chapterSelection, replacePage, fail, runMaskedNext],
   );
 
   const stop = useCallback(async () => {
@@ -1045,7 +1061,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       restitchChapter,
       setProjectFormat,
       arrange,
-      selectPage: (pageId, mode = "replace") => setState((s) => ({ ...s, ...nextSelection(s, pageId, mode), blockId: undefined, rasterId: undefined })),
+      selectPage: (pageId, mode = "replace") =>
+        setState((s) => ({ ...s, ...nextSelection(s, pageId, mode), chapterSelection: [], blockId: undefined, rasterId: undefined })),
+      selectChapter: (chapterId, mode = "replace") => setState((s) => ({ ...s, ...nextChapterSelection(s, chapterId, mode) })),
+      clearChapterSelection: () => setState((s) => (s.chapterSelection.length ? { ...s, chapterSelection: [] } : s)),
       selectBlock: (blockId) => setState((s) => ({ ...s, blockId, rasterId: blockId ? undefined : s.rasterId })),
       selectRaster: (rasterId) => setState((s) => ({ ...s, rasterId, blockId: rasterId ? undefined : s.blockId })),
       setView: (view) => setState((s) => ({ ...s, view })),
@@ -1195,6 +1214,36 @@ export function selectedPages(state: Pick<State, "project" | "pageId" | "pageSel
   const order = state.project?.chapters.flatMap((c) => c.pageIds) ?? [];
   const picked = order.filter((id) => state.pageSelection.includes(id));
   return picked.length > 1 && state.pageId && picked.includes(state.pageId) ? picked : [];
+}
+
+/** The chapters picked in the sidebar, in project order; only those still in the project. */
+export function selectedChapters(state: Pick<State, "project" | "chapterSelection">): Chapter[] {
+  return state.project?.chapters.filter((c) => state.chapterSelection.includes(c.id)) ?? [];
+}
+
+/**
+ * Applies a Ctrl/Shift click on a chapter row, as `nextSelection` does for pages; the anchor starts
+ * at the current page's chapter. Picking chapters drops a page multi-selection, so one pick rules.
+ */
+function nextChapterSelection(s: State, chapterId: string, mode: SelectMode): Pick<State, "chapterSelection" | "chapterAnchor" | "pageSelection"> {
+  const order = s.project?.chapters.map((c) => c.id) ?? [];
+  const base = selectedChapters(s).map((c) => c.id);
+  const fallback = chapterOf(s, s.pageId)?.id;
+  let anchor = s.chapterAnchor && order.includes(s.chapterAnchor) && base.length ? s.chapterAnchor : (fallback ?? chapterId);
+  let selection: string[];
+  if (mode === "toggle") {
+    selection = base.includes(chapterId) ? base.filter((id) => id !== chapterId) : [...base, chapterId];
+    anchor = chapterId;
+  } else if (mode === "range" || mode === "add-range") {
+    const from = order.indexOf(anchor);
+    const to = order.indexOf(chapterId);
+    const run = from < 0 || to < 0 ? [chapterId] : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+    selection = mode === "add-range" ? [...base, ...run] : run;
+  } else {
+    selection = [];
+    anchor = chapterId;
+  }
+  return { chapterSelection: order.filter((id) => selection.includes(id)), chapterAnchor: anchor, pageSelection: s.pageId ? [s.pageId] : [] };
 }
 
 /**

@@ -52,11 +52,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttri
 
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import { assetHref, assetVersion, describeError, exportChapter, exportPage, saveBlob } from "../api/client";
+import { assetHref, assetVersion, describeError, exportChapters, exportPage, saveBlob } from "../api/client";
 import { PAGE_ACCEPT } from "../api/imports";
 import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../api/sources";
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, chapterOf, pageComplete, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
+import { STAGES, chapterOf, pageComplete, selectedChapters, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
 import { AutomationsButton } from "./Automations";
 import { confirm } from "./ConfirmDialog";
 import { KomgaButton } from "./Komga";
@@ -67,6 +67,7 @@ import { ProjectFormatButton } from "./ProjectFormat";
 import { swapSources } from "./swapSource";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
+import { features } from "../edition";
 
 const CHAPTER = "c:";
 const PAGE = "p:";
@@ -439,12 +440,14 @@ export function Sidebar() {
               <Settings size={16} />
             </Button>
           </Tooltip>
-          <Tooltip content="Models" side="top">
-            <Button variant="ghost" size="icon-sm" aria-label="Models" onClick={() => ws.setModelsOpen(true)}>
-              <Boxes size={16} />
-            </Button>
-          </Tooltip>
-          <MemoryMeter />
+          {features.models && (
+            <Tooltip content="Models" side="top">
+              <Button variant="ghost" size="icon-sm" aria-label="Models" onClick={() => ws.setModelsOpen(true)}>
+                <Boxes size={16} />
+              </Button>
+            </Tooltip>
+          )}
+          {features.hardware && <MemoryMeter />}
         </div>
       </div>
     </aside>
@@ -480,9 +483,9 @@ function ProjectHead() {
         </span>
       )}
       <ProjectFormatButton />
-      <KnowledgeButton />
-      <KomgaButton />
-      <AutomationsButton />
+      {features.knowledge && <KnowledgeButton />}
+      {features.komga && <KomgaButton />}
+      {features.automations && <AutomationsButton />}
     </div>
   );
 }
@@ -493,7 +496,7 @@ function SourceBar() {
   const project = ws.project!;
   const link = ws.link;
   const [broken, setBroken] = useState(false);
-  if (link === undefined) return null;
+  if (link === undefined || !features.sources) return null;
   if (link === null) {
     return (
       <div className="mx-1 mb-1 flex items-center gap-2 rounded-card">
@@ -702,13 +705,22 @@ function ChapterItem({
     }
   };
 
+  // Ctrl/Cmd adds or removes the chapter, Shift picks a run of chapters, as page rows do.
+  const picked = ws.chapterSelection.includes(chapter.id);
+  const group = picked ? selectedChapters(ws).map((c) => c.id) : [chapter.id];
+  const select = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, input")) return;
+    const add = event.ctrlKey || event.metaKey;
+    ws.selectChapter(chapter.id, event.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
+  };
+
   const [exporting, setExporting] = useState<string>();
-  /** Renders every page with its translation and saves the archive; large chapters take a few seconds. */
-  const exportAs = async (format: "cbz" | "zip" | "strip") => {
+  /** Renders every page with its translation and saves the archive (every selected chapter when this one is picked). */
+  const exportAs = async (format: ChapterFormat) => {
     if (!ws.project) return;
     setExporting(format);
     try {
-      const { blob, filename } = await exportChapter(ws.project.id, chapter.id, format);
+      const { blob, filename } = await exportChapters(ws.project.id, group, format);
       saveBlob(blob, filename);
     } catch (error) {
       ws.reportError(describeError(error));
@@ -748,8 +760,14 @@ function ChapterItem({
         open={open}
         complete={complete}
         dropTarget={dropTarget || fileOver}
+        selected={picked}
         onToggle={onToggle}
-        rowProps={{ onPointerDown: pointerStart(sortable.listeners), onDoubleClick: () => setEditing(true) }}
+        rowProps={{
+          onPointerDown: pointerStart(sortable.listeners),
+          onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => event.shiftKey && event.preventDefault(),
+          onClick: select,
+          onDoubleClick: () => setEditing(true),
+        }}
         gripProps={{ ...sortable.attributes, ...sortable.listeners, ref: sortable.setActivatorNodeRef }}
         editor={
           editing ? (
@@ -771,15 +789,17 @@ function ChapterItem({
             {items.length > 0 && (
               <ActionMenu
                 trigger={
-                  <Button variant="ghost" size="icon-xs" title={exporting ? "Exporting" : "Export chapter"} aria-label={`Export ${name}`} disabled={!!exporting}>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    title={exporting ? "Exporting" : group.length > 1 ? `Export ${group.length} chapters` : "Export chapter"}
+                    aria-label={group.length > 1 ? `Export ${group.length} selected chapters` : `Export ${name}`}
+                    disabled={!!exporting}
+                  >
                     {exporting ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <FileDown size={14} />}
                   </Button>
                 }
-                actions={[
-                  { label: "Comic book (.cbz)", onSelect: () => void exportAs("cbz") },
-                  { label: "Images (.zip)", onSelect: () => void exportAs("zip") },
-                  ...(webtoon ? [{ label: "Long strip (.png)", onSelect: () => void exportAs("strip") }] : []),
-                ]}
+                actions={exportActions(webtoon, group.length, (format) => void exportAs(format))}
               />
             )}
             {webtoon && items.length > 0 && (
@@ -839,6 +859,7 @@ function ChapterRowView({
   open,
   complete,
   dropTarget,
+  selected,
   overlay,
   onToggle,
   rowProps,
@@ -851,6 +872,7 @@ function ChapterRowView({
   open: boolean;
   complete?: boolean;
   dropTarget?: boolean;
+  selected?: boolean;
   overlay?: boolean;
   onToggle?: () => void;
   rowProps?: HTMLAttributes<HTMLDivElement>;
@@ -859,7 +881,7 @@ function ChapterRowView({
   actions?: ReactNode;
 }) {
   return (
-    <div className={cn(ROW, "group", dropTarget ? "bg-selected" : "hover:bg-hover")} {...rowProps}>
+    <div className={cn(ROW, "group", dropTarget || selected ? "bg-selected" : "hover:bg-hover")} data-selected={selected || undefined} {...rowProps}>
       <button className={cn(GRIP, overlay ? "opacity-100" : GRIP_HIDDEN)} aria-label={`Reorder ${name}`} {...gripProps}>
         <GripVertical size={12} />
       </button>
@@ -871,7 +893,7 @@ function ChapterRowView({
           {name}
         </span>
       )}
-      {!editor && actions && <span className={cn(ACTIONS, "right-7", ACTIONS_BG)}>{actions}</span>}
+      {!editor && actions && <span className={cn(ACTIONS, "right-7", selected ? ACTIONS_BG_ACTIVE : ACTIONS_BG)}>{actions}</span>}
       {complete && <CircleCheck size={14} className="text-success" aria-label="All pages translated" />}
       <span className="px-1 text-xs tabular-nums text-fg-3" aria-label={`${count} pages`}>
         {count}
@@ -880,12 +902,37 @@ function ChapterRowView({
   );
 }
 
-/** "4 pages selected" with a way out, while a Shift/Ctrl selection is active. */
+type ChapterFormat = "cbz" | "zip" | "strip";
+
+/** The export formats for one chapter or several (several save as one ZIP of them). */
+function exportActions(webtoon: boolean, count: number, exportAs: (format: ChapterFormat) => void) {
+  const several = count > 1;
+  return [
+    { label: several ? `${count} comic books (.cbz) in a .zip` : "Comic book (.cbz)", onSelect: () => exportAs("cbz") },
+    { label: several ? `${count} folders of images (.zip)` : "Images (.zip)", onSelect: () => exportAs("zip") },
+    ...(webtoon ? [{ label: several ? `${count} long strips (.png) in a .zip` : "Long strip (.png)", onSelect: () => exportAs("strip") }] : []),
+  ];
+}
+
+/** "4 pages selected" or "3 chapters selected" with a way out, while a Shift/Ctrl selection is active. */
 function SelectionBar() {
   const ws = useWorkspace();
+  const chapters = selectedChapters(ws);
   const pages = selectedPages(ws);
-  const active = pages.length > 1;
-  const clear = () => ws.pageId && ws.selectPage(ws.pageId);
+  const active = pages.length > 1 || chapters.length > 0;
+  const clear = () => (chapters.length ? ws.clearChapterSelection() : ws.pageId && ws.selectPage(ws.pageId));
+  const [exporting, setExporting] = useState(false);
+  const exportAs = async (format: ChapterFormat) => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await exportChapters(ws.project!.id, chapters.map((c) => c.id), format);
+      saveBlob(blob, filename);
+    } catch (error) {
+      ws.reportError(describeError(error));
+    } finally {
+      setExporting(false);
+    }
+  };
   // Esc clears it, unless the key is for a field being typed in.
   useEffect(() => {
     if (!active) return;
@@ -896,14 +943,35 @@ function SelectionBar() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, ws.pageId]);
+  }, [active, ws.pageId, chapters.length]);
   if (!active) return null;
+  const pageCount = chapters.reduce((sum, c) => sum + c.pageIds.length, 0);
   return (
     <div className="mx-2 mb-1 flex h-7 items-center gap-2 rounded-control bg-brand-weak pr-0.5 pl-2 text-xs text-fg" role="status">
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium tabular-nums">{pages.length}</span> pages selected
-      </span>
-      <Button variant="ghost" size="icon-xs" title="Clear selection (Esc)" aria-label="Clear page selection" onClick={clear}>
+      {chapters.length ? (
+        <span className="min-w-0 flex-1 truncate" title={chapters.map((c) => c.name).join("\n")}>
+          <span className="font-medium tabular-nums">{chapters.length}</span> chapter{chapters.length === 1 ? "" : "s"} selected
+          <span className="text-fg-3">
+            {" "}
+            · <span className="tabular-nums">{pageCount}</span> page{pageCount === 1 ? "" : "s"}
+          </span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium tabular-nums">{pages.length}</span> pages selected
+        </span>
+      )}
+      {chapters.length > 0 && pageCount > 0 && (
+        <ActionMenu
+          trigger={
+            <Button variant="ghost" size="icon-xs" title={exporting ? "Exporting" : "Export selected chapters"} aria-label="Export selected chapters" disabled={exporting}>
+              {exporting ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <FileDown size={14} />}
+            </Button>
+          }
+          actions={exportActions(ws.project?.format?.kind === "webtoon", chapters.length, (format) => void exportAs(format))}
+        />
+      )}
+      <Button variant="ghost" size="icon-xs" title="Clear selection (Esc)" aria-label={chapters.length ? "Clear chapter selection" : "Clear page selection"} onClick={clear}>
         <X size={14} />
       </Button>
     </div>

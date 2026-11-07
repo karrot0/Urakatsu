@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
+import { features } from "../edition";
 
 const TABS = [
   ["appearance", "Appearance", Palette],
@@ -47,6 +48,15 @@ const TABS = [
   ["about", "About", Info],
 ] as const;
 type Tab = (typeof TABS)[number][0];
+
+/** Whether this build offers a tab (edition.ts). */
+function offered(tab: Tab): boolean {
+  if (tab === "workers") return features.workers;
+  if (tab === "runtimes") return features.runtimes;
+  if (tab === "sources") return features.sources;
+  if (tab === "providers") return features.translationProviders;
+  return true;
+}
 
 const SAVE_DELAY = 260;
 
@@ -107,7 +117,7 @@ export function SettingsSection({ tab, draft, update }: { tab: Tab; draft?: Conf
   // The app's workers, for the runtime menus; read again when a section with those menus opens.
   const [workerList, setWorkerList] = useState<Worker[]>([]);
   useEffect(() => {
-    if (tab === "pipeline" || tab === "providers") workersApi.list(false).then((list) => setWorkerList(list.workers), () => undefined);
+    if (features.workers && (tab === "pipeline" || tab === "providers")) workersApi.list(false).then((list) => setWorkerList(list.workers), () => undefined);
   }, [tab]);
   return (
     <WorkersContext.Provider value={workerList}>
@@ -139,7 +149,7 @@ export function SettingsPage() {
             <ArrowLeft size={16} /> {ws.settingsFromModels ? "Back to models" : ws.settingsFromSources ? "Back to sources" : ws.project ? "Back to editor" : "Back to projects"}
           </Button>
           <p className="px-2 pb-1 text-xs leading-5 text-fg-3">Settings</p>
-          {TABS.map(([id, label, Icon]) => (
+          {TABS.filter(([id]) => offered(id)).map(([id, label, Icon]) => (
             <button
               key={id}
               className={cn(
@@ -735,7 +745,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
   ];
   return (
     <PreferencePage title="Pipeline" description="The device, the models each stage uses, and how pages are stored.">
-      <PreferenceSection title="Hardware">
+      {features.hardware && <PreferenceSection title="Hardware">
         <PreferenceRow title="Device" description="Where models run. Automatic picks the fastest available.">
           <Select label="Device" value={draft.device} options={devices} onChange={(device) => update({ device })} />
         </PreferenceRow>
@@ -751,7 +761,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
             onCommit={(minutes) => update({ idleUnloadMinutes: minutes ?? 0 })}
           />
         </PreferenceRow>
-      </PreferenceSection>
+      </PreferenceSection>}
       <PreferenceSection title="Vision models">
         {VISION.map(({ stage, title, description }) => {
           const providers = byStage(stage);
@@ -767,10 +777,14 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         })}
         <FillModelRow providers={byStage("inpainting")} draft={draft} update={update} />
       </PreferenceSection>
-      <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
-      <WatermarksSection providers={watermarkers} draft={draft} update={update} />
-      <CensorshipSection detectors={censorDetectors} models={decensors} draft={draft} update={update} />
-      <ColorizationSection providers={colorizers} draft={draft} update={update} />
+      {features.optionalStages && (
+        <>
+          <SoundEffectsSection providers={byStage("inpainting")} draft={draft} update={update} />
+          <WatermarksSection providers={watermarkers} draft={draft} update={update} />
+          <CensorshipSection detectors={censorDetectors} models={decensors} draft={draft} update={update} />
+          <ColorizationSection providers={colorizers} draft={draft} update={update} />
+        </>
+      )}
       {VISION.map(({ stage }) => {
         const provider = byStage(stage).find((p) => p.id === draft[stage]);
         if (!provider) return null;
@@ -787,9 +801,9 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         const provider = id && id !== draft.inpainting && id !== draft.fill ? byStage("inpainting").find((p) => p.id === id) : undefined;
         return provider && <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title={`${provider.name} options`} />;
       })()}
-      <CensorshipOptions detectors={censorDetectors} models={decensors} draft={draft} update={update} />
-      <ColorizationOptions providers={colorizers} draft={draft} update={update} />
-      <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">
+      {features.optionalStages && <CensorshipOptions detectors={censorDetectors} models={decensors} draft={draft} update={update} />}
+      {features.optionalStages && <ColorizationOptions providers={colorizers} draft={draft} update={update} />}
+      {features.hardware && <PreferenceSection title="Storage" description="Where models are kept, and how pages are stored. JPEG and WebP pages are never re-encoded.">
         <ModelsFolderRow />
         <PreferenceRow
           title="Compress PNG pages losslessly"
@@ -797,7 +811,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
         >
           <Switch label="Compress PNG pages losslessly" checked={draft.losslessPages} onChange={(losslessPages) => update({ losslessPages })} />
         </PreferenceRow>
-      </PreferenceSection>
+      </PreferenceSection>}
     </PreferencePage>
   );
 }

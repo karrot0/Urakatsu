@@ -30,8 +30,11 @@ export interface RoutedState {
   pageId?: string;
 }
 
+const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
+
 export function parseRoute(pathname: string, search: string): Route {
-  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const local = BASE && (pathname === BASE || pathname.startsWith(`${BASE}/`)) ? pathname.slice(BASE.length) : pathname;
+  const parts = local.split("/").filter(Boolean).map(decodeURIComponent);
   const page = new URLSearchParams(search).get("page") ?? undefined;
   switch (parts[0]) {
     case "projects":
@@ -48,6 +51,10 @@ export function parseRoute(pathname: string, search: string): Route {
 }
 
 export function pathFor(state: RoutedState): string {
+  return BASE + localPath(state);
+}
+
+function localPath(state: RoutedState): string {
   if (state.settingsOpen) return `/settings${state.settingsTab ? `/${encodeURIComponent(state.settingsTab)}` : ""}`;
   if (state.modelsOpen) return "/models";
   if (state.sourcesOpen) return "/sources";

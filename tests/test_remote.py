@@ -719,6 +719,15 @@ def test_on_the_cloud_only_the_model_choice_is_sent(cloud_account):
     assert "remote_url" not in remote(EchoInpainter)._remote.model_settings()  # a worker still gets the options
 
 
+def test_the_cloud_gets_no_installed_model_for_a_provider_it_runs_only_with_defaults(cloud_account):
+    # flux2-klein with the Klein 9B installed here: the cloud runs Klein's default weights only.
+    provider = EchoInpainter({"model": "org/weights"}, None, CLOUD)
+    provider._remote.cloud_models = frozenset()
+    assert provider._remote.model_settings() == {}
+    provider._remote.cloud_models = frozenset({"org/weights"})  # a provider the cloud runs catalog models for
+    assert provider._remote.model_settings() == {"model": "org/weights"}
+
+
 def test_only_models_a_cloud_worker_runs_are_offered(monkeypatch):
     cloud.reset()
     monkeypatch.setenv(cloud.KEY_ENV, "uk_live_test")

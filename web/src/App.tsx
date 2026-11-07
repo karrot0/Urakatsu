@@ -20,6 +20,7 @@ import { MobileApp } from "./components/mobile/MobileApp";
 import { useMobile } from "./components/mobile/useMobile";
 import { UpdatePopup } from "./components/Updates";
 import { useWorkspace } from "./state/workspace";
+import { features } from "./edition";
 
 export function App() {
   const ws = useWorkspace();
@@ -40,7 +41,7 @@ export function App() {
       ) : (
         <Start />
       )}
-      <UpdatePopup />
+      {features.updates && <UpdatePopup />}
       <ConfirmHost />
       {ws.browser && <BrowserPanel key={`${ws.browser.system}:${ws.browser.url}`} />}
       <WindowControls />

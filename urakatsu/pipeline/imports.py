@@ -20,6 +20,7 @@ folders are skipped.
 from __future__ import annotations
 
 import io
+import posixpath
 import re
 import zipfile
 from dataclasses import dataclass, field
@@ -55,9 +56,16 @@ class _Root:
 
 
 def natural_key(text: str) -> list:
-    """Sorts ``page 2`` before ``page 10``. ``re.split`` with a group alternates text and digits,
-    so two keys compare text with text and numbers with numbers."""
-    return [int(part) if index % 2 else part.casefold() for index, part in enumerate(re.split(r"(\d+)", text))]
+    """Sorts ``page 2`` before ``page 10``, and a path folder by folder. ``re.split`` with a group
+    alternates text and digits, so two keys compare text with text and numbers with numbers. A
+    name's extension only breaks ties, so ``Ch 1.cbz`` comes before ``Ch 1 (2).cbz``."""
+
+    def chunks(part: str) -> list:
+        return [int(piece) if index % 2 else piece.casefold() for index, piece in enumerate(re.split(r"(\d+)", part))]
+
+    *folders, name = text.split("/")
+    stem, suffix = posixpath.splitext(name)
+    return [(chunks(folder), "") for folder in folders] + [(chunks(stem), suffix.casefold())]
 
 
 def is_archive(name: str) -> bool:

@@ -24,14 +24,15 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { describeError, exportChapter, exportPage, saveBlob } from "../api/client";
+import { describeError, exportChapters, exportPage, saveBlob } from "../api/client";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, chapterOf, currentPage, selectedPages, useWorkspace, type RunScope, type RunStage, type StageName, type Theme, type ViewMode } from "../state/workspace";
+import { STAGES, chapterOf, currentPage, selectedChapters, selectedPages, useWorkspace, type RunScope, type RunStage, type StageName, type Theme, type ViewMode } from "../state/workspace";
 import { Popover, Tooltip } from "./primitives";
 import { Segmented } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { features } from "../edition";
 
 export const STAGE_LABEL: Record<StageName, string> = {
   detection: "Detection",
@@ -128,6 +129,8 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
   const ws = useWorkspace();
   const page = currentPage(ws);
   const chapter = chapterOf(ws, ws.pageId);
+  const picked = selectedChapters(ws).filter((c) => c.pageIds.length > 0);
+  const group = picked.length ? picked : chapter && chapter.pageIds.length > 0 ? [chapter] : [];
   const webtoon = ws.project?.format?.kind === "webtoon";
   const [exporting, setExporting] = useState(false);
 
@@ -143,7 +146,7 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
   };
   const exportAs = (format: ChapterFormat) =>
     save(async () => {
-      const { blob, filename } = await exportChapter(ws.project!.id, chapter!.id, format);
+      const { blob, filename } = await exportChapters(ws.project!.id, group.map((c) => c.id), format);
       saveBlob(blob, filename);
     });
 
@@ -173,14 +176,16 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
             <DropdownMenuItem onClick={() => void save(() => exportPage(ws.project!.id, page))}>Image (.png)</DropdownMenuItem>
           </DropdownMenuGroup>
         )}
-        {chapter && chapter.pageIds.length > 0 && (
+        {group.length > 0 && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="truncate">Export chapter · {chapter.name}</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => void exportAs("cbz")}>Comic book (.cbz)</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void exportAs("zip")}>Images (.zip)</DropdownMenuItem>
-              {webtoon && <DropdownMenuItem onClick={() => void exportAs("strip")}>Long strip (.png)</DropdownMenuItem>}
+              <DropdownMenuLabel className="truncate" title={group.map((c) => c.name).join("\n")}>
+                {group.length > 1 ? `Export ${group.length} selected chapters · one .zip` : `Export chapter · ${group[0].name}`}
+              </DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => void exportAs("cbz")}>{group.length > 1 ? "Comic books (.cbz)" : "Comic book (.cbz)"}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void exportAs("zip")}>{group.length > 1 ? "Folders of images" : "Images (.zip)"}</DropdownMenuItem>
+              {webtoon && <DropdownMenuItem onClick={() => void exportAs("strip")}>{group.length > 1 ? "Long strips (.png)" : "Long strip (.png)"}</DropdownMenuItem>}
             </DropdownMenuGroup>
           </>
         )}
@@ -202,9 +207,11 @@ function InferenceControl() {
   const modelName = selected?.name || translation?.model || "No model";
   const progress = ws.job && ws.job.total ? Math.round((ws.job.completed / ws.job.total) * 100) : 0;
 
-  // Pages picked in the sidebar (Shift/Ctrl) take over the scope until the selection is cleared.
+  const chapters = selectedChapters(ws);
+  const chapterPages = chapters.reduce((sum, c) => sum + c.pageIds.length, 0);
   const picked = selectedPages(ws).length;
-  const scope = picked > 1 ? "selection" : ws.runScope;
+  const scope = chapters.length ? "chapters" : picked > 1 ? "selection" : ws.runScope;
+  const chaptersLabel = `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}`;
   const run = () => {
     const stages = STAGES.filter((s) => ws.runStages.includes(s));
     if (stages.length === STAGES.length) void ws.run({ kind: "full", scope });
@@ -279,7 +286,11 @@ function InferenceControl() {
         {view === "root" && (
           <div className="flex flex-col">
             <SelectorRow label="Model" value={modelName} onClick={() => setView("model")} />
-            <SelectorRow label="Scope" value={picked > 1 ? `${picked} selected pages` : SCOPE_LABEL[ws.runScope]} onClick={() => setView("scope")} />
+            <SelectorRow
+              label="Scope"
+              value={chapters.length ? `${chaptersLabel} selected` : picked > 1 ? `${picked} selected pages` : SCOPE_LABEL[ws.runScope]}
+              onClick={() => setView("scope")}
+            />
             <SelectorRow label="Stages" value={stagesLabel} onClick={() => setView("stages")} />
             <hr />
             <button
@@ -291,15 +302,17 @@ function InferenceControl() {
             >
               <Settings size={14} className="text-icon-2" /> Settings
             </button>
-            <button
-              className={popupItem}
-              onClick={() => {
-                setOpen(false);
-                ws.setModelsOpen(true);
-              }}
-            >
-              <Boxes size={14} className="text-icon-2" /> Find more models
-            </button>
+            {features.models && (
+              <button
+                className={popupItem}
+                onClick={() => {
+                  setOpen(false);
+                  ws.setModelsOpen(true);
+                }}
+              >
+                <Boxes size={14} className="text-icon-2" /> Find more models
+              </button>
+            )}
           </div>
         )}
         {view === "model" && (
@@ -309,9 +322,10 @@ function InferenceControl() {
         )}
         {view === "scope" && (
           <SelectorPanel title="Scope" onBack={() => setView("root")}>
-            {picked > 1 && (
+            {(chapters.length > 0 || picked > 1) && (
               <p className="px-2 pt-1 pb-1.5 text-xs leading-4 text-fg-2">
-                {picked} pages are selected in the sidebar, so Run uses them. Clear the selection to use a scope below.
+                {chapters.length ? `${chaptersLabel} (${chapterPages} pages) are` : `${picked} pages are`} selected in the sidebar, so Run uses them. Clear the
+                selection to use a scope below.
               </p>
             )}
             {(Object.keys(SCOPE_LABEL) as RunScope[]).map((scope) => (
@@ -357,8 +371,14 @@ function InferenceControl() {
             <Square size={12} /> Stop
           </Button>
         ) : (
-          <Button size="sm" className="min-w-18 rounded-r-none" disabled={!ws.pageId} onClick={run} title={picked > 1 ? `Run on the ${picked} selected pages` : undefined}>
-            <Play size={14} /> {picked > 1 ? `Run ${picked} pages` : "Run"}
+          <Button
+            size="sm"
+            className="min-w-18 rounded-r-none"
+            disabled={!ws.pageId || (chapters.length > 0 && chapterPages === 0)}
+            onClick={run}
+            title={chapters.length ? `Run on the ${chapterPages} pages of the selected ${chaptersLabel}` : picked > 1 ? `Run on the ${picked} selected pages` : undefined}
+          >
+            <Play size={14} /> {chapters.length ? `Run ${chaptersLabel}` : picked > 1 ? `Run ${picked} pages` : "Run"}
           </Button>
         )}
         <ExportMenu variant={running ? "outline" : "default"} />

@@ -666,3 +666,41 @@ async def test_import_takes_archives_and_folders_as_chapters_in_one_request(work
     view = workspace.project_view(project.id)
     assert [(chapter.name, len(chapter.page_ids)) for chapter in view.chapters] == [("Ch 1", 2), ("Series", 2)]
     assert [view.pages[i].name for i in range(2)] == ["1.png", "2.png"]
+
+
+async def test_selected_chapters_export_as_one_zip_that_imports_back(workspace):
+    import zipfile
+
+    from urakatsu.pipeline.imports import gather
+    from urakatsu.pipeline.projects import DEFAULT_CHAPTER_ID
+
+    project = workspace.create_project("Series").id
+    workspace.add_page(project, "1.png", page_png())
+    workspace.rename_chapter(project, DEFAULT_CHAPTER_ID, "Ch 1")
+    twin = workspace.create_chapter(project, "Ch 1").chapters[-1].id
+    workspace.add_page(project, "1.png", page_png(), chapter_id=twin)
+    workspace.add_page(project, "2.png", page_png(), chapter_id=twin)
+    empty = workspace.create_chapter(project, "Empty").chapters[-1].id
+    chosen = [empty, twin, DEFAULT_CHAPTER_ID]  # any order in; project order out; the empty one is skipped
+
+    data, name = workspace.export_chapters(project, chosen, "cbz")
+    assert name == "Series.zip"
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert archive.namelist() == ["Ch 1.cbz", "Ch 1 (2).cbz"]
+    assert [(n, len(pages)) for n, pages in gather([(name, data)]).chapters] == [("Ch 1", 1), ("Ch 1 (2)", 2)]
+
+    data, _ = workspace.export_chapters(project, chosen, "zip")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert archive.namelist() == ["Ch 1/0001_1.png", "Ch 1 (2)/0001_1.png", "Ch 1 (2)/0002_2.png"]
+    with pytest.raises(ValueError, match="no pages"):
+        workspace.export_chapters(project, [empty], "cbz")
+
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/projects/{project}/export", params={"chapter": [twin, DEFAULT_CHAPTER_ID], "format": "strip"})
+        assert response.status_code == 200, response.text
+        assert 'filename="Series.zip"' in response.headers["content-disposition"]
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert archive.namelist() == ["Ch 1.png", "Ch 1 (2).png"]
+        assert (await client.get(f"/api/v1/projects/{project}/export")).status_code == 400
+        assert (await client.get(f"/api/v1/projects/{project}/export", params={"chapter": "nope"})).status_code == 404

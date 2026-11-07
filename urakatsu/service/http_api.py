@@ -217,13 +217,23 @@ def api_router(ws: Workspace) -> APIRouter:
     def rename_chapter(project_id: str, chapter_id: str, body: ChapterBody):
         return guard(ws.rename_chapter, project_id, chapter_id, body.name)
 
-    @router.get("/projects/{project_id}/chapters/{chapter_id}/export")
-    def export_chapter(project_id: str, chapter_id: str, format: str = "cbz"):
-        data, filename = guard(ws.export_chapter, project_id, chapter_id, format)
-        media = {"cbz": "application/vnd.comicbook+zip", "strip": "image/png"}.get(format, "application/zip")
+    def attachment(data: bytes, filename: str, media: str) -> Response:
         ascii_name = filename.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
         disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
         return Response(content=data, media_type=media, headers={"content-disposition": disposition})
+
+    @router.get("/projects/{project_id}/chapters/{chapter_id}/export")
+    def export_chapter(project_id: str, chapter_id: str, format: str = "cbz"):
+        data, filename = guard(ws.export_chapter, project_id, chapter_id, format)
+        return attachment(data, filename, {"cbz": "application/vnd.comicbook+zip", "strip": "image/png"}.get(format, "application/zip"))
+
+    @router.get("/projects/{project_id}/export")
+    def export_chapters(project_id: str, chapter: list[str] = Query(default=[]), format: str = "cbz"):
+        """Several chapters in one ZIP (``Workspace.export_chapters``): ``?chapter=a&chapter=b``."""
+        if not chapter:
+            raise HTTPException(400, "name at least one chapter to export")
+        data, filename = guard(ws.export_chapters, project_id, chapter, format)
+        return attachment(data, filename, "application/zip")
 
     @router.post("/projects/{project_id}/chapters/{chapter_id}/restitch")
     async def restitch_chapter(project_id: str, chapter_id: str):

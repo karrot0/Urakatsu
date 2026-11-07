@@ -12,6 +12,7 @@ import { TitleBarInset } from "./WindowControls";
 import { Select } from "./primitives";
 import { Badge } from "./ui";
 import { cn } from "cn";
+import { features } from "../edition";
 
 type ProjectSort = "updated" | "name";
 const SORTS: { value: ProjectSort; label: string }[] = [
@@ -53,12 +54,16 @@ export function Start() {
             <span className="truncate">{ws.capabilities.device.description}</span>
           </Badge>
         )}
-        <a className={buttonVariants({ variant: "ghost", size: "sm" })} href="/api/docs" target="_blank" rel="noreferrer">
-          API docs
-        </a>
-        <Button variant="ghost" size="sm" onClick={() => ws.setModelsOpen(true)}>
-          <Boxes size={14} /> Models
-        </Button>
+        {features.apiDocs && (
+          <a className={buttonVariants({ variant: "ghost", size: "sm" })} href="/api/docs" target="_blank" rel="noreferrer">
+            API docs
+          </a>
+        )}
+        {features.models && (
+          <Button variant="ghost" size="sm" onClick={() => ws.setModelsOpen(true)}>
+            <Boxes size={14} /> Models
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => ws.setSettingsOpen(true)}>
           <Settings size={14} /> Settings
         </Button>
@@ -89,9 +94,11 @@ export function Start() {
           <Button type="submit" className="h-9">
             <Plus size={16} /> Create project
           </Button>
-          <Button variant="outline" type="button" className="h-9" onClick={() => ws.setSourcesOpen(true)}>
-            <Link2 size={16} /> From a source
-          </Button>
+          {features.sources && (
+            <Button variant="outline" type="button" className="h-9" onClick={() => ws.setSourcesOpen(true)}>
+              <Link2 size={16} /> From a source
+            </Button>
+          )}
         </form>
         {ws.capabilities && (
           <p className="mt-2 text-xs tracking-[0.005em] text-fg-3">

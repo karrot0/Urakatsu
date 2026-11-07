@@ -2,14 +2,11 @@
 // the UI, so the browser talks real gRPC framing without a proxy.
 
 import { createClient } from "@connectrpc/connect";
-import { createGrpcWebTransport } from "@connectrpc/connect-web";
 
 import { Urakatsu, type Page } from "../gen/urakatsu/v1/urakatsu_pb";
+import { transport } from "./transport";
 
-export const transport = createGrpcWebTransport({
-  baseUrl: window.location.origin,
-  useBinaryFormat: true,
-});
+export { transport };
 
 export const client = createClient(Urakatsu, transport);
 
@@ -93,8 +90,22 @@ export async function exportPage(projectId: string, page: Page): Promise<void> {
 }
 
 /** A chapter's rendered pages as one archive (or one long strip PNG), with the file name the server chose. */
-export async function exportChapter(projectId: string, chapterId: string, format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
-  const response = await fetch(`/api/v1/projects/${projectId}/chapters/${chapterId}/export?format=${format}`);
+export function exportChapter(projectId: string, chapterId: string, format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
+  return download(`/api/v1/projects/${projectId}/chapters/${chapterId}/export?format=${format}`, `chapter.${format === "strip" ? "png" : format}`);
+}
+
+/**
+ * Chapters exported together: one chapter as `exportChapter` saves it, several as one ZIP named after
+ * the project with a `.cbz`, a folder of images or a strip `.png` per chapter.
+ */
+export function exportChapters(projectId: string, chapterIds: string[], format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
+  if (chapterIds.length === 1) return exportChapter(projectId, chapterIds[0], format);
+  const query = new URLSearchParams([["format", format], ...chapterIds.map((id) => ["chapter", id])]);
+  return download(`/api/v1/projects/${projectId}/export?${query}`, "chapters.zip");
+}
+
+async function download(url: string, fallback: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(url);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(typeof body?.detail === "string" ? body.detail : `Export failed: ${response.status} ${response.statusText}`);
@@ -102,7 +113,7 @@ export async function exportChapter(projectId: string, chapterId: string, format
   const disposition = response.headers.get("content-disposition") ?? "";
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
   const plain = /filename="([^"]+)"/i.exec(disposition)?.[1];
-  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? `chapter.${format === "strip" ? "png" : format}` };
+  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : (plain ?? fallback) };
 }
 
 /** Replaces pages' source images in one undo step, keeping each page and its work. */

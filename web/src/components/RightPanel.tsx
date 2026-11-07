@@ -37,6 +37,7 @@ import { RichTextField } from "./RichTextField";
 import { Badge } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TitleBarInset } from "./WindowControls";
+import { features } from "../edition";
 
 const PANEL_TAB = "inline-flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1 rounded-control text-fg-2 transition-colors duration-[20ms] ease-in focus-visible:outline-none focus-visible:shadow-focus";
 const TAB_LABEL = "in-data-[shell=windows]:@max-[26rem]:sr-only";
@@ -58,9 +59,11 @@ export function RightPanel() {
           <ActivityIcon size={14} /> <span className={TAB_LABEL}>Activity</span>{" "}
           {ws.job?.status === "running" && <span className="size-1.5 animate-[soft-pulse_1s_ease-in-out_infinite_alternate] rounded-full bg-brand" aria-label="Running" />}
         </button>
-        <button role="tab" aria-selected={tab === "agent"} className={panelTab(tab === "agent")} title="Agent" onClick={() => setTab("agent")}>
-          <Sparkles size={14} /> <span className={TAB_LABEL}>Agent</span>
-        </button>
+        {features.agent && (
+          <button role="tab" aria-selected={tab === "agent"} className={panelTab(tab === "agent")} title="Agent" onClick={() => setTab("agent")}>
+            <Sparkles size={14} /> <span className={TAB_LABEL}>Agent</span>
+          </button>
+        )}
         <span aria-hidden className="flex-1" />
         <TitleBarInset side="right" />
       </div>
