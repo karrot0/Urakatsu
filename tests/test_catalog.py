@@ -147,6 +147,26 @@ def test_installed_models_swap_into_providers_and_remove_cleanly(offline_home):
         provider.selected_sources(defaults)
 
 
+def test_an_installed_model_keeps_companion_files_from_other_repositories(offline_home):
+    # Issue #7: Baberu OCR's own config.json must not replace DINOv2's config.json.
+    from urakatsu.core.registry import registry
+    from urakatsu.providers.ocr.baberu_ocr import DINOV2_REPOSITORY
+
+    store = ModelStore()
+    names = ["config.json", "generation_config.json", "model.safetensors", "tokenizer/vocab.json"]
+    v12 = InstalledModel(
+        id="genshiai-daichi/baberu-ocr:v1.2", repo="genshiai-daichi/baberu-ocr", revision="b9868433", runtime="torch",
+        files=[InstalledFile(path=name, role="file") for name in names],
+    )
+    InstalledModels(store).add(v12)
+
+    cls = registry.get("ocr", "baberu-ocr")
+    defaults = cls.weight_sources("torch")
+    chosen = cls(settings={"model": v12.id}, runtime="torch").selected_sources(defaults)
+    assert [(s.repository, s.revision, s.filename) for s in chosen[:4]] == [(v12.repo, v12.revision, n) for n in names]
+    assert chosen[4:] == defaults[4:] and all(s.repository == DINOV2_REPOSITORY for s in chosen[4:])
+
+
 def test_a_pinned_runtime_stays_put_and_unpinning_reuses_the_kept_build(tmp_path, monkeypatch):
     monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: ["win-cpu"])
     releases, blobs = [], {}

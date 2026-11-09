@@ -340,6 +340,7 @@ class Provider(ABC):
         if installed is None:
             raise ProviderUnavailable(f"{self.id}: installed model {model_id!r} was removed; pick another on the Models page")
         roles = self.weight_roles.get(self.runtime_name or "")
+        primary = getattr(sources[0], "repository", None) if sources else None
         replaced = []
         for index, source in enumerate(sources):
             if roles is not None and index < len(roles):
@@ -347,9 +348,14 @@ class Provider(ABC):
             else:
                 name = getattr(source, "filename", "")
                 replacement = installed.source_for_name(name)
-                weights = [f for f in installed.files if f.path.endswith(".safetensors")]
-                if replacement is None and name.endswith(".safetensors") and len(weights) == 1:
-                    replacement = installed.source(weights[0].path)  # one weights file under another name
+                repository = getattr(source, "repository", None)
+                if repository != primary:
+                    if replacement is not None and replacement.repository != repository:
+                        replacement = None
+                else:
+                    weights = [f for f in installed.files if f.path.endswith(".safetensors")]
+                    if replacement is None and name.endswith(".safetensors") and len(weights) == 1:
+                        replacement = installed.source(weights[0].path)  # one weights file under another name
             replaced.append(replacement or source)
         return tuple(replaced)
 
