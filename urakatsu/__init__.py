@@ -9,4 +9,4 @@ The package is organised like into a modular structure.
 - ``urakatsu.service``   gRPC + gRPC-web + HTTP service, CLI entry point
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
