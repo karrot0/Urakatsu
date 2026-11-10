@@ -329,6 +329,17 @@ def test_retranslating_one_block_reads_the_rest_of_its_page(project):
     assert [(c.source, c.translation) for c in provider.request.context] == [("誰だ", "Who's there?")]
 
 
+def test_a_runaway_source_is_trimmed_for_the_translator_but_kept_on_the_page(project):
+    from urakatsu.pipeline.stages.ocr import MAX_REPEATS
+
+    store, project_id = project
+    looped = "え" + "っ" * 400
+    page_id, contents = page(store, project_id, [(looped, None)])
+    provider, _ = run_stage(store, project_id, page_id)
+    assert provider.request.segments == ["え" + "っ" * MAX_REPEATS]
+    assert store.session(project_id).snapshot().component(contents[0], SourceText).text.value == looped
+
+
 def test_a_stale_neighbour_does_not_reject_the_page(project):
     store, project_id = project
     _, contents = page(store, project_id, [("一", "One")])

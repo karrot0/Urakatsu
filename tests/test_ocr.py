@@ -18,7 +18,7 @@ from PIL import Image
 
 from urakatsu.pipeline.stages.base import StageInput
 from urakatsu.providers.base import OcrProvider
-from urakatsu.pipeline.stages.ocr import OcrStage, crop, normalize_ocr_text
+from urakatsu.pipeline.stages.ocr import MAX_OCR_CHARS, MAX_REPEATS, OcrStage, crop, normalize_ocr_text
 from urakatsu.providers.ocr._common import pillow_grayscale, read_lines
 from urakatsu.catalog.facts import ModelFacts
 from urakatsu.providers.ocr.baberu_ocr import BaberuOcrProvider
@@ -175,6 +175,16 @@ def test_ordinary_text_and_single_boxes_are_unchanged():
     # stages/ocr.rs: ordinary_text_and_single_boxes_are_unchanged
     assert normalize_ocr_text("待って…") == "待って…"
     assert normalize_ocr_text("☐") == "☐"
+
+
+def test_runaway_repeats_are_cut_down():
+    # Not in Koharu: a looping OCR model made the translation model return no JSON.
+    assert normalize_ocr_text("え" + "っ" * 400 + "！") == "え" + "っ" * MAX_REPEATS + "！"
+    assert normalize_ocr_text("やだ" + "やめて" * 50) == "やだ" + "やめて" * MAX_REPEATS
+    assert normalize_ocr_text("ドドドドドド！！！！") == "ドドドドドド！！！！"  # real repeats stay
+    assert normalize_ocr_text("ゴ" * MAX_REPEATS) == "ゴ" * MAX_REPEATS
+    unrepeated = "".join(chr(0x4E00 + i) for i in range(MAX_OCR_CHARS + 50))
+    assert normalize_ocr_text(unrepeated) == unrepeated[:MAX_OCR_CHARS]
 
 
 def test_crop_floors_and_ceils_and_rejects_empty_overlap():

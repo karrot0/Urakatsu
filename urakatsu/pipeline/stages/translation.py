@@ -7,7 +7,9 @@ An ellipsis source keeps the ellipsis.
 
 Not in Koharu: the request carries the project's knowledge (``pipeline/knowledge.py``), sized by
 ``TranslationConfig.prompt_size``; with Story so far on, a whole-page run also writes the page's
-``PageSummary`` from the reply, unless the user wrote that page's summary.
+``PageSummary`` from the reply, unless the user wrote that page's summary. Source text is sent
+through ``ocr.trim_runaway``, so a runaway OCR repeat stored before that existed (or typed in)
+cannot make the model loop until it returns no JSON; the stored text is left as it is.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from urakatsu.scene import Authored, PageSummary, Patch, Snapshot, SourceText, T
 from urakatsu.scene.components import is_user
 
 from .base import StageInput, StageProcessor, finish, generation
+from .ocr import trim_runaway
 from .sound_effects import ROLE, is_sound_effect
 from .watermarks import page_image
 
@@ -58,7 +61,7 @@ class TranslationStage(StageProcessor):
         whole_page = len(targets) == len(_sources(scene, input.page))
         summarize = retrieved.summarize and whole_page and not _user_summary(scene, input.page)
         request = TranslationRequest(
-            segments=[text for _, text in targets],
+            segments=[trim_runaway(text) for _, text in targets],
             target_language=target_language,
             instructions=config.instructions,
             context=retrieved.context,

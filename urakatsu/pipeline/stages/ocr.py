@@ -9,6 +9,7 @@ text that the user wrote is never overwritten.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -40,11 +41,29 @@ class _Target:
 
 
 def normalize_ocr_text(text: str) -> str:
-    """Only an all-placeholder sequence (two or more glyphs) becomes an ellipsis; other text is kept."""
+    """Only an all-placeholder sequence (two or more glyphs) becomes an ellipsis; other text is
+    kept, except that a runaway repeat is cut down (``trim_runaway``)."""
     visible = [ch for ch in text if not is_whitespace(ch)]
     if len(visible) >= 2 and all(ch in PLACEHOLDER_GLYPHS for ch in visible):
         return "…"
-    return text
+    return trim_runaway(text)
+
+
+# Not in Koharu. An autoregressive OCR model sometimes loops on a character or a short run
+# ("ああああ…" hundreds of times). Sent on, that text makes a translation model loop too, until it
+# runs out of tokens and returns no JSON. Real text repeats a unit a few times (ドドドド, ！！！！),
+# so only a run longer than MAX_REPEATS is cut, down to MAX_REPEATS copies.
+MAX_REPEATS = 8
+_RUNAWAY = re.compile(r"(.{1,16}?)\1{%d,}" % MAX_REPEATS, re.DOTALL)
+# A speech bubble or narration box holds far less; anything longer is a loop that did not repeat exactly.
+MAX_OCR_CHARS = 1000
+
+
+def trim_runaway(text: str) -> str:
+    """``text`` with any unit repeated more than ``MAX_REPEATS`` times in a row cut to that many,
+    and the whole capped at ``MAX_OCR_CHARS`` characters."""
+    text = _RUNAWAY.sub(lambda match: match.group(1) * MAX_REPEATS, text)
+    return text[:MAX_OCR_CHARS]
 
 
 def crop(source: Image.Image, geometry: c.Geometry) -> Image.Image:
