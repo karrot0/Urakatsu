@@ -20,6 +20,8 @@ export interface Usage {
   provider: string;
   name: string;
   runtime: string;
+  /** The stage can run on the app's workers (Colab, Kaggle, another machine). */
+  remotable?: boolean;
 }
 
 export interface SearchResult {
@@ -73,6 +75,8 @@ export interface InstalledModel {
   usable_by: Usage[];
   compatibility?: Compatibility;
   complete?: boolean;
+  /** Added for the app's workers only: its files download on the worker (Colab: into Google Drive). */
+  workers_only?: boolean;
   /** stable-diffusion.cpp recipe id, for image models. */
   recipe?: string | null;
   /** The recipe edits by instruction (reference image), so prompts say what to change. */
@@ -265,8 +269,9 @@ export const catalog = {
   search: (runtime: CatalogRuntime, q: string, sort: string, usable: boolean) =>
     call<SearchResult[]>(`/catalog/search?${query({ runtime, q, sort, usable, limit: 40 })}`),
   details: (runtime: CatalogRuntime, repo: string) => call<ModelDetails>(`/catalog/models/${repo}?${query({ runtime })}`),
-  install: (runtime: CatalogRuntime, repo: string, variant: string) =>
-    call<Download>("/catalog/install", { method: "POST", body: JSON.stringify({ runtime, repo, variant }) }),
+  /** ``workers_only`` registers the model for the app's workers (Colab, Kaggle) without downloading it here. */
+  install: (runtime: CatalogRuntime, repo: string, variant: string, workers_only = false) =>
+    call<Download>("/catalog/install", { method: "POST", body: JSON.stringify({ runtime, repo, variant, workers_only }) }),
   downloads: () => call<Download[]>("/catalog/downloads"),
   cancel: (id: string) => call<void>(`/catalog/downloads/${id}/cancel`, { method: "POST" }),
   pause: (id: string) => call<void>(`/catalog/downloads/${id}/pause`, { method: "POST" }),

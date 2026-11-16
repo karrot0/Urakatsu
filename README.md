@@ -203,6 +203,10 @@ notebook, or another machine. Add one under Settings, Workers, then pick it as a
 in Settings, Pipeline (each worker is listed there by name). A model runs only on the worker you
 picked, and a worker loads its models as soon as it starts (`urakatsu worker --preload`), so the
 first page does not wait for weights. A model you installed from the Models page goes along too.
+With a worker set up, a model's **For workers** button adds it without downloading it to your
+computer: the worker downloads it where it runs (a Colab worker straight into Google Drive), so a
+model too large for your machine never passes through it. Download it here later if you want it
+locally too.
 
 - **Kaggle**: paste a Kaggle API token (from kaggle.com/settings; the account must be
   phone-verified). Urakatsu pushes a private notebook that runs on a T4, starts it when a run

@@ -19,6 +19,7 @@ import {
   Pause,
   Play,
   Search,
+  Server,
   Sparkles,
   Trash2,
   X,
@@ -46,6 +47,7 @@ import {
   type Variant,
 } from "../api/catalog";
 import { describeError } from "../api/client";
+import { workers as workersApi } from "../api/workers";
 import { formatDate, formatTimestamp } from "../format";
 import { useWorkspace } from "../state/workspace";
 import { ModelsFolder, StorageBar, useModelsStorage } from "./ModelsStorage";
@@ -170,9 +172,10 @@ function useCatalogState() {
     installed,
     loaded,
     reloadInstalled: loadInstalled,
-    install: async (runtime: CatalogRuntime, repo: string, variant: string) => {
+    install: async (runtime: CatalogRuntime, repo: string, variant: string, workersOnly = false) => {
       try {
-        await catalog.install(runtime, repo, variant);
+        await catalog.install(runtime, repo, variant, workersOnly);
+        if (workersOnly) void loadInstalled();
         setPolling(true);
         void poll();
       } catch (error) {
@@ -516,6 +519,18 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
   }, [runtime, repo]);
 
   const installedIds = useMemo(() => new Set(state.installed.filter((m) => m.repo === repo).map((m) => m.variant || "snapshot")), [state.installed, repo]);
+  const workersOnlyIds = useMemo(
+    () => new Set(state.installed.filter((m) => m.repo === repo && m.workers_only).map((m) => m.variant || "snapshot")),
+    [state.installed, repo],
+  );
+  // With a worker set up (Settings, Workers), a model can be added for it without downloading it here.
+  const [hasWorkers, setHasWorkers] = useState(false);
+  useEffect(() => {
+    workersApi.list(false).then(
+      (list) => setHasWorkers(list.workers.length > 0),
+      () => setHasWorkers(false),
+    );
+  }, []);
 
   if (error) {
     return (
@@ -551,13 +566,6 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
         (d.model.variant || "snapshot") === variant.id &&
         (d.status === "queued" || d.status === "downloading" || d.status === "paused"),
     );
-    if (installedIds.has(variant.id)) {
-      return (
-        <Badge tone="success">
-          <CircleCheck size={12} /> Installed
-        </Badge>
-      );
-    }
     if (download)
       return (
         <span className="inline-flex items-center gap-2">
@@ -565,7 +573,7 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
           <QueueControls download={download} state={state} compact />
         </span>
       );
-    return (
+    const here = (
       <Button
         size="sm"
         variant={variant.recommended && !blocked ? "default" : "outline"}
@@ -574,6 +582,35 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
       >
         <DownloadIcon size={14} /> Download
       </Button>
+    );
+    if (workersOnlyIds.has(variant.id)) {
+      return (
+        <span className="inline-flex items-center gap-2">
+          <Badge>
+            <Server size={12} /> On workers
+          </Badge>
+          {variant.fit.level !== "too_large" && here}
+        </span>
+      );
+    }
+    if (installedIds.has(variant.id)) {
+      return (
+        <Badge tone="success">
+          <CircleCheck size={12} /> Installed
+        </Badge>
+      );
+    }
+    if (!hasWorkers || !details.usable_by.some((usage) => usage.remotable)) return here;
+    // The worker downloads the files itself (a Colab worker into Google Drive): nothing comes here.
+    return (
+      <span className="inline-flex items-center gap-2">
+        <Tooltip content="Adds the model without downloading it to this computer. Your workers download it where they run; Colab keeps it in Google Drive." side="top">
+          <Button size="sm" variant="outline" disabled={blocked} onClick={() => state.install(runtime, details.repo, variant.id, true)}>
+            <Server size={14} /> For workers
+          </Button>
+        </Tooltip>
+        {here}
+      </span>
     );
   };
 
@@ -1015,7 +1052,7 @@ function Installed({ state, onDiscover }: { state: CatalogState; onDiscover: () 
                   <TableCell className="h-auto px-3 py-2">
                     <span className="font-medium">{model.repo.split("/").pop()}</span> {model.variant && <Badge>{model.variant}</Badge>}
                     <p className="text-xs tracking-[0.005em] text-fg-3">
-                      {model.repo.split("/")[0]}, installed {formatTimestamp(model.installed_at)}
+                      {model.repo.split("/")[0]}, {model.workers_only ? "added" : "installed"} {formatTimestamp(model.installed_at)}
                     </p>
                   </TableCell>
                   <TableCell className="h-auto px-3 py-2 text-fg-2">{RUNTIME_LABEL[model.runtime]}</TableCell>
@@ -1035,7 +1072,7 @@ function Installed({ state, onDiscover }: { state: CatalogState; onDiscover: () 
                             key={usage.provider}
                             variant="outline"
                             size="sm"
-                            disabled={status === "unsupported" || model.complete === false}
+                            disabled={status === "unsupported" || (model.complete === false && !model.workers_only)}
                             onClick={() => use(model, usage)}
                           >
                             {STAGE_LABEL[usage.stage] ?? usage.stage}
@@ -1048,7 +1085,7 @@ function Installed({ state, onDiscover }: { state: CatalogState; onDiscover: () 
                     {confirm === model.id ? (
                       <span className="flex items-center gap-1">
                         <Button variant="destructive" size="sm" onClick={() => remove(model)}>
-                          Delete files
+                          {model.workers_only ? "Remove" : "Delete files"}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => setConfirm(undefined)}>
                           Cancel
@@ -1071,6 +1108,16 @@ function Installed({ state, onDiscover }: { state: CatalogState; onDiscover: () 
 }
 
 function StatusCell({ model, status }: { model: InstalledModel; status: string }): ReactNode {
+  if (model.workers_only)
+    return (
+      <Tooltip content="Not downloaded to this computer: your workers download it where they run (Colab keeps it in Google Drive)." side="top">
+        <span className="inline-flex outline-none focus-visible:rounded-control focus-visible:shadow-focus" tabIndex={0}>
+          <Badge>
+            <Server size={12} /> On workers
+          </Badge>
+        </span>
+      </Tooltip>
+    );
   if (model.complete === false) return <Badge tone="danger">Files missing</Badge>;
   if (status === "needs_update" || status === "unsupported") {
     return (

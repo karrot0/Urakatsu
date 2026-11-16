@@ -23,6 +23,8 @@ class InstallBody(BaseModel):
     runtime: str
     repo: str
     variant: str
+    # Register it for the app's workers without downloading it here.
+    workers_only: bool = False
 
 
 class MoveBody(BaseModel):
@@ -92,7 +94,7 @@ def catalog_router() -> APIRouter:
 
     @router.post("/catalog/install", status_code=202)
     def install(body: InstallBody):
-        return _guard(catalog().install, _runtime(body.runtime), body.repo, body.variant)
+        return _guard(catalog().install, _runtime(body.runtime), body.repo, body.variant, body.workers_only)
 
     @router.get("/catalog/downloads")
     def downloads():

@@ -53,6 +53,9 @@ class InstalledModel(BaseModel):
     installed_at: float = 0.0
     usable_by: list[dict] = Field(default_factory=list)  # [{"stage", "provider", "runtime"}]
     recipe: Optional[str] = None  # stable-diffusion.cpp recipe id
+    # Added for the app's workers only (a Colab or Kaggle notebook): nothing was downloaded here,
+    # and each machine that loads the model downloads its files itself (into Drive on Colab).
+    workers_only: bool = False
 
     def source(self, path: str) -> HuggingFaceFile:
         entry = next((f for f in self.files if f.path == path and f.repo), None)
@@ -325,6 +328,7 @@ class Downloader:
                     shutil.move(str(partial), str(target))
                     base += file.size
             model.installed_at = time.time()
+            model.workers_only = False
             self.registry.add(model)
             download.status = "completed"
         except _Paused:

@@ -89,16 +89,26 @@ export async function exportPage(projectId: string, page: Page): Promise<void> {
   saveBlob(await response.blob(), `${stem}.png`);
 }
 
+/** A page as a layered Photoshop file: the art, cleanup and brush layers, and each text block as its own layer. */
+export async function exportPagePsd(projectId: string, page: Page): Promise<void> {
+  const stem = page.name.trim().replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_") || "page";
+  const { blob, filename } = await download(`/api/v1/projects/${projectId}/pages/${page.id}/export?format=psd`, `${stem}.psd`);
+  saveBlob(blob, filename);
+}
+
+/** How chapters export: comic book, folder of PNGs, one long strip, or layered Photoshop files (in a .zip). */
+export type ChapterFormat = "cbz" | "zip" | "strip" | "psd";
+
 /** A chapter's rendered pages as one archive (or one long strip PNG), with the file name the server chose. */
-export function exportChapter(projectId: string, chapterId: string, format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
-  return download(`/api/v1/projects/${projectId}/chapters/${chapterId}/export?format=${format}`, `chapter.${format === "strip" ? "png" : format}`);
+export function exportChapter(projectId: string, chapterId: string, format: ChapterFormat): Promise<{ blob: Blob; filename: string }> {
+  return download(`/api/v1/projects/${projectId}/chapters/${chapterId}/export?format=${format}`, `chapter.${format === "strip" ? "png" : format === "psd" ? "zip" : format}`);
 }
 
 /**
  * Chapters exported together: one chapter as `exportChapter` saves it, several as one ZIP named after
  * the project with a `.cbz`, a folder of images or a strip `.png` per chapter.
  */
-export function exportChapters(projectId: string, chapterIds: string[], format: "cbz" | "zip" | "strip"): Promise<{ blob: Blob; filename: string }> {
+export function exportChapters(projectId: string, chapterIds: string[], format: ChapterFormat): Promise<{ blob: Blob; filename: string }> {
   if (chapterIds.length === 1) return exportChapter(projectId, chapterIds[0], format);
   const query = new URLSearchParams([["format", format], ...chapterIds.map((id) => ["chapter", id])]);
   return download(`/api/v1/projects/${projectId}/export?${query}`, "chapters.zip");
@@ -127,6 +137,19 @@ export async function uploadPageSources(projectId: string, swaps: [pageId: strin
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(typeof body?.detail === "string" ? body.detail : `Swap failed: ${response.status} ${response.statusText}`);
+  }
+}
+
+/** Several pages removed in one undo step. */
+export async function removePages(projectId: string, pageIds: string[]): Promise<void> {
+  const response = await fetch(`/api/v1/projects/${projectId}/pages/remove`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ page_ids: pageIds }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(typeof body?.detail === "string" ? body.detail : `Remove failed: ${response.status} ${response.statusText}`);
   }
 }
 

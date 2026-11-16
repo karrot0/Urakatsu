@@ -48,11 +48,11 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEventHandler, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import { assetHref, assetVersion, describeError, exportChapters, exportPage, saveBlob } from "../api/client";
+import { assetHref, assetVersion, describeError, exportChapters, exportPage, exportPagePsd, saveBlob, type ChapterFormat } from "../api/client";
 import { PAGE_ACCEPT } from "../api/imports";
 import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../api/sources";
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
@@ -165,6 +165,99 @@ function useExpanded(projectId: string): [(id: string) => boolean, (id: string, 
   return [isOpen, toggle];
 }
 
+/** Edge band (px) of the list where a rectangle drag scrolls it, and the fastest scroll per frame. */
+const MARQUEE_EDGE = 28;
+const MARQUEE_SPEED = 14;
+
+/**
+ * Rectangle selection over the page rows, as file managers do: press on empty space in the list
+ * (between or below the rows; a row itself drags to reorder) and drag. Pages whose rows the
+ * rectangle touches become the selection; Ctrl/Cmd or Shift adds them to the pages already picked.
+ * Near the list's top or bottom edge it scrolls, so long chapters can be swept. A click on empty
+ * space without a drag goes back to the current page alone.
+ */
+function useMarquee(content: RefObject<HTMLDivElement | null>) {
+  const ws = useWorkspace();
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+  const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const onPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const el = content.current;
+      const target = event.target as HTMLElement;
+      if (!el || event.button !== 0 || event.pointerType === "touch") return;
+      if (target !== el && !target.hasAttribute("data-marquee")) return;
+      const viewport = el.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+      const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+      const start = wsRef.current;
+      const base = additive ? (selectedPages(start).length ? selectedPages(start) : start.pageId ? [start.pageId] : []) : [];
+      const first = el.getBoundingClientRect();
+      const origin = { x: event.clientX - first.left, y: event.clientY - first.top };
+      let pointer = { x: event.clientX, y: event.clientY };
+      let moved = false;
+      let frame = 0;
+      let last = "";
+      el.setPointerCapture(event.pointerId);
+      event.preventDefault();
+
+      const update = () => {
+        const rect = el.getBoundingClientRect();
+        const x = pointer.x - rect.left;
+        const y = pointer.y - rect.top;
+        const area = { x: Math.min(origin.x, x), y: Math.min(origin.y, y), width: Math.abs(x - origin.x), height: Math.abs(y - origin.y) };
+        if (!moved && area.width < 4 && area.height < 4) return;
+        moved = true;
+        setBox(area);
+        const hit: string[] = [];
+        for (const row of el.querySelectorAll<HTMLElement>("[data-page-id]")) {
+          const r = row.getBoundingClientRect();
+          const top = r.top - rect.top;
+          const left = r.left - rect.left;
+          if (top < area.y + area.height && top + r.height > area.y && left < area.x + area.width && left + r.width > area.x) hit.push(row.dataset.pageId!);
+        }
+        const picked = [...base, ...hit.filter((id) => !base.includes(id))];
+        const key = picked.join(",");
+        if (picked.length && key !== last) {
+          last = key;
+          wsRef.current.selectPages(picked);
+        }
+      };
+      const scroll = () => {
+        frame = 0;
+        if (!viewport) return;
+        const bounds = viewport.getBoundingClientRect();
+        const over = pointer.y < bounds.top + MARQUEE_EDGE ? pointer.y - bounds.top - MARQUEE_EDGE : pointer.y > bounds.bottom - MARQUEE_EDGE ? pointer.y - bounds.bottom + MARQUEE_EDGE : 0;
+        if (!over) return;
+        const step = Math.max(-MARQUEE_SPEED, Math.min(MARQUEE_SPEED, Math.round((over / MARQUEE_EDGE) * MARQUEE_SPEED)));
+        if (!step) return;
+        viewport.scrollTop += step;
+        update();
+        frame = requestAnimationFrame(scroll);
+      };
+      const move = (e: PointerEvent) => {
+        pointer = { x: e.clientX, y: e.clientY };
+        update();
+        if (!frame) frame = requestAnimationFrame(scroll);
+      };
+      const end = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", end);
+        el.removeEventListener("pointercancel", end);
+        if (frame) cancelAnimationFrame(frame);
+        setBox(null);
+        const now = wsRef.current;
+        if (!moved && !additive && now.pageId && selectedPages(now).length) now.selectPage(now.pageId);
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", end);
+      el.addEventListener("pointercancel", end);
+    },
+    [content],
+  );
+  return { box, onPointerDown };
+}
+
 export function Sidebar() {
   const ws = useWorkspace();
   const project = ws.project!;
@@ -178,6 +271,8 @@ export function Sidebar() {
   const uploadFolder = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<string | undefined>(undefined);
   const [fileOver, setFileOver] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const marquee = useMarquee(listRef);
 
   const layout = draft ?? base;
   const pages = useMemo(() => new Map(project.pages.map((page) => [page.id, page])), [project.pages]);
@@ -315,7 +410,8 @@ export function Sidebar() {
       </div>
       <SelectionBar />
 
-      <ScrollArea className="flex-1" contentClassName="px-1 pb-3">
+      <ScrollArea className="flex-1" contentClassName="flex min-h-full flex-col">
+        <div ref={listRef} className="relative flex flex-1 flex-col px-1 pb-3 select-none" onPointerDown={marquee.onPointerDown}>
         <DndContext
           sensors={sensors}
           collisionDetection={collision}
@@ -363,6 +459,16 @@ export function Sidebar() {
             )}
           </DragOverlay>
         </DndContext>
+          {/* Room below the rows to start a rectangle selection, however long the list. */}
+          <div data-marquee className="min-h-10 flex-1" aria-hidden />
+          {marquee.box && (
+            <div
+              className="pointer-events-none absolute z-10 rounded-[2px] border border-brand bg-[color-mix(in_oklab,var(--brand)_12%,transparent)]"
+              style={{ left: marquee.box.x, top: marquee.box.y, width: marquee.box.width, height: marquee.box.height }}
+              aria-hidden
+            />
+          )}
+        </div>
       </ScrollArea>
 
       <div className="flex flex-col gap-1 p-2 shadow-[inset_0_1px_0_var(--border-soft)]">
@@ -902,7 +1008,6 @@ function ChapterRowView({
   );
 }
 
-type ChapterFormat = "cbz" | "zip" | "strip";
 
 /** The export formats for one chapter or several (several save as one ZIP of them). */
 function exportActions(webtoon: boolean, count: number, exportAs: (format: ChapterFormat) => void) {
@@ -911,7 +1016,14 @@ function exportActions(webtoon: boolean, count: number, exportAs: (format: Chapt
     { label: several ? `${count} comic books (.cbz) in a .zip` : "Comic book (.cbz)", onSelect: () => exportAs("cbz") },
     { label: several ? `${count} folders of images (.zip)` : "Images (.zip)", onSelect: () => exportAs("zip") },
     ...(webtoon ? [{ label: several ? `${count} long strips (.png) in a .zip` : "Long strip (.png)", onSelect: () => exportAs("strip") }] : []),
+    { label: "Photoshop layers (.psd in a .zip)", onSelect: () => exportAs("psd") },
   ];
+}
+
+/** Asks, then removes the selected pages in one undo step. */
+async function removeSelected(ws: ReturnType<typeof useWorkspace>, pageIds: string[]) {
+  if (!pageIds.length) return;
+  if (await confirm({ title: `Remove ${pageIds.length} pages?`, description: "You can undo this.", action: "Remove", danger: true })) await ws.removePages(pageIds);
 }
 
 /** "4 pages selected" or "3 chapters selected" with a way out, while a Shift/Ctrl selection is active. */
@@ -938,12 +1050,18 @@ function SelectionBar() {
     if (!active) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (event.key === "Escape" && !target?.closest("input, textarea, [contenteditable]")) clear();
+      if (target?.closest("input, textarea, [contenteditable]")) return;
+      if (event.key === "Escape") clear();
+      // Delete removes a page selection while the sidebar has focus (the canvas keeps Delete for its blocks).
+      if ((event.key === "Delete" || event.key === "Backspace") && !chapters.length && pages.length > 1 && target?.closest('[aria-label="Chapters and pages"]')) {
+        event.preventDefault();
+        void removeSelected(ws, pages);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, ws.pageId, chapters.length]);
+  }, [active, ws.pageId, chapters.length, pages.join(",")]);
   if (!active) return null;
   const pageCount = chapters.reduce((sum, c) => sum + c.pageIds.length, 0);
   return (
@@ -971,6 +1089,18 @@ function SelectionBar() {
           actions={exportActions(ws.project?.format?.kind === "webtoon", chapters.length, (format) => void exportAs(format))}
         />
       )}
+      {!chapters.length && pages.length > 1 && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          title={`Remove ${pages.length} pages (Delete)`}
+          aria-label={`Remove ${pages.length} selected pages`}
+          disabled={ws.job?.status === "running"}
+          onClick={() => void removeSelected(ws, pages)}
+        >
+          <Trash2 size={14} />
+        </Button>
+      )}
       <Button variant="ghost" size="icon-xs" title="Clear selection (Esc)" aria-label={chapters.length ? "Clear chapter selection" : "Clear page selection"} onClick={clear}>
         <X size={14} />
       </Button>
@@ -990,10 +1120,10 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
   const selection = selectedPages(ws);
   const inSelection = selection.includes(page.id);
   const [exporting, setExporting] = useState(false);
-  const exportPng = async () => {
+  const exportPng = async (psd = false) => {
     setExporting(true);
     try {
-      await exportPage(ws.project!.id, page);
+      await (psd ? exportPagePsd : exportPage)(ws.project!.id, page);
     } catch (error) {
       ws.reportError(describeError(error));
     } finally {
@@ -1001,10 +1131,11 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
     }
   };
   const remove = async () => {
+    if (inSelection) return void removeSelected(ws, selection);
     if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
   };
   return (
-    <div ref={sortable.setNodeRef} style={style} role="listitem">
+    <div ref={sortable.setNodeRef} style={style} role="listitem" data-page-id={page.id}>
       <ContextActions
         actions={[
           {
@@ -1016,7 +1147,8 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
             },
           },
           { label: "Export as PNG", disabled: exporting, onSelect: () => void exportPng() },
-          { label: "Remove page", danger: true, disabled, onSelect: () => void remove() },
+          { label: "Export as PSD (layers)", disabled: exporting, onSelect: () => void exportPng(true) },
+          { label: inSelection ? `Remove ${selection.length} pages` : "Remove page", danger: true, disabled, onSelect: () => void remove() },
         ]}
       >
         <PageRowView

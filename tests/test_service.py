@@ -704,3 +704,73 @@ async def test_selected_chapters_export_as_one_zip_that_imports_back(workspace):
             assert archive.namelist() == ["Ch 1.png", "Ch 1 (2).png"]
         assert (await client.get(f"/api/v1/projects/{project}/export")).status_code == 400
         assert (await client.get(f"/api/v1/projects/{project}/export", params={"chapter": "nope"})).status_code == 404
+
+
+def _psd_layers(data: bytes) -> list[tuple[str, tuple[int, int, int, int]]]:
+    """Each layer's Unicode name and (top, left, bottom, right), bottom first, read back by hand."""
+    import struct
+
+    assert data[:4] == b"8BPS"
+    channels, height, width, depth, mode = struct.unpack(">H6xHIIHH", data[4:26])[1:]
+    assert (channels, depth, mode) == (3, 8, 3)
+    at = 26
+    for _ in range(2):  # color mode data, image resources
+        at += 4 + struct.unpack(">I", data[at : at + 4])[0]
+    at += 4 + 4  # section length, layer info length
+    (count,) = struct.unpack(">h", data[at : at + 2])
+    at += 2
+    layers = []
+    for _ in range(count):
+        box = struct.unpack(">4i", data[at : at + 16])
+        (n,) = struct.unpack(">H", data[at + 16 : at + 18])
+        at += 18 + 6 * n + 12
+        (extra,) = struct.unpack(">I", data[at : at + 4])
+        block = data[at + 4 : at + 4 + extra]
+        at += 4 + extra
+        luni = block.index(b"8BIMluni")
+        (chars,) = struct.unpack(">I", block[luni + 12 : luni + 16])
+        layers.append((block[luni + 16 : luni + 16 + 2 * chars].decode("utf-16-be"), box))
+    return layers
+
+
+def test_a_page_exports_as_psd_with_each_text_block_on_its_own_layer(workspace):
+    import zipfile
+
+    from urakatsu.pipeline.projects import DEFAULT_CHAPTER_ID
+
+    workspace._renderer = None  # the real renderer: the PSD is made from its layers
+    project = workspace.create_project("Layers").id
+    page = workspace.add_page(project, "p1.png", page_png()).id
+    view = workspace.create_text_block(project, page, {"x": 40, "y": 40, "width": 200, "height": 80})
+    workspace.update_text_block(project, page, view.blocks[-1].layer_id, {"translation": "Hello there"})
+    data, name = workspace.export_page(project, page, "psd")
+    assert name == "p1.psd"
+    layers = _psd_layers(data)
+    assert layers[0][0] == "Original" and layers[0][1] == (0, 0, 300, 400)
+    assert [n for n, _ in layers[1:]] == ["</Layer group>", "Hello there", "Text"]
+    top, left, bottom, right = layers[2][1]
+    assert 0 <= left < right <= 400 and 0 <= top < bottom <= 300  # the text keeps its place on the page
+
+    archive, archive_name = workspace.export_chapter(project, DEFAULT_CHAPTER_ID, "psd")
+    assert archive_name == "Layers - Chapter 1 (PSD).zip"
+    with zipfile.ZipFile(io.BytesIO(archive)) as packed:
+        assert packed.namelist() == ["0001_p1.psd"]
+
+
+async def test_selected_pages_remove_in_one_undo_step(workspace):
+    project = workspace.create_project("Bulk").id
+    ids = [workspace.add_page(project, f"p{n}.png", page_png()).id for n in range(4)]
+    view = workspace.remove_pages(project, [ids[1], ids[3], ids[1]])
+    assert [p.id for p in view.pages] == [ids[0], ids[2]]
+    workspace.undo(project)
+    assert [p.id for p in workspace.project_view(project).pages] == ids
+    from urakatsu.scene.scene import SceneError
+
+    with pytest.raises(SceneError):
+        workspace.remove_pages(project, [ids[0], "nope"])
+    assert len(workspace.project_view(project).pages) == 4  # an unknown page removes nothing
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/api/v1/projects/{project}/pages/remove", json={"page_ids": ids[:2]})
+        assert response.status_code == 200
+    assert [p.id for p in workspace.project_view(project).pages] == ids[2:]

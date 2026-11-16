@@ -142,7 +142,8 @@ class Catalog:
             for provider_id, cls in providers.items():
                 runtime = cls.accepts(facts)
                 if runtime:
-                    usage.append({"stage": stage.value, "provider": provider_id, "name": cls.name or provider_id, "runtime": runtime})
+                    # ``remotable``: the app's workers (Colab, Kaggle, another machine) can run it.
+                    usage.append({"stage": stage.value, "provider": provider_id, "name": cls.name or provider_id, "runtime": runtime, "remotable": bool(getattr(cls, "remotable", False))})
         return usage
 
     # -- runtime compatibility ---------------------------------------------------------------------
@@ -555,7 +556,10 @@ class Catalog:
 
     # -- install -----------------------------------------------------------------------------------
 
-    def install(self, runtime: str, repo_id: str, variant: str) -> dict[str, Any]:
+    def install(self, runtime: str, repo_id: str, variant: str, workers_only: bool = False) -> dict[str, Any]:
+        """Downloads one variant, or with ``workers_only`` only registers it: the app's workers then
+        download its files where they run (a Colab worker into Google Drive), so a model too large
+        for this machine never passes through it."""
         if models_folder.mover.running:
             raise ValueError("Models are moving to a new folder. Install once the move finishes.")
         details_repo = self.hub.model(repo_id)
@@ -609,6 +613,14 @@ class Catalog:
             usable_by=usage,
             recipe=plan.recipe.id if plan else None,
         )
+        if workers_only:
+            if not any(u.get("remotable") for u in usage):
+                raise ValueError(f"{repo_id} runs only on this computer: none of the stages that use it run on workers")
+            if self.installed.complete(model) or (self.installed.get(model.id) and not self.installed.get(model.id).workers_only):
+                raise ValueError(f"{model.id} is already downloaded on this computer")
+            model.workers_only, model.installed_at = True, time.time()
+            self.installed.add(model)
+            return {"id": "", "model": model.model_dump(mode="json"), "status": "completed"}
         download = self.downloads.start(model)
         return download.model_dump(mode="json")
 

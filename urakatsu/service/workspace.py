@@ -16,14 +16,14 @@ import time
 import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 
 from PIL import Image
 from pydantic import BaseModel
 
 from urakatsu import __version__
 from urakatsu.core import files
-from urakatsu.core.config import PipelineConfig, load_config, save_config
+from urakatsu.core.config import PipelineConfig, home, load_config, save_config
 from urakatsu.core.errors import ProcessingError, ProjectBusy
 from urakatsu.core.progress import Progress, ProgressKind
 from urakatsu.core.registry import registry
@@ -361,8 +361,12 @@ class Workspace:
         CBZ export: the :meth:`chapter_pages` entries, stored uncompressed
         since PNG is already compressed.
         """
-        if format not in ("cbz", "zip", "strip"):
-            raise ValueError("format must be cbz, zip or strip")
+        if format not in ("cbz", "zip", "strip", "psd"):
+            raise ValueError("format must be cbz, zip, strip or psd")
+        if format == "psd":
+            chapter, pages = self.chapter_pages(project_id, chapter_id, psd=True)
+            name = files.safe_stem(f"{self.store.name(project_id)} - {chapter.name}") or "chapter"
+            return _zip(pages, deflate=True), f"{name} (PSD).zip"
         chapter, pages = self.chapter_pages(project_id, chapter_id)
         if format == "strip":
             strip = stitch([Image.open(io.BytesIO(data)) for _, data in pages])
@@ -381,8 +385,8 @@ class Workspace:
         (``zip``), or ``<chapter>.png`` (``strip``). Chapters go in project order; empty ones
         are skipped and named in the error if none is left. Importing the ZIP gives the
         chapters back (``urakatsu/pipeline/imports.py``)."""
-        if format not in ("cbz", "zip", "strip"):
-            raise ValueError("format must be cbz, zip or strip")
+        if format not in ("cbz", "zip", "strip", "psd"):
+            raise ValueError("format must be cbz, zip, strip or psd")
         known = {ch.id: ch for ch in chapters_of(self.session(project_id).snapshot())}
         missing = [cid for cid in chapter_ids if cid not in known]
         if missing:
@@ -394,7 +398,9 @@ class Workspace:
         project = self.store.name(project_id)
         taken: set[str] = set()
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        # PSD channels are PackBits, which leaves the flat areas of a page for deflate to shrink.
+        compression = zipfile.ZIP_DEFLATED if format == "psd" else zipfile.ZIP_STORED
+        with zipfile.ZipFile(buffer, "w", compression=compression) as archive:
             for chapter_id in filled:
                 stem = files.safe_stem(known[chapter_id].name) or "chapter"
                 name, n = stem, 1
@@ -402,17 +408,18 @@ class Workspace:
                     n += 1
                     name = f"{stem} ({n})"
                 taken.add(name.casefold())
-                if format == "zip":
-                    for page, data in self.chapter_pages(project_id, chapter_id)[1]:
+                if format in ("zip", "psd"):
+                    for page, data in self.chapter_pages(project_id, chapter_id, psd=format == "psd")[1]:
                         archive.writestr(f"{name}/{page}", data)
                 else:
                     data, _ = self.export_chapter(project_id, chapter_id, format)
                     archive.writestr(f"{name}.{'png' if format == 'strip' else 'cbz'}", data)
         return buffer.getvalue(), f"{files.safe_stem(project) or 'chapters'}.zip"
 
-    def chapter_pages(self, project_id: str, chapter_id: str) -> tuple[Chapter, list[tuple[str, bytes]]]:
+    def chapter_pages(self, project_id: str, chapter_id: str, psd: bool = False) -> tuple[Chapter, list[tuple[str, bytes]]]:
         """A chapter and its pages as rendered, in chapter order, as ``(file name, PNG)``:
-        ``0001_<page>.png``, numbered so any reader sorts them right."""
+        ``0001_<page>.png``, numbered so any reader sorts them right. With ``psd``, layered
+        Photoshop files instead (``page_psd``)."""
         snapshot = self.session(project_id).snapshot()
         chapter = next((ch for ch in chapters_of(snapshot) if ch.id == chapter_id), None)
         if chapter is None:
@@ -423,8 +430,28 @@ class Workspace:
         pages = []
         for index, page_id in enumerate(chapter.pages, start=1):
             label = files.safe_stem(snapshot.page(page_id).label or "") or "page"
-            pages.append((f"{index:0{width}d}_{label}.png", self.render(project_id, page_id, snapshot)))
+            if psd:
+                pages.append((f"{index:0{width}d}_{label}.psd", self.page_psd(project_id, page_id, snapshot)))
+            else:
+                pages.append((f"{index:0{width}d}_{label}.png", self.render(project_id, page_id, snapshot)))
         return chapter, pages
+
+    def page_psd(self, project_id: str, page_id: str, snapshot: Optional[Snapshot] = None) -> bytes:
+        """A page as a layered Photoshop file (``urakatsu.renderer.psd``): the art, cleanup and brush
+        layers, and each text block as its own layer, so edits stay apart in other editors."""
+        from urakatsu.renderer.psd import frame_psd
+
+        snapshot = snapshot or self.session(project_id).snapshot()
+        frame, _ = self._drawn(project_id, page_id, snapshot)
+        return frame_psd(frame)
+
+    def export_page(self, project_id: str, page_id: str, format: str) -> tuple[bytes, str]:
+        """One page as a layered ``psd`` (the PNG export is the ``render`` asset)."""
+        if format != "psd":
+            raise ValueError("format must be psd")
+        snapshot = self.session(project_id).snapshot()
+        label = files.safe_stem(snapshot.page(page_id).label or "") or "page"
+        return self.page_psd(project_id, page_id, snapshot), f"{label}.psd"
 
     def delete_chapter(self, project_id: str, chapter_id: str) -> ProjectView:
         self._idle(project_id)
@@ -459,6 +486,14 @@ class Workspace:
         self.store.remove_page(project_id, page_id)
         return self.project_view(project_id)
 
+    def remove_pages(self, project_id: str, page_ids: list[str]) -> ProjectView:
+        """Several pages removed in one undo step (the sidebar's selection)."""
+        if not page_ids:
+            raise ValueError("name at least one page to remove")
+        self._idle(project_id)
+        self.store.remove_pages(project_id, page_ids)
+        return self.project_view(project_id)
+
     def swap_page_source(self, project_id: str, page_id: str, data: bytes) -> PageView:
         self._idle(project_id)
         return self.page(project_id, self.store.swap_page_source(project_id, page_id, data))
@@ -483,6 +518,7 @@ class Workspace:
         return self._renderer
 
     def render(self, project_id: str, page_id: str, snapshot: Optional[Snapshot] = None) -> bytes:
+        """The page as rendered, flattened to one PNG (exports, the ``render`` asset)."""
         snapshot = snapshot or self.session(project_id).snapshot()
         key = (project_id, page_id, snapshot.revision)
         with self._render_lock:
@@ -492,26 +528,45 @@ class Workspace:
                 return cached
         from urakatsu.renderer.svg import split_index
 
-        with self._draw_lock:
-            frame = self.renderer().render(snapshot, page_id)
-            # The art under the text first, then the text over it: the editor shows the two apart.
-            split = split_index(frame)
-            base = replace(frame, layers=frame.layers[:split]).composite()
-            image = replace(frame, layers=frame.layers[split:]).composite(onto=base)
+        frame, base = self._drawn(project_id, page_id, snapshot)
+        image = replace(frame, layers=frame.layers[split_index(frame) :]).composite(onto=base)
         data = _png(image)
+        with self._render_lock:
+            self._renders[key] = data
+            while len(self._renders) > RENDER_CACHE:
+                self._renders.popitem(last=False)
+        return data
+
+    def _drawn(self, project_id: str, page_id: str, snapshot: Snapshot) -> tuple[Any, Image.Image]:
+        """The page's rendered frame and the art under its text, drawn once per revision and kept
+        (``_keep_frame``). The editor shows the art and the text apart (``render_parts``), so this
+        flattens nothing further and encodes nothing: only exports need the whole page as a PNG."""
+        from urakatsu.renderer.svg import split_index
+
+        key = (project_id, page_id, snapshot.revision)
+        with self._render_lock:
+            frame, base = self._frames.get(key), self._bases.get(key)
+        if frame is not None and base is not None:
+            return frame, base
+        with self._draw_lock:
+            with self._render_lock:
+                frame, base = self._frames.get(key), self._bases.get(key)
+            if frame is None:
+                frame = self.renderer().render(snapshot, page_id)
+            if base is None:
+                base = replace(frame, layers=frame.layers[: split_index(frame)]).composite()
         layouts = {
             layer.entity: {"font_size": layer.kind.font_size, "line_starts": list(layer.kind.line_starts), "writing_mode": layer.kind.writing_mode.value}
             for layer in frame.layers
             if layer.is_text()
         }
         with self._render_lock:
-            self._renders[key] = data
+            self._text_layouts.pop(key, None)
             self._text_layouts[key] = layouts
+            while len(self._text_layouts) > RENDER_CACHE:
+                self._text_layouts.pop(next(iter(self._text_layouts)))
             self._keep_frame(key, frame, base)
-            while len(self._renders) > RENDER_CACHE:
-                evicted, _ = self._renders.popitem(last=False)
-                self._text_layouts.pop(evicted, None)
-        return data
+        return frame, base
 
     def text_layout(self, project_id: str, page_id: str) -> dict[str, dict[str, Any]]:
         """How the render laid out each text block: the font size auto-fit chose and where each line (or
@@ -521,7 +576,7 @@ class Workspace:
         with self._render_lock:
             if key in self._text_layouts:
                 return self._text_layouts[key]
-        self.render(project_id, page_id, snapshot)
+        self._drawn(project_id, page_id, snapshot)
         with self._render_lock:
             return self._text_layouts.get(key, {})
 
@@ -537,15 +592,7 @@ class Workspace:
             with self._draw_lock:
                 frame = self.renderer().render(edit.snapshot(), page_id)
         else:
-            key = (project_id, page_id, snapshot.revision)
-            self.render(project_id, page_id, snapshot)
-            with self._render_lock:
-                frame = self._frames.get(key)
-            if frame is None:
-                with self._draw_lock:
-                    frame = self.renderer().render(snapshot, page_id)
-                with self._render_lock:
-                    self._keep_frame(key, frame)
+            frame, _ = self._drawn(project_id, page_id, snapshot)
         layer = frame.layer(layer_id)
         if layer is None or not layer.is_text():
             raise KeyError(f"text block {layer_id} is not drawn on page {page_id}")
@@ -584,24 +631,35 @@ class Workspace:
             if cached is not None:
                 self._parts.move_to_end(key)
                 return cached
-        self.render(project_id, page_id, snapshot)
-        with self._render_lock:
-            frame = self._frames.get(key)
-            base = self._bases.get(key)
-        if frame is None:
-            with self._draw_lock:
-                frame = self.renderer().render(snapshot, page_id)
-            with self._render_lock:
-                self._keep_frame(key, frame)
-        split = split_index(frame)
-        if base is None:
-            base = replace(frame, layers=frame.layers[:split]).composite()
-        parts = (_png(base), layers_svg(frame, frame.layers[split:]))
+        frame, base = self._drawn(project_id, page_id, snapshot)
+        parts = (_png(base), layers_svg(frame, frame.layers[split_index(frame) :]))
         with self._render_lock:
             self._parts[key] = parts
             while len(self._parts) > RENDER_CACHE:
                 self._parts.popitem(last=False)
         return parts
+
+    def _thumbnail(self, blob: str, read: Callable[[], bytes]) -> bytes:
+        """A sidebar thumbnail of a source image, kept on disk under its blob's (content) hash so a
+        restart does not decode every page again: decoding a page is most of a cold sidebar's load."""
+        path = home() / "cache" / "thumbnails" / f"{blob}.jpg"
+        try:
+            return path.read_bytes()
+        except OSError:
+            pass
+        image = Image.open(io.BytesIO(read())).convert("RGB")
+        image.thumbnail((256, 256))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=80)
+        data = buffer.getvalue()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        except OSError:
+            pass  # a read-only or full disk only costs the next start a decode
+        return data
 
     def asset(self, project_id: str, page_id: str, kind: str) -> Optional[tuple[bytes, str, int, int]]:
         snapshot = self.session(project_id).snapshot()
@@ -618,11 +676,7 @@ class Workspace:
             if source is None:
                 return None
             if source.blob not in self._thumbnails:
-                image = Image.open(io.BytesIO(snapshot.blobs.read(source.blob))).convert("RGB")
-                image.thumbnail((256, 256))
-                buffer = io.BytesIO()
-                image.save(buffer, format="JPEG", quality=80)
-                self._thumbnails[source.blob] = buffer.getvalue()
+                self._thumbnails[source.blob] = self._thumbnail(source.blob, lambda: snapshot.blobs.read(source.blob))
             return self._thumbnails[source.blob], "image/jpeg", *size
         if kind.startswith("layer:"):
             layer = kind.removeprefix("layer:")
@@ -1062,6 +1116,14 @@ class Workspace:
         self.links.close()
         self.systems.close()
         self.pipeline.unload_all()
+
+
+def _zip(entries: list[tuple[str, bytes]], deflate: bool = False) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED if deflate else zipfile.ZIP_STORED) as archive:
+        for name, data in entries:
+            archive.writestr(name, data)
+    return buffer.getvalue()
 
 
 def _png(image: Image.Image) -> bytes:

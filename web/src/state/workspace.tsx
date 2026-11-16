@@ -3,7 +3,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { assetUrl, assetVersion, client, describeError, forgetAssets, uploadPageSources } from "../api/client";
+import { assetUrl, assetVersion, client, describeError, forgetAssets, removePages as removePagesRequest, uploadPageSources } from "../api/client";
 import { collect, importFiles, needsImport, type Incoming, type PageSource } from "../api/imports";
 import { challengeOf, type CatalogRuntime, type Challenge } from "../api/catalog";
 import { sources, type LinkView } from "../api/sources";
@@ -205,6 +205,10 @@ interface Actions {
   redo(): Promise<void>;
   uploadPages(source: PageSource, chapterId?: string): Promise<void>;
   removePage(pageId: string): Promise<void>;
+  /** Several pages removed in one undo step (the sidebar selection). */
+  removePages(pageIds: string[]): Promise<void>;
+  /** Sets the page selection to `pageIds` (a rectangle drag in the sidebar); "add" keeps the pages already picked. */
+  selectPages(pageIds: string[], mode?: "replace" | "add"): void;
   swapPageSources(swaps: [pageId: string, file: File][]): Promise<void>;
   createChapter(name?: string): Promise<void>;
   renameChapter(chapterId: string, name: string): Promise<void>;
@@ -577,6 +581,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [state.project, fail],
   );
+
+  const removePages = useCallback(
+    async (pageIds: string[]) => {
+      const project = state.project;
+      if (!project || !pageIds.length) return;
+      try {
+        await removePagesRequest(project.id, pageIds);
+        const next = await client.getProject({ projectId: project.id });
+        for (const pageId of pageIds) forgetAssets(project.id, pageId);
+        const gone = new Set(pageIds);
+        setState((s) => {
+          // The current page stays if it is left, else the first page after the removed ones.
+          const order = s.project?.chapters.flatMap((c) => c.pageIds) ?? [];
+          const after = order.slice(order.indexOf(s.pageId ?? "") + 1).find((id) => !gone.has(id) && next.pages.some((p) => p.id === id));
+          const pageId = s.pageId && !gone.has(s.pageId) ? s.pageId : (after ?? next.pages[0]?.id);
+          return { ...s, project: next, pageId, pageSelection: pageId ? [pageId] : [], blockId: pageId === s.pageId ? s.blockId : undefined };
+        });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.project, fail],
+  );
+
+  const selectPages = useCallback((pageIds: string[], mode: "replace" | "add" = "replace") => {
+    setState((s) => {
+      const order = s.project?.chapters.flatMap((c) => c.pageIds) ?? [];
+      const base = mode === "add" ? (selectedPages(s).length ? selectedPages(s) : s.pageId ? [s.pageId] : []) : [];
+      const selection = order.filter((id) => base.includes(id) || pageIds.includes(id));
+      if (!selection.length) return s;
+      const pageId = s.pageId && selection.includes(s.pageId) ? s.pageId : selection[0];
+      const same = pageId === s.pageId;
+      return { ...s, pageId, pageSelection: selection, pageAnchor: pageIds[0] ?? s.pageAnchor, chapterSelection: [], blockId: same ? s.blockId : undefined, rasterId: same ? s.rasterId : undefined };
+    });
+  }, []);
 
   const swapPageSources = useCallback(
     async (swaps: [pageId: string, file: File][]) => {
@@ -1054,6 +1093,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       redo: () => history("redo"),
       uploadPages,
       removePage,
+      removePages,
+      selectPages,
       swapPageSources,
       createChapter,
       renameChapter,
@@ -1142,6 +1183,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       history,
       uploadPages,
       removePage,
+      removePages,
+      selectPages,
       swapPageSources,
       createChapter,
       renameChapter,

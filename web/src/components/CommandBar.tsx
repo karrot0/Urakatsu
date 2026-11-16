@@ -24,7 +24,7 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { describeError, exportChapters, exportPage, saveBlob } from "../api/client";
+import { describeError, exportChapters, exportPage, exportPagePsd, saveBlob, type ChapterFormat } from "../api/client";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
@@ -123,7 +123,6 @@ export function CommandBar() {
   );
 }
 
-type ChapterFormat = "cbz" | "zip" | "strip";
 
 function ExportMenu({ variant }: { variant: "default" | "outline" }) {
   const ws = useWorkspace();
@@ -174,6 +173,7 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
           <DropdownMenuGroup>
             <DropdownMenuLabel className="truncate">Export page · {page.name}</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => void save(() => exportPage(ws.project!.id, page))}>Image (.png)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void save(() => exportPagePsd(ws.project!.id, page))}>Photoshop layers (.psd)</DropdownMenuItem>
           </DropdownMenuGroup>
         )}
         {group.length > 0 && (
@@ -186,6 +186,7 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
               <DropdownMenuItem onClick={() => void exportAs("cbz")}>{group.length > 1 ? "Comic books (.cbz)" : "Comic book (.cbz)"}</DropdownMenuItem>
               <DropdownMenuItem onClick={() => void exportAs("zip")}>{group.length > 1 ? "Folders of images" : "Images (.zip)"}</DropdownMenuItem>
               {webtoon && <DropdownMenuItem onClick={() => void exportAs("strip")}>{group.length > 1 ? "Long strips (.png)" : "Long strip (.png)"}</DropdownMenuItem>}
+              <DropdownMenuItem onClick={() => void exportAs("psd")}>Photoshop layers (.psd in a .zip)</DropdownMenuItem>
             </DropdownMenuGroup>
           </>
         )}

@@ -305,15 +305,23 @@ class ProjectStore:
         self.touch(project_id)
 
     def remove_page(self, project_id: str, page_id: str) -> None:
+        self.remove_pages(project_id, [page_id])
+
+    def remove_pages(self, project_id: str, page_ids: list[str]) -> None:
+        """Removes pages in one undoable commit. Every id is checked first, so an unknown one
+        removes nothing."""
         session = self.session(project_id)
         snapshot = session.snapshot()
-        snapshot.page(page_id)
+        doomed = list(dict.fromkeys(page_ids))
+        for page_id in doomed:
+            snapshot.page(page_id)
         chapters = chapters_of(snapshot)
+        gone = set(doomed)
         for chapter in chapters:
-            if page_id in chapter.pages:
-                chapter.pages.remove(page_id)
+            chapter.pages[:] = [page for page in chapter.pages if page not in gone]
         edit = snapshot.edit()
-        edit.remove_entity(page_id, RemovePolicy.CASCADE)
+        for page_id in doomed:
+            edit.remove_entity(page_id, RemovePolicy.CASCADE)
         write_chapters(edit, chapters)
         session.commit(edit.finish())
         self.touch(project_id)

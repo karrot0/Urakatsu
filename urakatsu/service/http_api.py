@@ -32,6 +32,10 @@ HTTP_STATUS = {
 }
 
 
+class PageIdsBody(BaseModel):
+    page_ids: list[str]
+
+
 class BoxBody(BaseModel):
     x: float
     y: float
@@ -227,6 +231,12 @@ def api_router(ws: Workspace) -> APIRouter:
         data, filename = guard(ws.export_chapter, project_id, chapter_id, format)
         return attachment(data, filename, {"cbz": "application/vnd.comicbook+zip", "strip": "image/png"}.get(format, "application/zip"))
 
+    @router.get("/projects/{project_id}/pages/{page_id}/export")
+    def export_page(project_id: str, page_id: str, format: str = "psd"):
+        """One page as a layered Photoshop file (``Workspace.export_page``)."""
+        data, filename = guard(ws.export_page, project_id, page_id, format)
+        return attachment(data, filename, "image/vnd.adobe.photoshop")
+
     @router.get("/projects/{project_id}/export")
     def export_chapters(project_id: str, chapter: list[str] = Query(default=[]), format: str = "cbz"):
         """Several chapters in one ZIP (``Workspace.export_chapters``): ``?chapter=a&chapter=b``."""
@@ -293,6 +303,12 @@ def api_router(ws: Workspace) -> APIRouter:
     @router.delete("/projects/{project_id}/pages/{page_id}")
     def remove_page(project_id: str, page_id: str):
         return guard(ws.remove_page, project_id, page_id)
+
+    @router.post("/projects/{project_id}/pages/remove")
+    def remove_pages(project_id: str, body: PageIdsBody):
+        """Several pages removed in one undo step (``Workspace.remove_pages``)."""
+        guard(ws.remove_pages, project_id, body.page_ids)
+        return {"ok": True}
 
     @router.put("/projects/{project_id}/pages/{page_id}/source")
     async def swap_page_source(project_id: str, page_id: str, file: UploadFile = File(...)):

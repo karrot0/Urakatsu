@@ -211,6 +211,13 @@ class Layer:
         left, top, right, bottom = _rounded_out(self.bounds)
         width = max(right - left, 1)
         height = max(bottom - top, 1)
+        # A raster drawn unscaled at whole pixels (the page art, cleanup and brush layers) is its
+        # own pixels: Skia would only premultiply and unpremultiply them, at a full page's cost.
+        raster = self.raster
+        if raster is not None and self.scene is None and (raster.width, raster.height) == (width, height):
+            a, b, c, d, e, f = affine_mul(affine_translate(-left, -top), self.placement)
+            if (a, b, c, d) == (1.0, 0.0, 0.0, 1.0) and e == 0 and f == 0:
+                return PILImage.fromarray(np.ascontiguousarray(raster.pixels), mode="RGBA")
         surface = skia.Surface(width, height)
         canvas = surface.getCanvas()
         canvas.clear(skia.ColorTRANSPARENT)
@@ -260,10 +267,14 @@ class Frame:
                 alpha = np.asarray(image.getchannel("A"), dtype=np.float32) * layer.presentation.opacity
                 image = image.copy()
                 image.putalpha(PILImage.fromarray(np.clip(alpha, 0, 255).astype(np.uint8), mode="L"))
-            # Layer images are cropped to their own bounds, so paste at the same origin.
-            overlay = PILImage.new("RGBA", canvas.size, (0, 0, 0, 0))
-            overlay.paste(image, (left - x0, top - y0))
-            canvas = PILImage.alpha_composite(canvas, overlay)
+            # Layer images are cropped to their own bounds, so they go at the same origin. Only the
+            # part over the canvas is composited, in place: a full-size overlay per layer cost a
+            # page-sized allocation and blend each, most of the editor's render time.
+            dx, dy = left - x0, top - y0
+            sx0, sy0 = max(0, -dx), max(0, -dy)
+            sx1, sy1 = min(image.width, canvas.width - dx), min(image.height, canvas.height - dy)
+            if sx1 > sx0 and sy1 > sy0:
+                canvas.alpha_composite(image, dest=(dx + sx0, dy + sy0), source=(sx0, sy0, sx1, sy1))
         return canvas
 
     def cropped(self, entity: str) -> Optional["Frame"]:

@@ -236,3 +236,19 @@ def test_hub_answers_survive_a_restart_and_refresh_in_the_background(tmp_path, m
     again._refresher.shutdown(wait=True)
     assert len(served) == 2  # ...and refreshed behind it
     assert DiskCache(tmp_path).get("missing") is None
+
+
+def test_a_model_added_for_workers_has_no_files_here_and_removes_cleanly(offline_home):
+    # A Colab user adds a model for their worker: nothing downloads here, the worker fetches it.
+    store = ModelStore()
+    models = InstalledModels(store)
+    model = InstalledModel(
+        id="someone/big-ocr", repo="someone/big-ocr", revision="abc", runtime="torch",
+        files=[InstalledFile(path="model.safetensors", role="file", size=40 * GB)], workers_only=True,
+    )
+    models.add(model)
+    stored = models.get(model.id)
+    assert stored.workers_only and not models.complete(stored)
+    assert not (store.root / "hf" / "someone" / "big-ocr").exists()
+    models.remove(model.id)
+    assert models.get(model.id) is None
