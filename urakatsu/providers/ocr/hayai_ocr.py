@@ -1,22 +1,29 @@
-"""Hayai OCR: SigLIP2 NaFlex encoder and a GQA decoder, greedy.
+"""Hayai OCR v2.7 Supernova: a SigLIP2 NaFlex encoder and a GQA decoder, greedy.
 
-Upstream sources (JustANormalTinkerer/hayai-ocr-v2 @ REVISION):
-- ``hayai_ocr/mod.rs``: load order and ``inference``.
-- ``hayai_ocr/config.rs``: SigLIP2 and decoder constants and validation.
-- ``hayai_ocr/processor.rs``: the NaFlex size search, bilinear resize,
-  patchify order, padding to 256 patches, and the decode filter.
-- ``hayai_ocr/model.rs``: ``generate`` (greedy, 256 tokens), 2D visual RoPE,
-  block-causal prefill mask and the decoder layers.
+Upstream: ``modeling_hayai.py`` and ``processing_hayai.py`` at REVISION, and Koharu's port of it
+(``crates/koharu-ml/src/hayai_ocr``, pinned at the same commit), which this one follows:
+- ``mod.rs``: load order and ``inference``.
+- ``config.rs``: SigLIP2 and decoder constants and validation.
+- ``processor.rs``: the per-crop patch budget (``max_patches="auto"``), the NaFlex size search,
+  bilinear resize and patchify order, and the decode filter.
+- ``model.rs``: ``generate`` (greedy, 128 tokens), the ``DSCProjector`` that merges 2x2 patch
+  blocks and reads them in both writing directions, ``StaticDepthFusion`` of every encoder depth,
+  2D visual RoPE, text RoPE from ``TEXT_ROPE_OFFSET``, and the block-causal prefill mask.
 
-Upstream: ``modeling_hayai.py`` at the pinned revision. Its decoder attribute names are kept so
-the checkpoint loads strictly.
+Upstream's decoder attribute names are kept so the checkpoint loads strictly. v2 and v2.5
+checkpoints have another projector and no depth fusion, so they are refused (as in Koharu, which
+replaced v2 with v2.7).
 
 Divergences:
-- The vision encoder is transformers' ``Siglip2VisionModel`` (default SigLIP2 base config,
-  which the released NaFlex config only overrides by model type). This port hand-builds the same
-  network. The pooled head is loaded but unused, as upstream does (``last_hidden_state``).
-- The ``REPETITION_PENALTY`` constant is 1.0, so the penalty is a no-op and is not ported.
-- Beam search is not ported; the upstream default is ``num_beams=1``.
+- The vision encoder is transformers' ``Siglip2VisionModel`` (default SigLIP2 base config, which
+  the released NaFlex config only overrides by model type), driven layer by layer to keep each
+  layer's input for depth fusion. Its pooled head is loaded but never run, as upstream.
+- Each crop is read alone. Koharu and upstream pad a batch to its longest crop and mask the
+  padding, which leaves every crop's result the same.
+- Upstream's optional ``escalate`` pass (re-reading dense crops at a larger budget) is off by
+  default there and not ported, as in Koharu. Beam search and the repetition penalty are ignored
+  upstream (``generate`` decodes greedily), so they are not ported either.
+- The IDS head ships in the checkpoint and loads, but never runs (the model card says so).
 """
 
 from __future__ import annotations
@@ -37,47 +44,100 @@ from ._common import normalize, raw_chw
 if TYPE_CHECKING:  # pragma: no cover
     import torch  # imported where used, and the network on load: the app imports every provider at startup
 
-REPOSITORY = "JustANormalTinkerer/hayai-ocr-v2"
-REVISION = "4a4ce477c9a8841f208b94e1d9ed5c0938965e05"
+REPOSITORY = "JustANormalTinkerer/hayai-ocr-v2.7-supernova"
+REVISION = "b00317ed69fccee5f787187d913fcf8a96f37f65"  # Koharu's pin; main adds only a README edit
 
-# hayai_ocr/config.rs: SigLIP2 NaFlex constants and the hardcoded decoder layout.
+# config.rs: SigLIP2 NaFlex constants and the hardcoded decoder layout.
 SIGLIP_HIDDEN = 768
+SIGLIP_LAYERS = 12
 PATCH_SIZE = 16
-MAX_NUM_PATCHES = 256
 QUERY_HEADS = 8
 KEY_VALUE_HEADS = 2
 HEAD_DIM = 64
 ROPE_THETA = 10_000.0
+DOWNSCALE = 2  # DSCProjector: each 2x2 block of patches becomes one decoder token
+FLOW_HEADS = 8  # VisualCausalFlow: half read the merged grid by rows, half by columns from the right
+TEXT_ROPE_OFFSET = 64.0  # HayaiConfig default (config.json leaves it out): text positions start here
 # model.rs
-MAX_NEW_TOKENS = 256
+MAX_NEW_TOKENS = 128
 RMS_NORM_EPS = 1e-6
 RESCALE_FACTOR = 1.0 / 255.0
 IMAGE_MEAN = [0.5, 0.5, 0.5]
 IMAGE_STD = [0.5, 0.5, 0.5]
+# processing_hayai.py / preprocessor_config.json
+MIN_PATCHES = 64
+MAX_SCALE = 4.0
+AUTO_PATCH_TIERS = (128, 192, 256, 384, 512)
 
 
-def _image_size_for_max_patches(height: int, width: int, patch: int, max_patches: int) -> tuple[int, int]:
-    """processor.rs ``get_image_size_for_max_num_patches``: binary search over the scale."""
+def _naflex_target_size(height: int, width: int, max_patches: int) -> tuple[int, int]:
+    """``_naflex_target_size``: the largest scale up to MAX_SCALE whose patch-rounded size fits
+    ``max_patches``; a crop left under MIN_PATCHES takes the largest that fits MIN_PATCHES."""
     eps = 1e-5
 
     def scaled(scale: float, size: int) -> int:
-        return max(math.ceil((size * scale) / patch) * patch, patch)
+        return max(PATCH_SIZE, int(math.ceil(size * scale / PATCH_SIZE)) * PATCH_SIZE)
 
-    scale_min = eps / 10.0
-    scale_max = 100.0
-    while scale_max - scale_min >= eps:
-        scale = (scale_min + scale_max) / 2.0
-        target_height = scaled(scale, height)
-        target_width = scaled(scale, width)
-        if (target_height // patch) * (target_width // patch) <= max_patches:
-            scale_min = scale
-        else:
-            scale_max = scale
-    return scaled(scale_min, height), scaled(scale_min, width)
+    def search(low: float, high: float, budget: int) -> float:
+        while high - low >= eps:
+            scale = 0.5 * (low + high)
+            if (scaled(scale, height) // PATCH_SIZE) * (scaled(scale, width) // PATCH_SIZE) <= budget:
+                low = scale
+            else:
+                high = scale
+        return low
+
+    scale = search(eps, MAX_SCALE, max_patches)
+    if (scaled(scale, height) // PATCH_SIZE) * (scaled(scale, width) // PATCH_SIZE) < MIN_PATCHES:
+        scale = search(scale, 100.0, min(MIN_PATCHES, max_patches))
+    return scaled(scale, height), scaled(scale, width)
+
+
+def _select_max_patches(height: int, width: int) -> int:
+    """``_select_best_max_patches``: the patch budget of AUTO_PATCH_TIERS that suits a crop's size
+    and shape, with upstream's thresholds. Upstream nests its 512 rule for square crops inside the
+    non-square branch, so that rule never runs; it is left out here too."""
+    crop_height, crop_width = max(1, height), max(1, width)
+    tiers = {}
+    for budget in AUTO_PATCH_TIERS:
+        th, tw = _naflex_target_size(height, width, budget)
+        tiers[budget] = ((th // PATCH_SIZE) * (tw // PATCH_SIZE), min(th / crop_height, tw / crop_width))
+    (n128, s128), (n192, s192), (n256, s256), (n384, s384), (n512, _) = (tiers[b] for b in AUTO_PATCH_TIERS)
+    if n128 == n512:
+        return 128
+    aspect = max(crop_height, crop_width) / min(crop_height, crop_width)
+    wide = crop_width / crop_height
+    square = 0.77 <= wide <= 1.30
+    horizontal = wide > 1.30
+    if not square:
+        if not horizontal and s128 >= 1.65 and aspect < 3.8:
+            return 128
+        if horizontal and s128 >= 2.35 and aspect < 3.2:
+            return 128
+        if s384 < 1.05 or (aspect >= 5.5 and s384 < 1.55) or (aspect >= 7.5 and s384 < 2.00):
+            return 512
+    if n384 > n256 and (
+        s256 < 1.28
+        or (square and s256 < 2.20)
+        or (horizontal and s256 < 1.45)
+        or (aspect >= 3.8 and s256 < 1.75)
+        or (aspect >= 5.0 and s256 < 2.20)
+    ):
+        return 384
+    if n192 == n128:
+        return 128
+    if n256 == n192:
+        return 192
+    if not square:
+        if not horizontal and s192 >= 1.55 and aspect < 3.6:
+            return 192
+        if horizontal and s192 >= 1.85 and aspect < 3.0:
+            return 192
+    return 256
 
 
 class ImageProcessor:
-    """processor.rs ``ImageProcessor``: aspect-preserving NaFlex resize, patchify, pad."""
+    """processor.rs ``ImageProcessor``: per-crop budget, aspect-preserving NaFlex resize, patchify."""
 
     def __init__(self, device: torch.device, dtype: torch.dtype):
         self.device = device
@@ -88,12 +148,10 @@ class ImageProcessor:
 
         if image.width == 0 or image.height == 0:
             raise ValueError("cannot recognize an empty image")
-        height, width = _image_size_for_max_patches(image.height, image.width, PATCH_SIZE, MAX_NUM_PATCHES)
+        height, width = _naflex_target_size(image.height, image.width, _select_max_patches(image.height, image.width))
         patch_height = height // PATCH_SIZE
         patch_width = width // PATCH_SIZE
         num_patches = patch_height * patch_width
-        if num_patches > MAX_NUM_PATCHES:
-            raise ValueError(f"image resize produced {num_patches} patches above the {MAX_NUM_PATCHES} limit")
 
         image = image.convert("RGB")
         if image.size != (width, height):
@@ -106,27 +164,27 @@ class ImageProcessor:
             .permute(0, 2, 4, 3, 5, 1)
             .reshape(1, num_patches, -1)
         )
-        attention = torch.ones((1, num_patches), dtype=torch.long, device=self.device)
-        if num_patches < MAX_NUM_PATCHES:
-            pad = MAX_NUM_PATCHES - num_patches
-            patches = torch.cat([patches, torch.zeros((1, pad, patches.shape[2]), device=self.device)], dim=1)
-            attention = torch.cat([attention, torch.zeros((1, pad), dtype=torch.long, device=self.device)], dim=1)
         spatial = torch.tensor([[patch_height, patch_width]], dtype=torch.long, device=self.device)
-        return patches.to(self.dtype), attention, spatial, (patch_height, patch_width)
+        return patches.to(self.dtype), spatial, (patch_height, patch_width)
 
 
 @register
 class HayaiOcrProvider(OcrProvider):
     id = "hayai-ocr"
     name = "Hayai OCR"
-    description = "Fast crop-level OCR for Japanese, Chinese, Korean and English (SigLIP2 NaFlex, greedy)."
+    description = "Fast crop-level OCR for Japanese, Chinese, Korean and English (Hayai v2.7 Supernova, SigLIP2 NaFlex, greedy)."
     runtimes = ("torch",)
 
     catalog_queries = ('hayai-ocr',)
 
     @classmethod
     def accepts(cls, facts) -> Optional[str]:
-        return "torch" if facts.runtime == "torch" and "HayaiModel" in facts.architectures else None
+        """v2.7-layout Hayai checkpoints. The Hub's config summary leaves out ``downscale_factor``
+        and ``n_vision_layers``, so the layout is told by the image processor v2.7 ships (v2 and
+        v2.5 have none, and a different projector this port cannot load)."""
+        if facts.runtime == "torch" and "HayaiModel" in facts.architectures and facts.has_file("preprocessor_config.json"):
+            return "torch"
+        return None
     requires = {"torch": ("transformers", "tokenizers", "safetensors")}
 
     @classmethod
@@ -159,6 +217,12 @@ class HayaiOcrProvider(OcrProvider):
             raise ValueError("decoder model size does not match the hardcoded query head layout")
         if int(config["n_layers"]) <= 0:
             raise ValueError("decoder must have at least one layer")
+        # v2 / v2.5 checkpoints lack both keys: their projector and missing depth fusion differ.
+        if config.get("n_vision_layers") != SIGLIP_LAYERS or config.get("downscale_factor") != DOWNSCALE:
+            raise ValueError(
+                f"Hayai OCR loads the v2.7 layout ({DOWNSCALE}x{DOWNSCALE} projector fusing all {SIGLIP_LAYERS} "
+                "SigLIP2 depths); this checkpoint is an older Hayai release"
+            )
 
         self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
         self._bos = self._special("<bos>")
@@ -168,7 +232,9 @@ class HayaiOcrProvider(OcrProvider):
             raise ValueError("Hayai OCR vocabulary size does not match the decoder outputs")
 
         vision = Siglip2VisionModel(Siglip2VisionConfig())
-        decoder = _Decoder(vocab_size, d_model, d_vision, int(config["d_ffn"]), int(config["n_layers"]))
+        decoder = _Decoder(
+            vocab_size, d_model, d_vision, int(config["d_ffn"]), int(config["n_layers"]), SIGLIP_LAYERS, int(config["num_ids_classes"])
+        )
         state = load_file(str(weights_path))
         # transformers' Siglip2VisionModel is the vision tower itself (no ``vision_model`` wrapper).
         vision_state = {
@@ -199,7 +265,7 @@ class HayaiOcrProvider(OcrProvider):
 
         d_axis = HEAD_DIM // 2
         freqs = 1.0 / (ROPE_THETA ** (torch.arange(0, d_axis, 2, device=self._device).float() / d_axis))
-        t = torch.arange(positions, device=self._device, dtype=torch.float32)
+        t = torch.arange(positions, device=self._device, dtype=torch.float32) + TEXT_ROPE_OFFSET
         outer = torch.outer(t, freqs)
         angles = torch.cat([outer, outer], dim=-1)
         return torch.cos(angles), torch.sin(angles)
@@ -213,16 +279,30 @@ class HayaiOcrProvider(OcrProvider):
     def _recognize(self, crops: list[Image.Image]) -> list[str]:
         return [self._inference(crop) for crop in crops]
 
+
     @inference_mode
     def _inference(self, image: Image.Image) -> str:
-        patches, attention, spatial, (height, width) = self._processor.preprocess(image)
-        token_ids = self._generate(patches, attention, spatial, height, width)
+        patches, spatial, (height, width) = self._processor.preprocess(image)
+        token_ids = self._generate(patches, spatial, height, width)
         kept = [t for t in token_ids if t not in (self._eos, self._pad)]
         return self.tokenizer.decode(kept, skip_special_tokens=True)
 
+    def _encode(self, patches, spatial) -> tuple[list, torch.Tensor]:
+        """Upstream ``_forward_vision_train``: each encoder layer's input (the embeddings first),
+        which depth fusion reads, and the post-layernorm output the projector reads."""
+        vision = self._vision
+        hidden = vision.embeddings(patches, spatial)
+        states = []
+        for layer in vision.encoder.layers:
+            states.append(hidden)
+            out = layer(hidden, None)
+            hidden = out[0] if isinstance(out, tuple) else out
+        return states, vision.post_layernorm(hidden)
+
     @inference_mode
-    def _generate(self, patches, attention, spatial, height: int, width: int) -> list[int]:
-        """model.rs ``generate``: prefill [visual | BOS] with a block-causal mask, then greedy steps."""
+    def _generate(self, patches, spatial, height: int, width: int) -> list[int]:
+        """model.rs ``generate``: prefill [visual | BOS] with a block-causal mask and each layer's
+        depth residual on the visual tokens, then greedy steps."""
         import torch
 
         from .hayai_ocr_network import _visual_rope
@@ -230,10 +310,9 @@ class HayaiOcrProvider(OcrProvider):
         device = self._device
         dtype = self._dtype
         decoder = self._decoder
-        vision_hidden = self._vision(
-            pixel_values=patches, pixel_attention_mask=attention, spatial_shapes=spatial
-        ).last_hidden_state
-        visual = decoder.projector(vision_hidden.to(dtype))
+        states, last = self._encode(patches, spatial)
+        visual, (merged_height, merged_width), blocks = decoder.projector(last, height, width)
+        depth = decoder.depth_fusion(states, blocks)  # (layers, visual tokens, d_model)
         m_vision = visual.shape[1]
         bos = torch.tensor([[self._bos]], dtype=torch.long, device=device)
         hidden = torch.cat([visual, decoder.token_embeddings(bos)], dim=1)
@@ -243,18 +322,13 @@ class HayaiOcrProvider(OcrProvider):
         mask[:m_vision, m_vision:] = float("-inf")  # visual tokens never see the text token
         mask = mask.view(1, 1, total, total)
 
-        cos_visual, sin_visual = _visual_rope(height, width, device)
-        covered = height * width
-        pad_rows = m_vision - covered
-        cos = torch.cat(
-            [cos_visual, torch.ones((pad_rows, HEAD_DIM // 2), device=device), self._text_cos[0:1]], dim=0
-        ).unsqueeze(0)
-        sin = torch.cat(
-            [sin_visual, torch.zeros((pad_rows, HEAD_DIM // 2), device=device), self._text_sin[0:1]], dim=0
-        ).unsqueeze(0)
+        cos_visual, sin_visual = _visual_rope(merged_height, merged_width, device)
+        cos = torch.cat([cos_visual, self._text_cos[0:1]], dim=0).unsqueeze(0)
+        sin = torch.cat([sin_visual, self._text_sin[0:1]], dim=0).unsqueeze(0)
 
         caches: list = []
         for index, layer in enumerate(decoder.layers):
+            hidden = torch.cat([hidden[:, :m_vision] + depth[index].unsqueeze(0), hidden[:, m_vision:]], dim=1)
             hidden, present = layer(hidden, mask, cos, sin, None)
             caches.append(present)
         logits = decoder.logits(hidden[:, -1, :])

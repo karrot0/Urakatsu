@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .hayai_ocr import HEAD_DIM, KEY_VALUE_HEADS, QUERY_HEADS, RMS_NORM_EPS, ROPE_THETA
+from .hayai_ocr import DOWNSCALE, FLOW_HEADS, HEAD_DIM, KEY_VALUE_HEADS, QUERY_HEADS, RMS_NORM_EPS, ROPE_THETA
 
 
 def _rotate(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
@@ -107,25 +107,126 @@ class _DecoderLayer(nn.Module):
         return x, present
 
 
+
+
+def _block_indices(height: int, width: int, device: torch.device) -> torch.Tensor:
+    """``gather_patches``: each merged token's DOWNSCALE x DOWNSCALE patch block, clamped into the
+    grid (its bottom and right edges replicate), as flat patch indices ``(tokens, r*r)``."""
+    r = DOWNSCALE
+    merged_height, merged_width = -(-height // r), -(-width // r)
+    y = torch.arange(merged_height, device=device).view(-1, 1, 1, 1) * r
+    x = torch.arange(merged_width, device=device).view(1, -1, 1, 1) * r
+    dy = torch.arange(r, device=device).view(1, 1, -1, 1)
+    dx = torch.arange(r, device=device).view(1, 1, 1, -1)
+    rows = (y + dy).clamp(max=height - 1)
+    cols = (x + dx).clamp(max=width - 1)
+    return (rows * width + cols).reshape(merged_height * merged_width, r * r)
+
+
+def _neighbour_indices(height: int, width: int, device: torch.device) -> torch.Tensor:
+    """``_dw_gather_mix_compiled``: each merged token's 3x3 neighbours, clamped into the grid,
+    row-major with the token itself at index 4, ``(tokens, 9)``."""
+    y = torch.arange(height, device=device).view(-1, 1, 1, 1)
+    x = torch.arange(width, device=device).view(1, -1, 1, 1)
+    offsets = torch.tensor([-1, 0, 1], device=device)
+    rows = (y + offsets.view(1, 1, -1, 1)).clamp(0, height - 1)
+    cols = (x + offsets.view(1, 1, 1, -1)).clamp(0, width - 1)
+    return (rows * width + cols).reshape(height * width, 9)
+
+
+def _dual_causal_mask(height: int, width: int, device: torch.device) -> torch.Tensor:
+    """``build_dual_causal_mask``, ``(1, FLOW_HEADS, tokens, tokens)`` (True = attend): the first
+    half of the heads sees the grid up to each token row by row, the second half column by column
+    from the right."""
+    tokens = torch.arange(height * width, device=device)
+    horizontal = tokens.view(-1, 1) >= tokens.view(1, -1)
+    rank = (width - 1 - tokens % width) * height + tokens // width
+    vertical = rank.view(-1, 1) >= rank.view(1, -1)
+    half = FLOW_HEADS // 2
+    return torch.stack([horizontal] * half + [vertical] * half).unsqueeze(0)
+
+
+class _CausalFlow(nn.Module):
+    """upstream ``VisualCausalFlow``: gated attention over the merged grid in both reading orders."""
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.norm = _RMSNorm(d_model)
+        self.wqkv = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.wo = nn.Linear(d_model, d_model, bias=False)
+        self.flow_gate = nn.Parameter(torch.zeros(d_model))
+
+    def forward(self, tokens: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        b, length, d_model = tokens.shape
+        head_dim = d_model // FLOW_HEADS
+        qkv = self.wqkv(self.norm(tokens)).view(b, length, 3, FLOW_HEADS, head_dim).permute(2, 0, 3, 1, 4)
+        mask = _dual_causal_mask(height, width, tokens.device)
+        attended = F.scaled_dot_product_attention(qkv[0], qkv[1], qkv[2], attn_mask=mask)
+        attended = attended.transpose(1, 2).reshape(b, length, d_model)
+        return tokens + self.wo(attended) * self.flow_gate
+
+
 class _Projector(nn.Module):
+    """upstream ``DSCProjector``: 2x2 patch blocks to one token, a depthwise 3x3 mix, the causal flow."""
+
     def __init__(self, d_vision: int, d_model: int):
         super().__init__()
-        self.proj = nn.Sequential(nn.Linear(d_vision, d_model), nn.GELU(), nn.Linear(d_model, d_model))
+        unshuffled = d_vision * DOWNSCALE * DOWNSCALE
+        self.norm = nn.LayerNorm(unshuffled)
+        self.mlp = nn.Sequential(nn.Linear(unshuffled, d_model, bias=False), nn.GELU(), nn.Linear(d_model, d_model, bias=False))
+        self.dw_weight = nn.Parameter(torch.zeros(9, d_model))
+        self.dw_bias = nn.Parameter(torch.zeros(d_model))
+        self.causal_flow = _CausalFlow(d_model)
+        self.out_norm = _RMSNorm(d_model)
 
-    def forward(self, x):
-        return self.proj(x)
+    def forward(self, features: torch.Tensor, height: int, width: int):
+        """``(1, height*width, d_vision)`` patch features: the visual tokens, the merged grid, and
+        each token's patch block (which depth fusion pools by)."""
+        merged_height, merged_width = -(-height // DOWNSCALE), -(-width // DOWNSCALE)
+        blocks = _block_indices(height, width, features.device)
+        # (tokens, r*r, d_vision) -> channel c*r*r + k, as ``F.pixel_unshuffle`` orders them.
+        tokens = features[0][blocks].transpose(1, 2).reshape(1, blocks.shape[0], -1)
+        tokens = self.mlp(self.norm(tokens))
+        neighbours = tokens[0][_neighbour_indices(merged_height, merged_width, tokens.device)]
+        tokens = (neighbours[:, 4] + (neighbours * self.dw_weight).sum(1) + self.dw_bias).unsqueeze(0)
+        tokens = self.causal_flow(tokens, merged_height, merged_width)
+        return self.out_norm(tokens), (merged_height, merged_width), blocks
+
+
+class _DepthFusion(nn.Module):
+    """upstream ``StaticDepthFusion``: every encoder depth pooled over the projector's blocks,
+    normalised and projected, mixed per decoder layer by a softmax and scaled per channel."""
+
+    def __init__(self, d_vision: int, d_model: int, n_layers: int, n_depths: int):
+        super().__init__()
+        self.norms = nn.ModuleList([_RMSNorm(d_vision) for _ in range(n_depths)])
+        self.wo = nn.Linear(d_vision, d_model, bias=False)
+        self.gamma = nn.Parameter(torch.zeros(n_layers, d_model))
+        self.depth_logits = nn.Parameter(torch.zeros(n_layers, n_depths))
+
+    def forward(self, states: list[torch.Tensor], blocks: torch.Tensor) -> torch.Tensor:
+        """``(layers, tokens, d_model)``, one residual onto the visual tokens per decoder layer."""
+        projected = torch.stack(
+            [self.wo(norm(state[0][blocks].sum(1) * 0.25)) for norm, state in zip(self.norms, states)]
+        )
+        alpha = self.depth_logits.float().softmax(-1).to(projected.dtype)
+        return torch.einsum("jl,lnd->jnd", alpha, projected) * self.gamma.unsqueeze(1)
 
 
 class _Decoder(nn.Module):
     """upstream ``VisualCausalOCRDecoder`` (names kept for the checkpoint)."""
 
-    def __init__(self, vocab_size: int, d_model: int, d_vision: int, d_ffn: int, n_layers: int):
+    def __init__(self, vocab_size: int, d_model: int, d_vision: int, d_ffn: int, n_layers: int, n_depths: int, ids_classes: int):
         super().__init__()
         self.projector = _Projector(d_vision, d_model)
+        self.depth_fusion = _DepthFusion(d_vision, d_model, n_layers, n_depths)
         self.token_embeddings = nn.Embedding(vocab_size, d_model)
         self.layers = nn.ModuleList([_DecoderLayer(d_model, d_ffn) for _ in range(n_layers)])
         self.final_norm = _RMSNorm(d_model)
         self.output_head = nn.Linear(d_model, vocab_size, bias=False)
+        # The IDS head is trained with the decoder and shipped; it never runs at inference.
+        self.ids_norm = _RMSNorm(d_model)
+        self.ids_head = nn.Linear(d_model, ids_classes, bias=False)
 
     def logits(self, hidden_last: torch.Tensor) -> torch.Tensor:
         return self.output_head(self.final_norm(hidden_last))

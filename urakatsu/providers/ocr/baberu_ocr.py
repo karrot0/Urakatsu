@@ -40,7 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover
     import torch  # imported where used, and the network on load: the app imports every provider at startup
 
 REPOSITORY = "genshiai-daichi/baberu-ocr"
-REVISION = "d9cc13153e9a1cd8fdfa3b7b1cc329da2020aeae"
+REVISION = "b9868433dbda3ed9ba1357d008599ff4ada873d5"  # the v1.2 tag Koharu pins (tag object a0e3d4b1)
 DINOV2_REPOSITORY = "facebook/dinov2-base"
 DINOV2_REVISION = "f9e44c814b77203eaa57a6bdbbd535f21ede1415"
 

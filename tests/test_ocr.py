@@ -25,7 +25,7 @@ from urakatsu.providers.ocr.baberu_ocr import BaberuOcrProvider
 from urakatsu.providers.ocr.charspot_ocr import COMBOS, CharspotOcrProvider, load_vocabulary, pad_grid, preprocess
 from urakatsu.providers.ocr import manga_ocr_cpt
 from urakatsu.providers.ocr.manga_ocr_cpt import MangaOcrCptProvider
-from urakatsu.providers.ocr.hayai_ocr import _image_size_for_max_patches
+from urakatsu.providers.ocr.hayai_ocr import _naflex_target_size, _select_max_patches
 from urakatsu.providers.ocr.manga_ocr import (
     MangaOcrProvider,
     _BeamHypotheses,
@@ -125,12 +125,44 @@ def test_read_lines_follows_rust_lines_semantics(tmp_path):
 
 
 def test_hayai_patch_budget_matches_upstream_search():
-    # hayai_ocr/processor.rs: the NaFlex size search never exceeds 256 patches of 16x16.
-    height, width = _image_size_for_max_patches(1024, 1024, 16, 256)
-    assert (height // 16) * (width // 16) <= 256
-    assert height == width == 256
-    height, width = _image_size_for_max_patches(120, 900, 16, 256)
-    assert (height // 16) * (width // 16) <= 256 and height % 16 == 0 and width % 16 == 0
+    # hayai_ocr/processor.rs (Koharu), whose values are upstream ``_naflex_target_size``'s.
+    assert _naflex_target_size(1024, 1024, 256) == (256, 256)
+    assert _naflex_target_size(120, 900, 256) == (96, 672)
+    assert _naflex_target_size(32, 32, 256) == (128, 128)  # upscaling stops at four times
+    assert _naflex_target_size(4, 4, 256) == (128, 128)  # tiny crops reach the minimum patch count
+
+
+def test_hayai_picks_each_crops_budget_as_upstream():
+    # processor.rs each_crop_takes_the_budget_upstream_picks_for_it: upstream
+    # ``_select_best_max_patches`` on the same crops (height, width, budget, resized h, resized w).
+    crops = [
+        (32, 32, 128, 128, 128),
+        (150, 50, 128, 288, 96),
+        (200, 60, 192, 384, 128),
+        (64, 180, 192, 128, 368),
+        (60, 200, 256, 144, 448),
+        (300, 80, 256, 480, 128),
+        (1024, 1024, 384, 304, 304),
+        (400, 100, 384, 608, 160),
+        (2000, 2000, 384, 304, 304),  # square crops never take 512
+        (120, 900, 512, 128, 960),
+        (900, 120, 512, 960, 128),
+        (700, 300, 512, 544, 240),
+    ]
+    for height, width, budget, resized_height, resized_width in crops:
+        assert _select_max_patches(height, width) == budget, (height, width)
+        assert _naflex_target_size(height, width, budget) == (resized_height, resized_width), (height, width)
+
+
+def test_hayai_accepts_only_the_v27_layout():
+    from urakatsu.catalog.facts import ModelFacts
+    from urakatsu.providers.ocr.hayai_ocr import HayaiOcrProvider
+
+    common = ["config.json", "model.safetensors", "tokenizer.json", "modeling_hayai.py"]
+    v27 = ModelFacts(runtime="torch", repo="x/hayai-ocr-v2.7-supernova", architectures=["HayaiModel"], files=[*common, "processing_hayai.py", "preprocessor_config.json"])
+    v25 = ModelFacts(runtime="torch", repo="x/hayai-ocr-v2.5-nova", architectures=["HayaiModel"], files=common)
+    assert HayaiOcrProvider.accepts(v27) == "torch"
+    assert HayaiOcrProvider.accepts(v25) is None
 
 
 def test_paddle_smart_resize_matches_transformers_fixture_shapes():
