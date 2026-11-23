@@ -255,7 +255,12 @@ class DiffusionRecipeProvider(InpaintingProvider):
         from urakatsu.runtimes.packages import STABLE_DIFFUSION_CPP, PackageManager
 
         support = SupportIndex(PackageManager()).for_tag(STABLE_DIFFUSION_CPP, tag)
-        recipe = support.recipe(recipe_id) if support else None
+        if support is None:  # the release is installed, but what it loads was never read (offline since)
+            raise ProviderUnavailable(
+                f"Urakatsu has not yet read which models stable-diffusion.cpp {tag} can load; "
+                "connect to the internet once so it can read the release's recipes"
+            )
+        recipe = support.recipe(recipe_id)
         if recipe is None:
             raise ProviderUnavailable(f"stable-diffusion.cpp {tag} has no recipe {recipe_id}; update it in Settings, Runtimes")
         return recipe

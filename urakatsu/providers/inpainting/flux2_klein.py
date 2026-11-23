@@ -178,8 +178,10 @@ class Flux2KleinProcessor:
             "height": height,
             "seed": -1,
             "batch_count": 1,
+            # No ref_image_args: sd.cpp master-1117 removed it and rejects the request. Its FLUX.2
+            # default fits a reference to min(1 MP, w*h) on the 16 px grid, which leaves this
+            # already grid-aligned, at-most-TARGET_AREA reference at its own size.
             "ref_images": [image_b64(init_image)],
-            "ref_image_args": "resize_before_vae=false",
             "sample_params": {
                 "sample_method": "euler",
                 "sample_steps": self.steps,

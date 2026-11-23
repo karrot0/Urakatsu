@@ -489,6 +489,7 @@ class PackageManager:
                 installed = Installed(package.id, tag, variant, path, now, now)
                 os.utime(path)  # most recent, so pruning keeps it
                 self._write_state(package, installed)
+                self._cache_support(package, tag)
                 return installed
         if self.offline:
             if current is not None:
@@ -527,7 +528,25 @@ class PackageManager:
         installed = Installed(package.id, release.tag, release.variant, target, now, now)
         self._write_state(package, installed)
         self._prune(package, keep=target)
+        self._cache_support(package, release.tag)
         return installed
+
+    def _cache_support(self, package: Package, tag: str) -> None:
+        """Reads what ``tag`` can load while the network is here, so the install also works offline.
+
+        The support data (llama.cpp architectures, stable-diffusion.cpp recipes) is otherwise
+        fetched the first time a model loads; an update followed by an offline load would then
+        find no recipe. Best effort: a failure leaves the lazy fetch to try again later.
+        """
+        if self.offline or package not in (LLAMA_CPP, STABLE_DIFFUSION_CPP):
+            return
+        from urakatsu.catalog.support import SupportIndex  # catalog builds on runtimes; import at call time
+
+        try:
+            if SupportIndex(self, transport=self._transport).for_tag(package, tag) is None:
+                log.warning("could not read what %s %s supports; it is read again when a model loads", package.name, tag)
+        except Exception as error:  # noqa: BLE001 - the install itself succeeded
+            log.warning("could not read what %s %s supports: %s", package.name, tag, error)
 
     def _download(self, client: httpx.Client, asset: Asset, path: Path, progress: Optional[ProgressFn]) -> None:
         algorithm, _, expected = asset.digest.partition(":")

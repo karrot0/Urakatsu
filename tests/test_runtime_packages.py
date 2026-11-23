@@ -147,6 +147,42 @@ def test_offline_uses_the_installed_build_and_never_downloads(tmp_path, monkeypa
         PackageManager(root=tmp_path / "empty", offline=True).ensure(LLAMA_CPP, CUDA)
 
 
+def test_an_install_reads_what_its_release_supports_so_offline_loads_still_work(tmp_path, monkeypatch):
+    from urakatsu.catalog.support import SupportIndex
+
+    monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: ["win-cpu"])
+    data = build_zip(EXE)
+    good = release("b400", "2026-10-07T00:00:00Z", {"llama-b400-bin-win-cpu-x64.zip": data})
+    arch = b'{ LLM_ARCH_LLAMA, "llama" },\n{ LLM_ARCH_QWEN3, "qwen3" },'
+    online = PackageManager(root=tmp_path, offline=False, transport=fake_github([good], {"llama-b400-bin-win-cpu-x64.zip": data, "llama-arch.cpp": arch}))
+    online.ensure(LLAMA_CPP, CUDA)
+
+    def refuse(request):
+        raise AssertionError("offline lookup touched the network")
+
+    offline = PackageManager(root=tmp_path, offline=True, transport=httpx.MockTransport(refuse))
+    support = SupportIndex(offline, transport=httpx.MockTransport(refuse)).installed(LLAMA_CPP)
+    assert support is not None and support.architectures == {"llama", "qwen3"}
+
+
+def test_a_release_whose_support_cannot_be_read_still_installs(tmp_path, monkeypatch):
+    monkeypatch.setattr("urakatsu.runtimes.packages.preferred_variants", lambda devices: ["win-cpu"])
+    data = build_zip(EXE)
+    good = release("b500", "2026-10-08T00:00:00Z", {"llama-b500-bin-win-cpu-x64.zip": data})
+    manager = PackageManager(root=tmp_path, offline=False, transport=fake_github([good], {"llama-b500-bin-win-cpu-x64.zip": data}))  # llama-arch.cpp 404s
+    assert manager.ensure(LLAMA_CPP, CUDA).tag == "b500"
+    assert not (tmp_path / LLAMA_CPP.id / "support" / "b500.json").exists()  # read again when a model loads
+
+
+def test_offline_without_support_data_says_so_instead_of_asking_for_an_update(isolated_home):
+    from urakatsu.core.errors import ProviderUnavailable
+    from urakatsu.providers.inpainting.flux2_klein import Flux2KleinProvider
+
+    provider = object.__new__(Flux2KleinProvider)
+    with pytest.raises(ProviderUnavailable, match="connect to the internet once"):
+        provider._recipe("master-1117-0d71f96", "flux2-klein-9b")
+
+
 def gguf_bytes(kv: dict) -> bytes:
     def string(text: str) -> bytes:
         raw = text.encode()
