@@ -12,6 +12,7 @@ https://github.com/Sanster/IOPaint/blob/61a759fb3f332bacdce8b2813f4837495c9b86e0
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Optional, ClassVar
 
 import cv2
@@ -184,8 +185,10 @@ class LamaProvider(InpaintingProvider):
 
     @classmethod
     def accepts(cls, facts) -> Optional[str]:
-        """LaMa inpainting checkpoints in safetensors form."""
-        if facts.runtime == "torch" and "lama" in (facts.model_type or "") and any(f.endswith(".safetensors") for f in facts.files):
+        """LaMa inpainting checkpoints in safetensors form. "lama" must be a whole word of the
+        model type ("big-lama-manga-inpainting"): as a substring it matched every "llama"."""
+        words = re.split(r"[^a-z0-9]+", (facts.model_type or "").lower())
+        if facts.runtime == "torch" and "lama" in words and any(f.endswith(".safetensors") for f in facts.files):
             return "torch"
         return None
     Settings: ClassVar[type[ProviderSettings]] = LamaSettings

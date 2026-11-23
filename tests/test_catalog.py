@@ -40,6 +40,9 @@ def test_support_comes_from_the_runtime_sources():
     assert match_family(families, ["black-forest-labs/FLUX.2-klein-4B"]).doc == "flux2"
     assert match_family(families, ["stabilityai/stable-diffusion-xl-base-1.0"]).doc == "sdxl"
     assert match_family(families, ["someone/whisper-large"]) is None
+    # Newer releases link docs/models/ and docs/guides/; the family is the same page name.
+    moved = readme.replace("./docs/", "./docs/models/").replace("./docs/models/edit.md", "./docs/guides/edit.md")
+    assert [(f.name, f.doc) for f in parse_families(moved)] == [(f.name, f.doc) for f in families]
 
 
 def test_fit_levels_and_the_recommended_quantization():

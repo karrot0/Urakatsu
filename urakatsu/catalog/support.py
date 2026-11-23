@@ -32,7 +32,10 @@ if TYPE_CHECKING:  # pragma: no cover
 
 RAW = "https://raw.githubusercontent.com"
 _ARCH = re.compile(r'\{\s*LLM_ARCH_[A-Z0-9_]+\s*,\s*"([^"]+)"\s*\}')
-_FAMILY = re.compile(r"\[([^\]]+)\]\(\./docs/([A-Za-z0-9_.\-]+)\.md(?:#[^)]*)?\)")
+# Pages sat in docs/ until upstream moved them to docs/models/ (guides to docs/guides/); the
+# family keeps the page name alone, so a family is the same across releases either side.
+_FAMILY = re.compile(r"\[([^\]]+)\]\(\./docs/(?:[A-Za-z0-9_\-]+/)*([A-Za-z0-9_.\-]+)\.md(?:#[^)]*)?\)")
+DOC_FOLDERS = ("docs/models", "docs")
 
 
 @dataclass(frozen=True)
@@ -99,8 +102,9 @@ class SupportIndex:
                 return self._memory[key]
         path = self._path(package, tag)
         support = _load(path, package.id, tag)
-        # Support files written before recipes were read lack them; fetch those once.
-        stale = support is not None and package is STABLE_DIFFUSION_CPP and not support.recipes
+        # Support files written before recipes were read lack them, and ones written while the
+        # README's links outran the parser have no families; fetch those once.
+        stale = support is not None and package is STABLE_DIFFUSION_CPP and not (support.recipes and support.families)
         if (support is None or stale) and not self.packages.offline:
             try:
                 fetched = self._fetch(package, tag)
@@ -142,10 +146,19 @@ class SupportIndex:
             pass
         if self.packages.offline:
             return ""
+        text = ""
         try:
             with httpx.Client(follow_redirects=True, timeout=30.0, transport=self._transport) as client:
-                text = client.get(f"{RAW}/{package.repository}/{tag}/docs/{doc}.md").raise_for_status().text
+                for folder in DOC_FOLDERS:
+                    response = client.get(f"{RAW}/{package.repository}/{tag}/{folder}/{doc}.md")
+                    if response.status_code == 200:
+                        text = response.text
+                        break
+                    if response.status_code != 404:
+                        response.raise_for_status()
         except httpx.HTTPError:
+            return ""
+        if not text:
             return ""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")

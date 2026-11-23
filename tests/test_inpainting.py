@@ -747,3 +747,13 @@ def test_a_forced_run_paints_a_generated_cleanup_again_but_not_the_users(tmp_pat
     snapshot = session.commit(edit.finish())
     assert stage.skip(make_input(snapshot, page), None)
     assert not stage.skip(StageInput(snapshot, page, None, None, ImageCache(), force=True), None)
+
+
+def test_lama_accepts_lama_checkpoints_but_not_llama_language_models():
+    from urakatsu.catalog.facts import ModelFacts
+    from urakatsu.providers.inpainting.lama import LamaProvider
+
+    lama = ModelFacts(runtime="torch", repo="mayocream/lama-manga", model_type="big-lama-manga-inpainting", files=["lama-manga.safetensors"])
+    llama = ModelFacts(runtime="torch", repo="x/standard-wiki-360m", model_type="llama", architectures=["LlamaForCausalLM"], files=["model.safetensors"])
+    assert LamaProvider.accepts(lama) == "torch"
+    assert LamaProvider.accepts(llama) is None
