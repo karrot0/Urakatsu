@@ -702,6 +702,35 @@ async def test_selected_chapters_export_as_one_zip_that_imports_back(workspace):
         assert 'filename="Series.zip"' in response.headers["content-disposition"]
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             assert archive.namelist() == ["Ch 1.png", "Ch 1 (2).png"]
+
+
+async def test_selected_pages_export_in_project_order(workspace):
+    import zipfile
+
+    from urakatsu.pipeline.projects import DEFAULT_CHAPTER_ID
+
+    project = workspace.create_project("Series").id
+    first = workspace.add_page(project, "a.png", page_png()).id
+    workspace.add_page(project, "b.png", page_png())
+    other = workspace.create_chapter(project, "Ch 2").chapters[-1].id
+    last = workspace.add_page(project, "c.png", page_png(), chapter_id=other).id
+    chosen = [last, first]  # any order in; project order out
+    assert workspace.project_view(project).chapters[0].id == DEFAULT_CHAPTER_ID
+
+    data, name = workspace.export_pages(project, chosen, "zip")
+    assert name == "Series - 2 pages.zip"
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert archive.namelist() == ["0001_a.png", "0002_c.png"]
+    with pytest.raises(KeyError):
+        workspace.export_pages(project, ["nope"], "zip")
+
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/projects/{project}/export", params={"page": chosen, "format": "cbz"})
+        assert response.status_code == 200, response.text
+        assert 'filename="Series - 2 pages.cbz"' in response.headers["content-disposition"]
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert archive.namelist() == ["0001_a.png", "0002_c.png"]
         assert (await client.get(f"/api/v1/projects/{project}/export")).status_code == 400
         assert (await client.get(f"/api/v1/projects/{project}/export", params={"chapter": "nope"})).status_code == 404
 

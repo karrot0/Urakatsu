@@ -24,7 +24,7 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { describeError, exportChapters, exportPage, exportPagePsd, saveBlob, type ChapterFormat } from "../api/client";
+import { describeError, exportChapters, exportPage, exportPagePsd, exportPages, saveBlob, type ChapterFormat } from "../api/client";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
@@ -131,6 +131,7 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
   const picked = selectedChapters(ws).filter((c) => c.pageIds.length > 0);
   const group = picked.length ? picked : chapter && chapter.pageIds.length > 0 ? [chapter] : [];
   const webtoon = ws.project?.format?.kind === "webtoon";
+  const pages = selectedPages(ws);
   const [exporting, setExporting] = useState(false);
 
   const save = async (task: () => Promise<void>) => {
@@ -146,6 +147,11 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
   const exportAs = (format: ChapterFormat) =>
     save(async () => {
       const { blob, filename } = await exportChapters(ws.project!.id, group.map((c) => c.id), format);
+      saveBlob(blob, filename);
+    });
+  const exportPicked = (format: ChapterFormat) =>
+    save(async () => {
+      const { blob, filename } = await exportPages(ws.project!.id, pages, format);
       saveBlob(blob, filename);
     });
 
@@ -169,7 +175,15 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
         }
       />
       <DropdownMenuContent align="end" className="w-60">
-        {page && (
+        {pages.length > 1 ? (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="truncate">Export {pages.length} selected pages</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => void exportPicked("zip")}>Images (.zip)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void exportPicked("cbz")}>Comic book (.cbz)</DropdownMenuItem>
+            {webtoon && <DropdownMenuItem onClick={() => void exportPicked("strip")}>Long strip (.png)</DropdownMenuItem>}
+            <DropdownMenuItem onClick={() => void exportPicked("psd")}>Photoshop layers (.psd in a .zip)</DropdownMenuItem>
+          </DropdownMenuGroup>
+        ) : page && (
           <DropdownMenuGroup>
             <DropdownMenuLabel className="truncate">Export page · {page.name}</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => void save(() => exportPage(ws.project!.id, page))}>Image (.png)</DropdownMenuItem>

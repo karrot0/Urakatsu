@@ -238,10 +238,14 @@ def api_router(ws: Workspace) -> APIRouter:
         return attachment(data, filename, "image/vnd.adobe.photoshop")
 
     @router.get("/projects/{project_id}/export")
-    def export_chapters(project_id: str, chapter: list[str] = Query(default=[]), format: str = "cbz"):
-        """Several chapters in one ZIP (``Workspace.export_chapters``): ``?chapter=a&chapter=b``."""
+    def export_chapters(project_id: str, chapter: list[str] = Query(default=[]), page: list[str] = Query(default=[]), format: str = "cbz"):
+        """Several chapters in one ZIP (``Workspace.export_chapters``): ``?chapter=a&chapter=b``;
+        or selected pages as one archive (``Workspace.export_pages``): ``?page=a&page=b``."""
+        if page and not chapter:
+            data, filename = guard(ws.export_pages, project_id, page, format)
+            return attachment(data, filename, {"cbz": "application/vnd.comicbook+zip", "strip": "image/png"}.get(format, "application/zip"))
         if not chapter:
-            raise HTTPException(400, "name at least one chapter to export")
+            raise HTTPException(400, "name at least one chapter or page to export")
         data, filename = guard(ws.export_chapters, project_id, chapter, format)
         return attachment(data, filename, "application/zip")
 

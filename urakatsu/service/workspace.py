@@ -416,6 +416,28 @@ class Workspace:
                     archive.writestr(f"{name}.{'png' if format == 'strip' else 'cbz'}", data)
         return buffer.getvalue(), f"{files.safe_stem(project) or 'chapters'}.zip"
 
+    def export_pages(self, project_id: str, page_ids: list[str], format: str) -> tuple[bytes, str]:
+        """Pages picked in the sidebar, in project order, packed as :meth:`export_chapter` packs a
+        chapter: a ``cbz``, a ``zip`` of PNGs, one long ``strip`` PNG, or a ``psd`` ZIP of layered
+        Photoshop files. Named ``<project> - <n> pages``."""
+        if format not in ("cbz", "zip", "strip", "psd"):
+            raise ValueError("format must be cbz, zip, strip or psd")
+        snapshot = self.session(project_id).snapshot()
+        order = [page_id for chapter in chapters_of(snapshot) for page_id in chapter.pages]
+        missing = [page_id for page_id in page_ids if page_id not in set(order)]
+        if missing:
+            raise KeyError(f"page {missing[0]} does not exist")
+        wanted = [page_id for page_id in order if page_id in set(page_ids)]
+        if not wanted:
+            raise ValueError("name at least one page to export")
+        pages = self._numbered(project_id, wanted, snapshot, psd=format == "psd")
+        name = files.safe_stem(f"{self.store.name(project_id)} - {len(wanted)} pages") or "pages"
+        if format == "psd":
+            return _zip(pages, deflate=True), f"{name} (PSD).zip"
+        if format == "strip":
+            return _png(stitch([Image.open(io.BytesIO(data)) for _, data in pages])), f"{name}.png"
+        return _zip(pages, deflate=False), f"{name}.{format}"
+
     def chapter_pages(self, project_id: str, chapter_id: str, psd: bool = False) -> tuple[Chapter, list[tuple[str, bytes]]]:
         """A chapter and its pages as rendered, in chapter order, as ``(file name, PNG)``:
         ``0001_<page>.png``, numbered so any reader sorts them right. With ``psd``, layered
@@ -426,15 +448,19 @@ class Workspace:
             raise KeyError(f"chapter {chapter_id} does not exist")
         if not chapter.pages:
             raise ValueError(f"{chapter.name} has no pages to export")
-        width = max(4, len(str(len(chapter.pages))))
+        return chapter, self._numbered(project_id, chapter.pages, snapshot, psd)
+
+    def _numbered(self, project_id: str, page_ids: list[str], snapshot: Snapshot, psd: bool) -> list[tuple[str, bytes]]:
+        """Pages as ``(0001_<page>.png, PNG)`` in the given order, or ``.psd`` layered files."""
+        width = max(4, len(str(len(page_ids))))
         pages = []
-        for index, page_id in enumerate(chapter.pages, start=1):
+        for index, page_id in enumerate(page_ids, start=1):
             label = files.safe_stem(snapshot.page(page_id).label or "") or "page"
             if psd:
                 pages.append((f"{index:0{width}d}_{label}.psd", self.page_psd(project_id, page_id, snapshot)))
             else:
                 pages.append((f"{index:0{width}d}_{label}.png", self.render(project_id, page_id, snapshot)))
-        return chapter, pages
+        return pages
 
     def page_psd(self, project_id: str, page_id: str, snapshot: Optional[Snapshot] = None) -> bytes:
         """A page as a layered Photoshop file (``urakatsu.renderer.psd``): the art, cleanup and brush

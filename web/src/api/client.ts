@@ -114,6 +114,12 @@ export function exportChapters(projectId: string, chapterIds: string[], format: 
   return download(`/api/v1/projects/${projectId}/export?${query}`, "chapters.zip");
 }
 
+/** Pages picked in the sidebar as one archive (or one long strip PNG), in project order. */
+export function exportPages(projectId: string, pageIds: string[], format: ChapterFormat): Promise<{ blob: Blob; filename: string }> {
+  const query = new URLSearchParams([["format", format], ...pageIds.map((id) => ["page", id])]);
+  return download(`/api/v1/projects/${projectId}/export?${query}`, `pages.${format === "strip" ? "png" : format === "psd" ? "zip" : format}`);
+}
+
 async function download(url: string, fallback: string): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(url);
   if (!response.ok) {
