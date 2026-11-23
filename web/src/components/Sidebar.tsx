@@ -258,6 +258,11 @@ function useMarquee(content: RefObject<HTMLDivElement | null>) {
   return { box, onPointerDown };
 }
 
+// dnd-kit options as constants: a new object each render changes its context and re-renders every row.
+const POINTER_SENSOR = { activationConstraint: { distance: 5 } };
+const KEYBOARD_SENSOR = { coordinateGetter: sortableKeyboardCoordinates };
+const MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
+
 export function Sidebar() {
   const ws = useWorkspace();
   const project = ws.project!;
@@ -300,10 +305,8 @@ export function Sidebar() {
     [],
   );
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR), useSensor(KeyboardSensor, KEYBOARD_SENSOR));
+  const chapterIds = useMemo(() => layout.map((c) => CHAPTER + c.id), [layout]);
 
   const collision: CollisionDetection = useCallback((args) => {
     if (kindOf(args.active.id) === "chapter") {
@@ -415,13 +418,13 @@ export function Sidebar() {
         <DndContext
           sensors={sensors}
           collisionDetection={collision}
-          measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+          measuring={MEASURING}
           onDragStart={onDragStart}
           onDragOver={onDragOver}
           onDragEnd={onDragEnd}
           onDragCancel={onDragCancel}
         >
-          <SortableContext items={layout.map((c) => CHAPTER + c.id)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={chapterIds} strategy={verticalListSortingStrategy}>
             {entries.map((entry) =>
               entry.kind === "remote" ? (
                 <RemoteChapterRow key={`remote:${entry.chapter.id}`} chapter={entry.chapter} showGroup={shared.has(entry.chapter.name)} actions={remoteActions} />
@@ -793,7 +796,14 @@ function ChapterItem({
   const [fileOver, setFileOver] = useState(false);
   const sortable = useSortable({ id: CHAPTER + chapter.id, data: { type: "chapter" }, disabled: editing || disabled });
   const style = { transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition };
-  const items = chapter.pageIds.filter((id) => pages.has(id));
+  const items = useMemo(() => chapter.pageIds.filter((id) => pages.has(id)), [chapter.pageIds, pages]);
+  // A stable list: SortableContext re-renders every row whenever it gets a new array.
+  const sortableIds = useMemo(() => items.map((id) => PAGE + id), [items]);
+  // Rows read the workspace through this when clicked, so they re-render only when their own props change.
+  const live = useRef(ws);
+  live.current = ws;
+  const selection = selectedPages(ws);
+  const running = ws.job?.status === "running" ? ws.job.current : undefined;
   const complete = items.length > 0 && items.every((id) => pageComplete(pages.get(id)!));
 
   const webtoon = ws.project?.format?.kind === "webtoon";
@@ -939,10 +949,20 @@ function ChapterItem({
         aria-hidden={!open}
       >
         <div className="min-h-0 overflow-hidden">
-          <SortableContext items={items.map((id) => PAGE + id)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             <div className="flex flex-col gap-0.5 pt-0.5 pb-1 pl-4" role="list">
               {items.map((id, index) => (
-                <PageItem key={id} page={pages.get(id)!} number={index + 1} disabled={disabled} />
+                <PageItem
+                  key={id}
+                  page={pages.get(id)!}
+                  number={index + 1}
+                  disabled={disabled}
+                  projectId={ws.project!.id}
+                  active={ws.pageId === id}
+                  selectionCount={selection.includes(id) ? selection.length : 0}
+                  activeStage={running?.page === id ? running.stage : undefined}
+                  live={live}
+                />
               ))}
               {items.length === 0 && (
                 <div className="px-2 py-1 text-xs text-fg-3">
@@ -1108,30 +1128,54 @@ function SelectionBar() {
   );
 }
 
-function PageItem({ page, number, disabled }: { page: Page; number: number; disabled: boolean }) {
-  const ws = useWorkspace();
+type Workspace = ReturnType<typeof useWorkspace>;
+
+/**
+ * A page row. Memoized: it gets what it shows as props and reads the rest of the workspace
+ * through `live` when acted on, so selecting a page re-renders two rows instead of all of them.
+ */
+const PageItem = memo(function PageItem({
+  page,
+  number,
+  disabled,
+  projectId,
+  active,
+  selectionCount,
+  activeStage,
+  live,
+}: {
+  page: Page;
+  number: number;
+  disabled: boolean;
+  projectId: string;
+  active: boolean;
+  /** The size of the multi-selection this page is in, or 0. */
+  selectionCount: number;
+  activeStage?: string;
+  live: RefObject<Workspace>;
+}) {
   const sortable = useSortable({ id: PAGE + page.id, data: { type: "page" }, disabled });
   const style = { transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition };
   // Shift selects a run of pages, Ctrl (Cmd on a Mac) adds or removes one, both add a run.
   const select = (event?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const add = !!event && (event.ctrlKey || event.metaKey);
-    ws.selectPage(page.id, event?.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
+    live.current.selectPage(page.id, event?.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
   };
-  const selection = selectedPages(ws);
-  const inSelection = selection.includes(page.id);
+  const inSelection = selectionCount > 0;
   const [exporting, setExporting] = useState(false);
   const exportPng = async (psd = false) => {
     setExporting(true);
     try {
-      await (psd ? exportPagePsd : exportPage)(ws.project!.id, page);
+      await (psd ? exportPagePsd : exportPage)(projectId, page);
     } catch (error) {
-      ws.reportError(describeError(error));
+      live.current.reportError(describeError(error));
     } finally {
       setExporting(false);
     }
   };
   const remove = async () => {
-    if (inSelection) return void removeSelected(ws, selection);
+    const ws = live.current;
+    if (inSelection) return void removeSelected(ws, selectedPages(ws));
     if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
   };
   return (
@@ -1139,26 +1183,27 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
       <ContextActions
         actions={[
           {
-            label: inSelection ? `Swap ${selection.length} source images` : "Swap source image",
+            label: inSelection ? `Swap ${selectionCount} source images` : "Swap source image",
             disabled,
             onSelect: () => {
-              const pages = inSelection ? selection.map((id) => ws.project!.pages.find((p) => p.id === id)!) : [page];
+              const ws = live.current;
+              const pages = inSelection ? selectedPages(ws).map((id) => ws.project!.pages.find((p) => p.id === id)!) : [page];
               swapSources(pages, ws.swapPageSources, ws.reportError);
             },
           },
           { label: "Export as PNG", disabled: exporting, onSelect: () => void exportPng() },
           { label: "Export as PSD (layers)", disabled: exporting, onSelect: () => void exportPng(true) },
-          { label: inSelection ? `Remove ${selection.length} pages` : "Remove page", danger: true, disabled, onSelect: () => void remove() },
+          { label: inSelection ? `Remove ${selectionCount} pages` : "Remove page", danger: true, disabled, onSelect: () => void remove() },
         ]}
       >
         <PageRowView
           page={page}
           number={number}
-          projectId={ws.project!.id}
-          active={ws.pageId === page.id}
+          projectId={projectId}
+          active={active}
           selected={inSelection}
           dragging={sortable.isDragging}
-          activeStage={ws.job?.status === "running" && ws.job.current?.page === page.id ? ws.job.current.stage : undefined}
+          activeStage={activeStage}
           rowProps={{
             onPointerDown: pointerStart(sortable.listeners),
             // Shift-click would otherwise select the text between the rows.
@@ -1172,7 +1217,7 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
             },
             tabIndex: 0,
             role: "button",
-            "aria-current": ws.pageId === page.id ? "page" : undefined,
+            "aria-current": active ? "page" : undefined,
           }}
           gripProps={{ ...sortable.attributes, ...sortable.listeners, ref: sortable.setActivatorNodeRef }}
           actions={
@@ -1209,7 +1254,7 @@ function PageItem({ page, number, disabled }: { page: Page; number: number; disa
       </ContextActions>
     </div>
   );
-}
+});
 
 function PageRowView({
   page,

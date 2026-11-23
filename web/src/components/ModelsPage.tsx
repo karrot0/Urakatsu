@@ -24,7 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   catalog,
@@ -332,6 +332,11 @@ function Discover({ state }: { state: CatalogState }) {
   // A phone lists the results and opens the one tapped in a sheet.
   const mobile = useMobile();
   const [opened, setOpened] = useState(false);
+  // Stable, so the memoized rows skip re-rendering while the query is typed.
+  const select = useCallback((repo: string) => {
+    setSelected(repo);
+    setOpened(true);
+  }, []);
 
   // Typing waits SEARCH_DELAY for a pause; the first load and a remembered list do not.
   const typed = useRef(false);
@@ -415,10 +420,7 @@ function Discover({ state }: { state: CatalogState }) {
               key={result.repo}
               result={result}
               active={!mobile && result.repo === selected}
-              onSelect={() => {
-                setSelected(result.repo);
-                setOpened(true);
-              }}
+              onSelect={select}
             />
           ))}
         </ScrollArea>
@@ -436,7 +438,7 @@ function Discover({ state }: { state: CatalogState }) {
   );
 }
 
-function ResultRow({ result, active, onSelect }: { result: SearchResult; active: boolean; onSelect: () => void }) {
+const ResultRow = memo(function ResultRow({ result, active, onSelect }: { result: SearchResult; active: boolean; onSelect: (repo: string) => void }) {
   const [author, ...rest] = result.repo.split("/");
   const params = formatParameters(result.parameters);
   return (
@@ -446,7 +448,7 @@ function ResultRow({ result, active, onSelect }: { result: SearchResult; active:
         active ? "bg-selected" : "bg-transparent hover:bg-hover",
       )}
       aria-current={active || undefined}
-      onClick={onSelect}
+      onClick={() => onSelect(result.repo)}
     >
       <span className="max-w-full truncate font-medium">
         <span className="text-fg-3">{author}/</span>
@@ -477,7 +479,7 @@ function ResultRow({ result, active, onSelect }: { result: SearchResult; active:
       </span>
     </button>
   );
-}
+});
 
 function uniqueStages(usage: Usage[]): string[] {
   return [...new Set(usage.map((u) => u.stage))];
@@ -494,7 +496,8 @@ function EmptyDetail() {
 
 // ---- details ------------------------------------------------------------------------------------
 
-function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; repo: string; state: CatalogState; onOpen: (repo: string) => void }) {
+/** Memoized: the search box above re-renders its panel on every keystroke. */
+const Details = memo(function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; repo: string; state: CatalogState; onOpen: (repo: string) => void }) {
   const ws = useWorkspace();
   const [details, setDetails] = useState<ModelDetails | undefined>(() => recentDetails.get(`${runtime}\n${repo}`));
   const [error, setError] = useState<string>();
@@ -795,7 +798,7 @@ function Details({ runtime, repo, state, onOpen }: { runtime: CatalogRuntime; re
       </div>
     </ScrollArea>
   );
-}
+});
 
 function FitCell({ fit }: { fit: Fit }) {
   const share = fit.level === "partial" ? ` ${Math.round(fit.gpu_share * 100)}% GPU` : "";

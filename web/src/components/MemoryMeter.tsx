@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { STAGE_LABEL, catalog, formatBytes, type MemoryUsage } from "../api/catalog";
+import { STAGE_LABEL, catalog, formatBytes, type MemoryPool, type MemoryUsage } from "../api/catalog";
 import { describeError } from "../api/client";
 import { useWorkspace } from "../state/workspace";
 import { Popover, Tooltip } from "./primitives";
@@ -20,6 +20,33 @@ function deviceLabel(label: string) {
   return backend === "cpu" || index === undefined ? name : `${name}:${index}`;
 }
 
+/** Memory drift smaller than this share of a pool keeps the reading on screen. */
+const DRIFT = 0.005;
+
+function samePool(a: (MemoryPool & { spilled?: number | null }) | null, b: (MemoryPool & { spilled?: number | null }) | null): boolean {
+  if (!a || !b) return a === b;
+  const near = (x: number, y: number) => Math.abs(x - y) < b.total * DRIFT;
+  return (
+    a.name === b.name &&
+    a.total === b.total &&
+    (a.app === null) === (b.app === null) &&
+    near(a.app ?? 0, b.app ?? 0) &&
+    near(a.used, b.used) &&
+    (a.spilled ?? 0) >= SPILL_WARNING === (b.spilled ?? 0) >= SPILL_WARNING &&
+    formatBytes(a.spilled ?? 0) === formatBytes(b.spilled ?? 0)
+  );
+}
+
+/**
+ * Whether a new reading can be skipped. Memory drifts by tens of MB every poll, which would
+ * re-render the sidebar and animate the bars every 3 s; the last reading stays until a pool moves
+ * by half a percent, or what Urakatsu holds changes.
+ */
+function sameReading(a: MemoryUsage | null, b: MemoryUsage): boolean {
+  if (!a) return false;
+  return a.device === b.device && a.busy === b.busy && JSON.stringify(a.loaded) === JSON.stringify(b.loaded) && samePool(a.gpu, b.gpu) && samePool(a.ram, b.ram);
+}
+
 /**
  * GPU memory and system RAM, each as Urakatsu's share (brand), other apps (neutral) and free
  * space on a bar marked at each quarter. RAM holds model layers offloaded to the CPU. Polls while
@@ -37,7 +64,7 @@ export function MemoryMeter() {
       if (document.visibilityState === "visible") {
         try {
           const next = await catalog.memory();
-          if (alive) setUsage(next);
+          if (alive) setUsage((last) => (sameReading(last, next) ? last : next));
         } catch {
           // A busy or older server; keep the last reading.
         }
