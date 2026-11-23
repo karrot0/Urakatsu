@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { CircleAlert, X } from "lucide-react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
@@ -72,8 +72,11 @@ function loadWidths(): typeof DEFAULT_WIDTHS {
   }
 }
 
-/** Chapters, canvas and inspector. The side panels keep their pixel width when the window resizes; double-click an edge to reset it. */
-function Editor({ projectId }: { projectId: string }) {
+/**
+ * Chapters, canvas and inspector. The side panels keep their pixel width when the window resizes; double-click an edge to reset it.
+ * Memoized: App re-renders on every workspace change, and each panel subscribes to what it shows itself.
+ */
+const Editor = memo(function Editor({ projectId }: { projectId: string }) {
   const widths = useRef(loadWidths());
   const sidebar = useRef<PanelImperativeHandle>(null);
   const inspector = useRef<PanelImperativeHandle>(null);
@@ -110,4 +113,4 @@ function Editor({ projectId }: { projectId: string }) {
       </ResizablePanel>
     </ResizablePanelGroup>
   );
-}
+});

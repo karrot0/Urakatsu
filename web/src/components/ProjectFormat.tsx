@@ -5,7 +5,7 @@ import { BookOpen, GalleryVertical } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-import { useWorkspace, type ProjectFormatInit } from "../state/workspace";
+import { useWorkspacePick, type ProjectFormatInit } from "../state/workspace";
 import { CheckRow, NumberField, Popover, Slider } from "./primitives";
 import { Segmented } from "./ui";
 
@@ -15,7 +15,7 @@ type Kind = "manga" | "webtoon";
 const DEFAULTS = { height: 0, sensitivity: 90, scanStep: 5, margin: 0, detect: true };
 
 export function ProjectFormatButton() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project");
   const project = ws.project!;
   const kind: Kind = project.format?.kind === "webtoon" ? "webtoon" : "manga";
   const stored = project.format?.stitch;

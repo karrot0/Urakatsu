@@ -56,7 +56,7 @@ import { assetHref, assetVersion, describeError, exportChapters, exportPage, exp
 import { PAGE_ACCEPT } from "../api/imports";
 import { chapterNumber, sources, type LinkView, type LinkedChapter } from "../api/sources";
 import type { Page, Project } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, chapterOf, pageComplete, selectedChapters, selectedPages, stageDone, useWorkspace, type ChapterLayout } from "../state/workspace";
+import { STAGES, chapterOf, pageComplete, selectedChapters, selectedPages, stageDone, useWorkspaceGetter, useWorkspacePick, type ChapterLayout, type Workspace } from "../state/workspace";
 import { AutomationsButton } from "./Automations";
 import { confirm } from "./ConfirmDialog";
 import { KomgaButton } from "./Komga";
@@ -177,9 +177,7 @@ const MARQUEE_SPEED = 14;
  * space without a drag goes back to the current page alone.
  */
 function useMarquee(content: RefObject<HTMLDivElement | null>) {
-  const ws = useWorkspace();
-  const wsRef = useRef(ws);
-  wsRef.current = ws;
+  const getWorkspace = useWorkspaceGetter();
   const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const onPointerDown = useCallback(
@@ -190,7 +188,7 @@ function useMarquee(content: RefObject<HTMLDivElement | null>) {
       if (target !== el && !target.hasAttribute("data-marquee")) return;
       const viewport = el.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
       const additive = event.ctrlKey || event.metaKey || event.shiftKey;
-      const start = wsRef.current;
+      const start = getWorkspace();
       const base = additive ? (selectedPages(start).length ? selectedPages(start) : start.pageId ? [start.pageId] : []) : [];
       const first = el.getBoundingClientRect();
       const origin = { x: event.clientX - first.left, y: event.clientY - first.top };
@@ -220,7 +218,7 @@ function useMarquee(content: RefObject<HTMLDivElement | null>) {
         const key = picked.join(",");
         if (picked.length && key !== last) {
           last = key;
-          wsRef.current.selectPages(picked);
+          getWorkspace().selectPages(picked);
         }
       };
       const scroll = () => {
@@ -246,14 +244,14 @@ function useMarquee(content: RefObject<HTMLDivElement | null>) {
         el.removeEventListener("pointercancel", end);
         if (frame) cancelAnimationFrame(frame);
         setBox(null);
-        const now = wsRef.current;
+        const now = getWorkspace();
         if (!moved && !additive && now.pageId && selectedPages(now).length) now.selectPage(now.pageId);
       };
       el.addEventListener("pointermove", move);
       el.addEventListener("pointerup", end);
       el.addEventListener("pointercancel", end);
     },
-    [content],
+    [content, getWorkspace],
   );
   return { box, onPointerDown };
 }
@@ -264,7 +262,7 @@ const KEYBOARD_SENSOR = { coordinateGetter: sortableKeyboardCoordinates };
 const MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
 
 export function Sidebar() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "link", "job", "importing");
   const project = ws.project!;
   const base = useMemo(() => layoutOf(project), [project]);
   const [draft, setDraft] = useState<ChapterLayout[] | null>(null);
@@ -294,13 +292,12 @@ export function Sidebar() {
     return twice;
   }, [ws.link]);
 
-  const wsRef = useRef(ws);
-  wsRef.current = ws;
+  const getWorkspace = useWorkspaceGetter();
   const remoteActions = useMemo<RemoteActions>(
     () => ({
-      download: (id) => void wsRef.current.downloadChapters([id]),
-      cancel: (id) => void wsRef.current.cancelDownload(id),
-      check: (url, id) => wsRef.current.openBrowser({ system: wsRef.current.link!.system, url }, () => void wsRef.current.downloadChapters([id])),
+      download: (id) => void getWorkspace().downloadChapters([id]),
+      cancel: (id) => void getWorkspace().cancelDownload(id),
+      check: (url, id) => getWorkspace().openBrowser({ system: getWorkspace().link!.system, url }, () => void getWorkspace().downloadChapters([id])),
     }),
     [],
   );
@@ -564,7 +561,7 @@ export function Sidebar() {
 }
 
 function ProjectHead() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project");
   const project = ws.project!;
   const [editing, setEditing] = useState(false);
   return (
@@ -601,7 +598,7 @@ function ProjectHead() {
 
 /** The linked series: its cover, title and source, or a way to link one. */
 function SourceBar() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "link");
   const project = ws.project!;
   const link = ws.link;
   const [broken, setBroken] = useState(false);
@@ -791,7 +788,7 @@ function ChapterItem({
   onOpen: () => void;
   onAddPages: () => void;
 }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "pageSelection", "chapterSelection", "job");
   const [editing, setEditing] = useState(false);
   const [fileOver, setFileOver] = useState(false);
   const sortable = useSortable({ id: CHAPTER + chapter.id, data: { type: "chapter" }, disabled: editing || disabled });
@@ -800,8 +797,7 @@ function ChapterItem({
   // A stable list: SortableContext re-renders every row whenever it gets a new array.
   const sortableIds = useMemo(() => items.map((id) => PAGE + id), [items]);
   // Rows read the workspace through this when clicked, so they re-render only when their own props change.
-  const live = useRef(ws);
-  live.current = ws;
+  const live = useWorkspaceGetter();
   const selection = selectedPages(ws);
   const running = ws.job?.status === "running" ? ws.job.current : undefined;
   const complete = items.length > 0 && items.every((id) => pageComplete(pages.get(id)!));
@@ -1041,14 +1037,14 @@ function exportActions(webtoon: boolean, count: number, exportAs: (format: Chapt
 }
 
 /** Asks, then removes the selected pages in one undo step. */
-async function removeSelected(ws: ReturnType<typeof useWorkspace>, pageIds: string[]) {
+async function removeSelected(ws: Pick<Workspace, "removePages">, pageIds: string[]) {
   if (!pageIds.length) return;
   if (await confirm({ title: `Remove ${pageIds.length} pages?`, description: "You can undo this.", action: "Remove", danger: true })) await ws.removePages(pageIds);
 }
 
 /** "4 pages selected" or "3 chapters selected" with a way out, while a Shift/Ctrl selection is active. */
 function SelectionBar() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "pageSelection", "chapterSelection", "job");
   const chapters = selectedChapters(ws);
   const pages = selectedPages(ws);
   const active = pages.length > 1 || chapters.length > 0;
@@ -1128,8 +1124,6 @@ function SelectionBar() {
   );
 }
 
-type Workspace = ReturnType<typeof useWorkspace>;
-
 /**
  * A page row. Memoized: it gets what it shows as props and reads the rest of the workspace
  * through `live` when acted on, so selecting a page re-renders two rows instead of all of them.
@@ -1152,14 +1146,14 @@ const PageItem = memo(function PageItem({
   /** The size of the multi-selection this page is in, or 0. */
   selectionCount: number;
   activeStage?: string;
-  live: RefObject<Workspace>;
+  live: () => Workspace;
 }) {
   const sortable = useSortable({ id: PAGE + page.id, data: { type: "page" }, disabled });
   const style = { transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition };
   // Shift selects a run of pages, Ctrl (Cmd on a Mac) adds or removes one, both add a run.
   const select = (event?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const add = !!event && (event.ctrlKey || event.metaKey);
-    live.current.selectPage(page.id, event?.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
+    live().selectPage(page.id, event?.shiftKey ? (add ? "add-range" : "range") : add ? "toggle" : "replace");
   };
   const inSelection = selectionCount > 0;
   const [exporting, setExporting] = useState(false);
@@ -1168,13 +1162,13 @@ const PageItem = memo(function PageItem({
     try {
       await (psd ? exportPagePsd : exportPage)(projectId, page);
     } catch (error) {
-      live.current.reportError(describeError(error));
+      live().reportError(describeError(error));
     } finally {
       setExporting(false);
     }
   };
   const remove = async () => {
-    const ws = live.current;
+    const ws = live();
     if (inSelection) return void removeSelected(ws, selectedPages(ws));
     if (await confirm({ title: `Remove ${page.name}?`, description: "You can undo this.", action: "Remove", danger: true })) void ws.removePage(page.id);
   };
@@ -1186,7 +1180,7 @@ const PageItem = memo(function PageItem({
             label: inSelection ? `Swap ${selectionCount} source images` : "Swap source image",
             disabled,
             onSelect: () => {
-              const ws = live.current;
+              const ws = live();
               const pages = inSelection ? selectedPages(ws).map((id) => ws.project!.pages.find((p) => p.id === id)!) : [page];
               swapSources(pages, ws.swapPageSources, ws.reportError);
             },

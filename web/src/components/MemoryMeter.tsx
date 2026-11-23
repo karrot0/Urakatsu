@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { STAGE_LABEL, catalog, formatBytes, type MemoryPool, type MemoryUsage } from "../api/catalog";
 import { describeError } from "../api/client";
-import { useWorkspace } from "../state/workspace";
+import { useWorkspacePick } from "../state/workspace";
 import { Popover, Tooltip } from "./primitives";
 import { UsageBar, UsageLegend, UsageRow } from "./UsageBar";
 import { Button } from "@/components/ui/button";
@@ -52,8 +52,9 @@ function sameReading(a: MemoryUsage | null, b: MemoryUsage): boolean {
  * space on a bar marked at each quarter. RAM holds model layers offloaded to the CPU. Polls while
  * the tab is visible. A click opens the details, with the loaded models and a way to unload them.
  */
-export function MemoryMeter() {
-  const ws = useWorkspace();
+/** Memoized: it has no props, so the sidebar re-rendering around it is no reason to. */
+export const MemoryMeter = memo(function MemoryMeter() {
+  const ws = useWorkspacePick("capabilities");
   const [usage, setUsage] = useState<MemoryUsage | null>(null);
   const [unloading, setUnloading] = useState<string>();
 
@@ -151,4 +152,4 @@ export function MemoryMeter() {
       </div>
     </Popover>
   );
-}
+});

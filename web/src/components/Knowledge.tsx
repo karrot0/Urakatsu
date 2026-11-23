@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { describeError } from "../api/client";
 import { knowledge as api, type Knowledge, type KnowledgeEntry, type KnowledgeInput, type KnowledgeKind, type RetrievedKnowledge } from "../api/knowledge";
 import { plural } from "../format";
-import { useWorkspace } from "../state/workspace";
+import { useWorkspacePick } from "../state/workspace";
 import { CheckRow, Select, Switch, Tooltip, type Option } from "./primitives";
 import { Badge, Segmented } from "./ui";
 
@@ -50,7 +50,7 @@ type Tab = "entries" | "page";
 type Editing = string | null;
 
 function KnowledgeDialog({ onClose }: { onClose: () => void }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId");
   const projectId = ws.project!.id;
   const pageId = ws.pageId;
   const [data, setData] = useState<Knowledge>();

@@ -1,7 +1,7 @@
 // Workspace state: one React context owning projects, selection, jobs, and config.
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { assetUrl, assetVersion, client, describeError, forgetAssets, removePages as removePagesRequest, uploadPageSources } from "../api/client";
 import { collect, importFiles, needsImport, type Incoming, type PageSource } from "../api/imports";
@@ -146,7 +146,7 @@ export interface BlockPatch {
   visible?: boolean;
 }
 
-interface State {
+export interface State {
   ready: boolean;
   capabilities?: Capabilities;
   config?: Config;
@@ -192,7 +192,7 @@ export interface ChapterLayout {
   pageIds: string[];
 }
 
-interface Actions {
+export interface Actions {
   refresh(): Promise<void>;
   refreshModels(): Promise<void>;
   reloadProject(projectId: string): Promise<void>;
@@ -262,6 +262,49 @@ interface Actions {
 }
 
 const Ctx = createContext<(State & Actions) | null>(null);
+
+/**
+ * The workspace as an external store, beside the context. `useWorkspace()` re-renders its
+ * component on every change; `useWorkspacePick()` only when a field it picked changes, so a
+ * panel that does not show the selected block, say, skips re-rendering when it changes.
+ */
+interface Store {
+  value: State & Actions;
+  /** Every action, each calling the latest one: stable for the life of the provider. */
+  actions: Actions;
+  subscribe(listener: () => void): () => void;
+  emit(): void;
+}
+
+function createStore(): Store {
+  const listeners = new Set<() => void>();
+  const calls = new Map<PropertyKey, (...args: unknown[]) => unknown>();
+  const store: Store = {
+    value: null as unknown as State & Actions,
+    actions: new Proxy({} as Actions, {
+      get(_, key) {
+        // Only actions: a state field that was not picked reads as undefined, not as a function.
+        if (typeof store.value?.[key as keyof Actions] !== "function") return undefined;
+        let call = calls.get(key);
+        if (!call) {
+          call = (...args: unknown[]) => (store.value[key as keyof Actions] as (...a: unknown[]) => unknown)(...args);
+          calls.set(key, call);
+        }
+        return call;
+      },
+    }),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    emit() {
+      for (const listener of listeners) listener();
+    },
+  };
+  return store;
+}
+
+const StoreCtx = createContext<Store | null>(null);
 const THEME_KEY = "urakatsu.theme";
 const SHORTCUTS_KEY = "urakatsu.shortcuts";
 const BRUSH_KEY = "urakatsu.brush";
@@ -1213,7 +1256,48 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(() => ({ ...state, ...actions }), [state, actions]);
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const [store] = useState(createStore);
+  // Set while rendering, so picks rendered in this pass read the same workspace as the context
+  // (the app renders no transitions or Suspense, so a render is never thrown away); picks that
+  // did not re-render with it hear about it before paint.
+  store.value = value;
+  useLayoutEffect(() => store.emit(), [store, value]);
+  return (
+    <StoreCtx.Provider value={store}>
+      <Ctx.Provider value={value}>{children}</Ctx.Provider>
+    </StoreCtx.Provider>
+  );
+}
+
+export type Workspace = State & Actions;
+
+/** A stable getter for the latest workspace, for event handlers: reading it subscribes to nothing. */
+export function useWorkspaceGetter(): () => Workspace {
+  const store = useContext(StoreCtx);
+  if (!store) throw new Error("useWorkspaceGetter outside WorkspaceProvider");
+  return useCallback(() => store.value, [store]);
+}
+/** The picked fields of the workspace and every action. */
+export type WorkspacePick<K extends keyof State> = Pick<State, K> & Actions;
+
+/**
+ * Only the `keys` of the workspace state, plus every action (stable, always the latest). The
+ * component re-renders when a picked field changes, not on every workspace change.
+ */
+export function useWorkspacePick<K extends keyof State>(...keys: K[]): WorkspacePick<K> {
+  const store = useContext(StoreCtx);
+  if (!store) throw new Error("useWorkspacePick outside WorkspaceProvider");
+  const last = useRef<Pick<State, K> | null>(null);
+  const picked = useSyncExternalStore(store.subscribe, () => {
+    const value = store.value;
+    const prev = last.current;
+    if (prev && keys.every((key) => prev[key] === value[key])) return prev;
+    const next = {} as Pick<State, K>;
+    for (const key of keys) next[key] = value[key];
+    last.current = next;
+    return next;
+  });
+  return useMemo(() => Object.assign(Object.create(store.actions) as Actions, picked), [store, picked]);
 }
 
 export function useWorkspace(): State & Actions {
@@ -1231,7 +1315,7 @@ function withLiveSelection(state: State): State {
   return blockId === state.blockId && rasterId === state.rasterId ? state : { ...state, blockId, rasterId };
 }
 
-export function currentPage(state: State): Page | undefined {
+export function currentPage(state: Pick<State, "project" | "pageId">): Page | undefined {
   return state.project?.pages.find((p) => p.id === state.pageId);
 }
 
@@ -1317,7 +1401,7 @@ function nextSelection(s: State, pageId: string, mode: SelectMode): Pick<State, 
   return { pageId: page, pageSelection: selection.length ? selection : [page], pageAnchor: anchor };
 }
 
-export function chapterOf(state: State, pageId: string | undefined): Chapter | undefined {
+export function chapterOf(state: Pick<State, "project">, pageId: string | undefined): Chapter | undefined {
   if (!pageId) return undefined;
   return state.project?.chapters.find((c) => c.pageIds.includes(pageId));
 }

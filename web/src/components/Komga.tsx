@@ -14,7 +14,7 @@ import { cn } from "cn";
 import { describeError } from "../api/client";
 import { komga, type KomgaLink, type KomgaSeries, type KomgaStatus } from "../api/komga";
 import { formatTimestamp, plural } from "../format";
-import { useWorkspace } from "../state/workspace";
+import { useWorkspace, useWorkspacePick } from "../state/workspace";
 import { CheckRow, Select, Tooltip, type Option } from "./primitives";
 import { Badge, Segmented } from "./ui";
 
@@ -75,7 +75,7 @@ export function useKomgaLink(projectId: string, active = true): [KomgaLink | nul
 // ---- dialog --------------------------------------------------------------------------------------
 
 function KomgaDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project");
   const projectId = ws.project!.id;
   const [status, setStatus] = useState<KomgaStatus>();
   const [link, setLink, linkError] = useKomgaLink(projectId, open);

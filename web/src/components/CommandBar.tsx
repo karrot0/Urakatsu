@@ -28,7 +28,7 @@ import { describeError, exportChapters, exportPage, exportPagePsd, exportPages, 
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 import type { Config, TranslationModel } from "../gen/urakatsu/v1/urakatsu_pb";
-import { STAGES, chapterOf, currentPage, selectedChapters, selectedPages, useWorkspace, type RunScope, type RunStage, type StageName, type Theme, type ViewMode } from "../state/workspace";
+import { STAGES, chapterOf, currentPage, selectedChapters, selectedPages, useWorkspacePick, type RunScope, type RunStage, type StageName, type Theme, type ViewMode } from "../state/workspace";
 import { Popover, Tooltip } from "./primitives";
 import { Segmented } from "./ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,7 +58,7 @@ const popupItem =
   "flex min-h-[30px] w-full cursor-default items-center gap-2 rounded-control bg-transparent px-2 py-0.5 text-left text-fg transition-colors duration-[20ms] ease-in outline-none select-none hover:bg-hover focus-visible:bg-hover data-[highlighted]:bg-hover [&_svg]:shrink-0";
 
 export function CommandBar() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "view", "showBlocks", "showRegions");
   const page = currentPage(ws);
   const chapter = chapterOf(ws, ws.pageId);
   const project = ws.project!;
@@ -125,7 +125,7 @@ export function CommandBar() {
 
 
 function ExportMenu({ variant }: { variant: "default" | "outline" }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "pageSelection", "chapterSelection");
   const page = currentPage(ws);
   const chapter = chapterOf(ws, ws.pageId);
   const picked = selectedChapters(ws).filter((c) => c.pageIds.length > 0);
@@ -212,7 +212,7 @@ function ExportMenu({ variant }: { variant: "default" | "outline" }) {
 type View = "root" | "model" | "scope" | "stages";
 
 function InferenceControl() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project", "pageId", "pageSelection", "chapterSelection", "config", "job", "runScope", "runStages", "translationModels");
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("root");
   const running = ws.job?.status === "running";
@@ -403,7 +403,7 @@ function InferenceControl() {
 }
 
 function ModelList({ current, onChoose }: { current?: TranslationModel; onChoose: (model: TranslationModel) => void }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("translationModels");
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();

@@ -28,7 +28,7 @@ import {
 } from "../api/automations";
 import { describeError } from "../api/client";
 import { formatDate, formatTimestamp, plural } from "../format";
-import { STAGES, useWorkspace, type StageName } from "../state/workspace";
+import { STAGES, useWorkspace, useWorkspacePick, type StageName } from "../state/workspace";
 import { useKomgaLink } from "./Komga";
 import { ActionMenu, CheckRow, NumberField, Select, Switch, Tooltip, type Option } from "./primitives";
 import { Badge, Segmented, type Tone } from "./ui";
@@ -65,7 +65,7 @@ function bodyOf(automation: Automation): AutomationBody {
 
 /** The project header's Automations button: a dot while one of this project's runs is on its way. */
 export function AutomationsButton() {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project");
   const projectId = ws.project!.id;
   const [open, setOpen] = useState(false);
   const status = useAutomationStatus(projectId);
@@ -88,7 +88,7 @@ export function AutomationsButton() {
  * re-reading the project so its pages show the results), otherwise now and then.
  */
 function useAutomationStatus(projectId: string): AutomationStatus | undefined {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick();
   const [status, setStatus] = useState<AutomationStatus>();
   const lastReload = useRef(0);
   const lastDone = useRef<string>("");
@@ -134,7 +134,7 @@ function useAutomationStatus(projectId: string): AutomationStatus | undefined {
 type View = { kind: "list" } | { kind: "edit"; id?: string; body: AutomationBody } | { kind: "profiles" };
 
 function AutomationsDialog({ open, onOpenChange, status }: { open: boolean; onOpenChange: (open: boolean) => void; status?: AutomationStatus }) {
-  const ws = useWorkspace();
+  const ws = useWorkspacePick("project");
   const projectId = ws.project!.id;
   const [data, setData] = useState<ProjectAutomations>();
   const [profiles, setProfiles] = useState<ModelProfile[]>([]);
