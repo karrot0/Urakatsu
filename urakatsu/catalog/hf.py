@@ -26,6 +26,10 @@ CACHE_SECONDS = 300
 STALE_SECONDS = 24 * 3600  # an older saved answer is refetched before it is shown
 HEADER_CHUNK = 256 << 10  # bytes of a GGUF file fetched first to read its header (doubled as needed)
 HEADER_LIMIT = 64 << 20  # give up rather than download most of a model
+PARALLEL = 8  # Hub requests one search may have in flight at once
+# httpx closes idle connections after 5 s, so a search typed after a pause paid a new TLS
+# handshake (~60 ms); the Hub keeps them open longer.
+KEEPALIVE_SECONDS = 60.0
 
 # Search filters per runtime. The Hub's `filter` matches tags and the library name.
 RUNTIME_FILTERS: dict[str, dict[str, Any]] = {
@@ -66,12 +70,14 @@ class HubClient:
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        self._client = httpx.Client(base_url=ENDPOINT, headers=headers, follow_redirects=True, timeout=httpx.Timeout(20.0, read=60.0), transport=transport)
+        self._client = httpx.Client(base_url=ENDPOINT, headers=headers, follow_redirects=True, timeout=httpx.Timeout(20.0, read=60.0), limits=httpx.Limits(keepalive_expiry=KEEPALIVE_SECONDS), transport=transport)
         self._cache: dict[str, tuple[float, Any]] = {}
         self._lock = threading.Lock()
         self._disk = DiskCache(cache_dir) if cache_dir else None
         self._refreshing: set[str] = set()
         self._refresher = ThreadPoolExecutor(2, thread_name_prefix="hub-refresh")
+        # Single requests only (never a task that waits on another), so it cannot deadlock.
+        self._fetcher = ThreadPoolExecutor(PARALLEL, thread_name_prefix="hub-fetch")
 
     def _get_json(self, path: str, params: Any = None) -> Any:
         key = path + "?" + repr(params)
@@ -128,9 +134,10 @@ class HubClient:
         if pipeline_tag:
             params.append(("pipeline_tag", pipeline_tag))
         results: dict[str, RepoInfo] = {}
-        # The Hub ANDs repeated filters, so a runtime with several acceptable libraries searches each.
-        for value in filters or [None]:
-            batch = self._get_json("/api/models", params + ([("filter", value)] if value else []))
+        # The Hub ANDs repeated filters, so a runtime with several acceptable libraries searches
+        # each; the searches go out together and merge in filter order.
+        batches = self._fetcher.map(lambda value: self._get_json("/api/models", params + ([("filter", value)] if value else [])), filters or [None])
+        for batch in batches:
             for item in batch:
                 info = _repo(item)
                 results.setdefault(info.id, info)

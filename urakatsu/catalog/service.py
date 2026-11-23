@@ -10,12 +10,15 @@ For every repository the catalog answers three questions:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import shutil
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -58,6 +61,9 @@ SLOT_LABELS = {
     "model": "Checkpoint",
 }
 LATEST_TTL = 1800  # seconds a newest-release lookup is reused
+# Whole searches and repo lookups run here; their own Hub requests go to the client's pool, so
+# a task here never waits on this pool.
+_HUB_POOL = ThreadPoolExecutor(8, thread_name_prefix="catalog-search")
 PYTHON_RUNTIMES = (("torch", "PyTorch"), ("torchvision", "torchvision"), ("transformers", "Transformers"), ("onnxruntime-gpu", "ONNX Runtime GPU"), ("onnxruntime", "ONNX Runtime"))
 
 
@@ -260,9 +266,11 @@ class Catalog:
             try:
                 import importlib.metadata as metadata
 
-                from transformers import CONFIG_MAPPING
-
                 version = metadata.version("transformers")
+                if facts.model_type in _transformers_model_types():
+                    return {"status": "supported", "runtime": "Transformers", "installed": version, "message": f"Transformers {version} knows model type “{facts.model_type}”."}
+                from transformers import CONFIG_MAPPING  # ~2-5 s the first time: only for types not in the table
+
                 if facts.model_type in CONFIG_MAPPING:
                     return {"status": "supported", "runtime": "Transformers", "installed": version, "message": f"Transformers {version} knows model type “{facts.model_type}”."}
                 return {"status": "supported", "runtime": "Transformers", "installed": version, "message": "Loaded by Urakatsu's own model code."}
@@ -278,17 +286,19 @@ class Catalog:
         installed_repos = {m.repo for m in self.installed.all()}
         defaults = self._default_repos(runtime)
         results = []
-        repos = self.hub.search(runtime, query, sort=sort, limit=limit)
-        if usable_only and not query:
-            # The most downloaded repos of a runtime are mostly ones no stage can load; add what
-            # each provider's own searches find so the list starts with usable models.
-            seen = {r.id for r in repos}
-            hints = dict.fromkeys(q for cls in registry.list() if runtime in cls.runtimes_declared() for q in cls.catalog_queries)
-            for hint in hints:
-                for repo in self.hub.search(runtime, hint, sort=sort, limit=10):
-                    if repo.id not in seen:
-                        seen.add(repo.id)
-                        repos.append(repo)
+        # The most downloaded repos of a runtime are mostly ones no stage can load: without a
+        # query, the usable list adds what each provider's own searches find so it starts with
+        # usable models. The searches are independent, so they go out together.
+        hints = list(dict.fromkeys(q for cls in registry.list() if runtime in cls.runtimes_declared() for q in cls.catalog_queries)) if usable_only and not query else []
+        searches = [(query, limit), *((hint, 10) for hint in hints)]
+        batches = list(_HUB_POOL.map(lambda s: self.hub.search(runtime, s[0], sort=sort, limit=s[1]), searches))
+        repos = list(batches[0])
+        seen = {r.id for r in repos}
+        for batch in batches[1:]:
+            for repo in batch:
+                if repo.id not in seen:
+                    seen.add(repo.id)
+                    repos.append(repo)
         repos = [*repos, *self._pinned_repos(runtime, query, defaults, {r.id for r in repos})]
         for repo in repos:
             facts = self.facts(runtime, repo)
@@ -338,15 +348,14 @@ class Catalog:
         """Installed and default repos that fit ``query`` but ranked outside the Hub's results."""
         words = query.lower().split()
         wanted = {m.repo for m in self.installed.all() if m.runtime == runtime} | defaults
-        repos = []
-        for repo_id in sorted(wanted - found):
-            if not all(word in repo_id.lower() for word in words):
-                continue
+        def lookup(repo_id: str) -> Optional[RepoInfo]:
             try:
-                repos.append(self.hub.model(repo_id))
+                return self.hub.model(repo_id)
             except Exception:  # noqa: BLE001 - offline, or the repo is gone: the search still stands
-                continue
-        return repos
+                return None
+
+        matching = [r for r in sorted(wanted - found) if all(word in r.lower() for word in words)]
+        return [repo for repo in _HUB_POOL.map(lookup, matching) if repo is not None]
 
     # -- details -----------------------------------------------------------------------------------
 
@@ -809,6 +818,29 @@ class Catalog:
         self._latest.pop(package.id, None)
         self.packages.ensure(package, discover().candidates(), force=True)
         return self.runtimes()
+
+
+@lru_cache(maxsize=1)
+def _transformers_model_types() -> frozenset[str]:
+    """Model types in Transformers' config table, read without importing Transformers (which
+    brings in torch: ~5 s on a fresh server, for the first details of a torch model).
+
+    ``auto_mappings.py`` is plain data in Transformers 5; types added elsewhere are missing
+    here, so a miss still asks the real table. Empty if the file moves.
+    """
+    try:
+        spec = importlib.util.find_spec("transformers")  # finds the package without importing it
+        if spec is None or not spec.origin:
+            return frozenset()
+        path = Path(spec.origin).parent / "models" / "auto" / "auto_mappings.py"
+        table = importlib.util.spec_from_file_location("_urakatsu_transformers_auto_mappings", path)
+        if table is None or table.loader is None:
+            return frozenset()
+        module = importlib.util.module_from_spec(table)
+        table.loader.exec_module(module)
+        return frozenset(getattr(module, "CONFIG_MAPPING_NAMES", {}))
+    except Exception:  # noqa: BLE001 - only a shortcut: the import answers instead
+        return frozenset()
 
 
 def _has_safetensors(facts: ModelFacts) -> bool:
