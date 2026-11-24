@@ -192,33 +192,96 @@ _LINK = re.compile(r"https://huggingface\.co/([\w.-]+/[\w.-]+)(?:/(tree|blob|res
 
 
 def parse_sources(doc: str, recipe: Recipe) -> dict[str, list[Source]]:
-    """Slot -> companion sources from the doc's "Download weights" bullets.
+    """Slot -> companion sources from the doc's "Model files" tables, or from the "Download
+    weights" bullets of releases before ``master-1117``.
 
-    A doc covering several models (``flux2.md``: FLUX.2-dev, Klein 4B, Klein 9B) has a
-    "Download weights" section under each model's heading; the recipe's own section is read,
-    else the first. The first bullet is the model itself, as is any bullet naming a model of
-    the section's heading ("Klein 9B / Klein base 9B"); a bullet naming a slot (``vae``,
-    ``clip_l``, ``t5xxl``, ``tokenizer``, ``tae``) is that slot; the remaining one is the text
-    encoder (``llm``) when the recipe has one. A projector mentioned with a text encoder's
-    GGUF repository is taken from that repository."""
+    A doc covering several models (``flux2.md``: FLUX.2-dev, Klein 4B, Klein 9B) has a table
+    (or a "Download weights" section) under each model's heading; the recipe's own is read,
+    else the first."""
+    names = {normalize(recipe.name), normalize(recipe.id)}
+
+    def own(sections: list[tuple[str, str]]) -> tuple[str, str]:
+        return next((s for s in sections if any(n and n in normalize(s[0]) for n in names)), sections[0])
+
+    tables = _component_tables(doc)
+    if tables:
+        return _table_sources(own(tables)[1], {s.id for s in recipe.slots})
     sections = _download_sections(doc)
     if not sections:
         return {}
-    names = {normalize(recipe.name), normalize(recipe.id)}
-    heading, body = next((s for s in sections if any(n and n in normalize(s[0]) for n in names)), sections[0])
+    return _bullet_sources(*own(sections), recipe)
+
+
+def _table_sources(table: str, slots: set[str]) -> dict[str, list[Source]]:
+    """Each row's links under the slot its "CLI option" names (``--vae`` is ``vae``,
+    ``--diffusion-model`` is ``diffusion_model``). Rows for options the recipe has no slot for
+    (``--lora-model-dir``) or with no option are skipped."""
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in table.splitlines() if line.lstrip().startswith("|")]
+    if not rows:
+        return {}
+    header = [cell.lower() for cell in rows[0]]
+    option = next((i for i, cell in enumerate(header) if "option" in cell), None)
+    if option is None:
+        return {}
+    found: dict[str, list[Source]] = {}
+    for row in rows[1:]:
+        if len(row) <= option or re.fullmatch(r"[-:\s]+", row[0] or "-"):
+            continue
+        slot = _slot_for_option(row[option], slots)
+        if slot is None:
+            continue
+        links = " ".join(cell for i, cell in enumerate(row) if i != option)
+        found.setdefault(slot, []).extend(_sources_in(links))
+    return {slot: sources for slot, sources in found.items() if sources}
+
+
+def _slot_for_option(cell: str, slots: set[str]) -> Optional[str]:
+    match = re.search(r"--?([A-Za-z][\w-]*)", cell)
+    if match is None:
+        return None
+    name = match.group(1).lower().replace("-", "_")
+    slot = {"m": "model", "taesd": "tae"}.get(name, name)
+    return slot if slot in slots else None
+
+
+def _sources_in(text: str) -> list[Source]:
+    return [Source(repo, file=path) if kind in ("blob", "resolve") else Source(repo, folder=path or "") for repo, kind, path in _LINK.findall(text)]
+
+
+def _bullet_sources(heading: str, body: str, recipe: Recipe) -> dict[str, list[Source]]:
+    """The first bullet is the model itself, as is any bullet naming a model of the section's
+    heading ("Klein 9B / Klein base 9B"); a bullet naming a slot (``vae``, ``clip_l``,
+    ``t5xxl``, ``tokenizer``, ``tae``) is that slot; the remaining one is the text encoder
+    (``llm``) when the recipe has one. A projector mentioned with a text encoder's GGUF
+    repository is taken from that repository."""
     models = [m for m in (normalize(part) for part in re.split(r"\s*/\s*", heading)) if len(m) >= 4]
     bullets = re.split(r"(?m)^- ", body)[1:]
     slots = {s.id for s in recipe.slots}
     found: dict[str, list[Source]] = {}
     for index, bullet in enumerate(bullets):
         title = bullet.split("\n", 1)[0].lower()
-        sources = [Source(repo, file=path) if kind in ("blob", "resolve") else Source(repo, folder=path or "") for repo, kind, path in _LINK.findall(bullet)]
+        sources = _sources_in(bullet)
         if not sources:
             continue
         slot = _slot_for(title, 0 if any(m in normalize(title) for m in models) else index, slots)
         if slot:
             found.setdefault(slot, []).extend(sources)
     return found
+
+
+def _component_tables(doc: str) -> list[tuple[str, str]]:
+    """(the heading a component table sits under, the table's text), in doc order: the tables
+    whose header has a "Component" column (``## Model files``, one per model under ``###``
+    headings in ``flux2.md``), not the "Recipe" or "Example" tables of the Usage section."""
+    headings = list(re.finditer(r"(?m)^#+\s*(.*)$", doc))
+    tables = []
+    for index, heading in enumerate(headings):
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(doc)
+        body = doc[heading.end() : end]
+        table = re.search(r"(?m)^\s*\|[^\n]*\bcomponent\b[^\n]*\|\s*\n(?:\s*\|[^\n]*\n?)+", body, re.IGNORECASE)
+        if table:
+            tables.append((heading.group(1).strip(), table.group(0)))
+    return tables
 
 
 def _download_sections(doc: str) -> list[tuple[str, str]]:

@@ -126,6 +126,61 @@ def test_a_doc_covering_several_models_gives_each_recipe_its_own_companions():
     assert [s.repo for s in parse_sources(FLUX2_DOC, KLEIN_4B)["llm"]] == ["unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF"]  # no section of its own: the first
 
 
+# The same page from master-1117 on: a "Model files" table per model, slots named by CLI option.
+FLUX2_TABLE_DOC = """# FLUX.2
+
+## Model files
+
+### Flux.2-dev
+
+| Component | Weights and downloads | CLI option | Requirement |
+| --- | --- | --- | --- |
+| FLUX.2 dev | [GGUF](https://huggingface.co/city96/FLUX.2-dev-gguf/tree/main) | `--diffusion-model` | Required for dev |
+| FLUX.2 VAE | [Safetensors](https://huggingface.co/black-forest-labs/FLUX.2-dev/tree/main) | `--vae` | Choose one compatible VAE |
+| Mistral Small 3.2 24B | [GGUF](https://huggingface.co/unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF/tree/main) | `--llm` | Required for dev |
+
+### Flux.2 klein 9B / Flux.2 klein base 9B
+
+| Component | Weights and downloads | CLI option | Requirement |
+| --- | --- | --- | --- |
+| FLUX.2 Klein 9B | [Safetensors](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B)<br>[GGUF](https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/tree/main) | `--diffusion-model` | Choose Klein or Klein Base |
+| FLUX.2 VAE | [Safetensors](https://huggingface.co/black-forest-labs/FLUX.2-dev/tree/main) | `--vae` | Required for these examples |
+| Qwen3 8B | [Safetensors](https://huggingface.co/Comfy-Org/flux2-klein-9B/tree/main/split_files/text_encoders)<br>[GGUF](https://huggingface.co/unsloth/Qwen3-8B-GGUF/tree/main) | `--llm` | Required for 9B variants |
+
+## Usage
+
+| Recipe | Component slots |
+| --- | --- |
+| FLUX.2 Klein 9B (`flux2-klein-9b`) | `diffusion_model`, `llm`, `vae`, `tae` |
+"""
+
+MOSS_TABLE_DOC = """# MOSS-Image
+
+## Model files
+
+| Component | Weights and downloads | CLI option | Requirement |
+| --- | --- | --- | --- |
+| MOSS-Image Base or SFT | [Safetensors](https://huggingface.co/Comfy-Org/MOSS-Image/tree/main/diffusion_models)<br>gguf:<br>Base: [Download](https://huggingface.co/leejet/MOSS-Image-Base-GGUF/tree/main) | `--diffusion-model` | Required |
+| vae | [Safetensors](https://huggingface.co/Comfy-Org/MOSS-Image/tree/main/vae) | `--vae` | Use matching VAE |
+| Qwen3.5 9B | [GGUF](https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/tree/main) | `--llm` | Use matching text encoder |
+| `tokenizer.json` | [Download](https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base/tree/main/tokenizer) | `--tokenizer` | Required |
+| MOSS-Image-Edit-HQ LoRA | [`lora.safetensors`](https://huggingface.co/akhaliq/MOSS-Image-Edit-HQ/blob/main/armV5-moss-edit-lora.safetensors) | `--lora-model-dir` | HQ editing |
+| chinoll Moss-Image-Edit LoRA | [`adapter_model.safetensors`](https://huggingface.co/chinoll/Moss-Image-Edit/blob/main/adapter_model.safetensors) | — | DGL only |
+"""
+
+
+def test_model_files_tables_become_companion_sources():
+    nine = parse_sources(FLUX2_TABLE_DOC, KLEIN_9B)
+    assert [(s.repo, s.folder) for s in nine["llm"]] == [("Comfy-Org/flux2-klein-9B", "split_files/text_encoders"), ("unsloth/Qwen3-8B-GGUF", "")]
+    assert [s.repo for s in nine["vae"]] == ["black-forest-labs/FLUX.2-dev"]
+    assert [s.repo for s in nine["diffusion_model"]] == ["black-forest-labs/FLUX.2-klein-9B", "leejet/FLUX.2-klein-9B-GGUF"]
+    assert [s.repo for s in parse_sources(FLUX2_TABLE_DOC, FLUX2_DEV)["llm"]] == ["unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF"]
+    moss = parse_sources(MOSS_TABLE_DOC, MOSS_BASE)
+    assert set(moss) == {"diffusion_model", "vae", "llm", "tokenizer"}  # LoRA rows have no slot
+    assert [(s.repo, s.folder) for s in moss["tokenizer"]] == [("OpenMOSS-Team/MOSS-Image-Base", "tokenizer")]
+    assert [(s.repo, s.folder) for s in moss["vae"]] == [("Comfy-Org/MOSS-Image", "vae")]
+
+
 def test_companions_are_picked_sensibly():
     comfy = [
         ("text_encoders/qwen3vl_8b_bf16.safetensors", 17 * GB),
