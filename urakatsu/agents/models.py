@@ -4,7 +4,8 @@ Three sources, none of them a hand-written model list:
 - ChatGPT: the signed-in account's models (``chatgpt.py``).
 - Translation providers that are LLMs: whatever their listing returns with the keys and
   endpoints set under Settings, Providers. Services that only translate (DeepL, Google
-  Cloud, Caiyun) are left out.
+  Cloud, Caiyun) are left out, and so is a provider whose key is only in the environment
+  (``configured``).
 - The local translation model: the GGUF model the translation stage runs, on its own
   ``llama-server`` (loaded on first use). It shares that server with translation, so it
   has the translator's context window (``local.N_CTX`` tokens).
@@ -100,7 +101,17 @@ class ModelDirectory:
         if refresh or listing is None:
             return await self._refresh(), False
         stale = time.time() - listing["at"] > LISTING_TTL or listing["key"] != self._key()
-        return [AgentModel(**m) for m in listing["models"]], stale
+        return [AgentModel(**m) for m in listing["models"] if self.configured(m["provider"])], stale
+
+    def configured(self, provider: str) -> bool:
+        """Whether the picker may offer ``provider``: a provider that needs a key has one under Settings, Providers.
+
+        A key only in the environment (``OPENROUTER_API_KEY``, ...) is left out: Settings shows that
+        provider as not configured, and the picker follows Settings. Translation still reads it.
+        """
+        if provider not in CHAT_PROVIDERS or not CHAT_PROVIDERS[provider][1]:
+            return True
+        return bool(credentials(self.workspace.config.providers.get(provider, {}), "api_key", ""))
 
     def _key(self) -> str:
         """What the listing depends on: provider settings, the translation model, the ChatGPT sign-in."""
@@ -128,7 +139,7 @@ class ModelDirectory:
 
         found, translation = await asyncio.gather(chatgpt(), asyncio.to_thread(self.workspace.translation_models))
         for model in translation:
-            if model["provider"] in CHAT_PROVIDERS and model.get("model"):
+            if model["provider"] in CHAT_PROVIDERS and model.get("model") and self.configured(model["provider"]):
                 found.append(
                     AgentModel(
                         id=f"{model['provider']}:{model['model']}",

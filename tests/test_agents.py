@@ -671,9 +671,16 @@ async def test_model_list_is_saved_and_marked_stale(workspace, tmp_path, monkeyp
 
     def listing():
         calls.append(1)
-        return [{"provider": "deepseek", "provider_name": "DeepSeek", "model": "chat", "name": "Chat"}, {"provider": "deepl", "provider_name": "DeepL", "model": None, "name": "DeepL"}]
+        return [
+            {"provider": "deepseek", "provider_name": "DeepSeek", "model": "chat", "name": "Chat"},
+            {"provider": "openrouter", "provider_name": "OpenRouter", "model": "x/y", "name": "Y"},
+            {"provider": "deepl", "provider_name": "DeepL", "model": None, "name": "DeepL"},
+        ]
 
     monkeypatch.setattr(workspace, "translation_models", listing)
+    # OpenRouter's key is only in the environment: Settings calls it not configured, so the picker leaves it out.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
+    workspace.config.providers = {"deepseek": {"api_key": "k"}}
     path = tmp_path / "models.json"
     directory = ModelDirectory(workspace, ChatGptAuth(tmp_path / "none.json"), path)
     models, stale = await directory.list()
@@ -685,10 +692,14 @@ async def test_model_list_is_saved_and_marked_stale(workspace, tmp_path, monkeyp
     assert [m.id for m in models] == ["deepseek:chat"] and not stale and len(calls) == 1
 
     # Changing provider settings marks it stale; a refresh lists again.
-    workspace.config.providers = {"deepseek": {"api_key": "k"}}
+    workspace.config.providers = {"deepseek": {"api_key": "k"}, "openrouter": {"api_key": "k2"}}
     assert (await again.list())[1] is True
     models, stale = await again.list(refresh=True)
-    assert not stale and len(calls) == 2
+    assert [m.id for m in models] == ["deepseek:chat", "openrouter:x/y"] and not stale and len(calls) == 2
+
+    # Removing a key hides that provider even from the saved listing, before any refresh.
+    workspace.config.providers = {"openrouter": {"api_key": "k2"}}
+    assert [m.id for m in (await again.list())[0]] == ["openrouter:x/y"]
 
 
 async def test_concurrent_refreshes_share_one_listing(workspace, tmp_path, monkeypatch):
