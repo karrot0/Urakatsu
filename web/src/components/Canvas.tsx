@@ -454,14 +454,15 @@ export function Canvas() {
     setMissing(false);
     void (async () => {
       const render = ws.view === "render";
+      // A failed fetch settles like a missing asset: left unsettled, the canvas would keep the last page's image.
       let [found, text] = await Promise.all([
         assetUrl(projectId, pageId, render ? "render-base" : "source", baseVersion),
         render ? assetUrl(projectId, pageId, "render-text", baseVersion) : null,
-      ]);
+      ]).catch(() => [null, null]);
       let version = baseVersion;
       if ((!found || (render && !text)) && render) {
-        setMissing(true);
-        found = await assetUrl(projectId, pageId, "source", sourceVersion);
+        if (alive) setMissing(true);
+        found = await assetUrl(projectId, pageId, "source", sourceVersion).catch(() => null);
         text = null;
         version = sourceVersion;
       }
@@ -1462,7 +1463,19 @@ export function Canvas() {
               className={cn("absolute", strip ? "" : "rounded-pill bg-surface shadow-floating")}
               style={{ width: page.width * zoom, height: page.height * zoom, left: padX + pageLeft * zoom, top: padY + pageTop * zoom }}
             >
-              {url && (!strip || urlPage === page.id) && (
+              {(!url || urlPage !== page.id) && (
+                // Until the page's own image is decoded, its sidebar thumbnail (already loaded) stands in:
+                // the last page's image would show under this page's blocks.
+                <img
+                  className="block rounded-[inherit] select-none"
+                  src={assetHref(projectId!, page.id, "thumbnail", assetVersion(page, "thumbnail"))}
+                  width={page.width * zoom}
+                  height={page.height * zoom}
+                  alt=""
+                  draggable={false}
+                />
+              )}
+              {url && urlPage === page.id && (
                 <img
                   ref={baseImage}
                   className="block rounded-[inherit] select-none"
@@ -1474,7 +1487,7 @@ export function Canvas() {
                   onLoad={() => setShown(urlVersion.current)}
                 />
               )}
-              {url && textUrl && (!strip || urlPage === page.id) && (
+              {url && textUrl && urlPage === page.id && (
                 // The render's text as vectors over the art, drawn at the zoomed size rather than scaled up from the page's pixels.
                 <img
                   ref={textImage}
