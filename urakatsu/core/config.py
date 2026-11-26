@@ -12,6 +12,8 @@
 - ``storage`` holds how page images are stored (``StorageConfig``; not an upstream setting).
 - ``sound_effects`` says what happens to detected onomatopoeia (``SoundEffectsConfig``; not an
   upstream setting: Koharu keeps them as regions that nothing downstream uses).
+- ``qa`` says whether translated pages are proofread and their layout checked (``QaConfig``; not
+  an upstream setting).
 """
 
 from __future__ import annotations
@@ -189,6 +191,37 @@ class ColorizationConfig(BaseModel):
     model: str = "diffusion-colorizer"
 
 
+QA_MODES = ("off", "flag", "fix")
+
+
+class QaConfig(BaseModel):
+    """Proofreading and layout checks after translation (``pipeline/stages/qa.py``). Not in Koharu.
+
+    ``off`` keeps Koharu's behaviour. ``flag`` records what it finds on each text block; ``fix``
+    also rewrites generated translations it finds wrong (never one the user wrote). ``model`` is a
+    translation provider and model; unset, QA uses the translation model, and the one already
+    loaded for translation (``Pipeline.provider``). A provider that only translates (DeepL) cannot
+    proofread, so only the layout checks run with it.
+    """
+
+    mode: Literal["off", "flag", "fix"] = "off"
+    model: Optional[ModelSelection] = None
+    # Knowledge tokens (glossary, notes, nearby lines) one review carries; the provider's own
+    # ``context_budget`` still caps it.
+    context_tokens: int = Field(default=600, ge=0)
+    # Extra rounds in which the model may ask for more context before it must answer.
+    fetch_rounds: int = Field(default=1, ge=0, le=2)
+    # Tokens the model may write per reply.
+    max_tokens: int = Field(default=600, ge=64)
+    # The meaning check (``qa/proofread.py``): every source line read alone, then each translation
+    # compared with that reading in calls of its own. Unset, the provider decides
+    # (``TranslatorProvider.meaning_check``: on for on-device models, off for hosted ones).
+    meaning_check: Optional[bool] = None
+
+    def selection(self, translation: ModelSelection) -> ModelSelection:
+        return self.model or translation
+
+
 class PipelineConfig(BaseModel):
     device: str = "auto"  # auto | cpu | cuda | cuda:N | metal
     # Loaded models are unloaded after this many minutes without a run; 0 keeps them loaded.
@@ -207,6 +240,7 @@ class PipelineConfig(BaseModel):
     watermarks: WatermarksConfig = Field(default_factory=WatermarksConfig)
     censorship: CensorshipConfig = Field(default_factory=CensorshipConfig)
     colorization: ColorizationConfig = Field(default_factory=ColorizationConfig)
+    qa: QaConfig = Field(default_factory=QaConfig)
 
     def provider_for(self, stage: Stage) -> str:
         if stage is Stage.TRANSLATION:
@@ -221,6 +255,8 @@ class PipelineConfig(BaseModel):
             return self.censorship.model
         if stage is Stage.COLORIZATION:
             return self.colorization.model
+        if stage is Stage.QA:
+            return self.qa.selection(self.translation.model).provider
         return {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model
 
     def fill_provider(self) -> str:
@@ -242,8 +278,14 @@ class PipelineConfig(BaseModel):
             self.censorship.model = provider
         elif stage is Stage.COLORIZATION:
             self.colorization.model = provider
+        elif stage is Stage.QA:
+            self.qa.model = self.qa.selection(self.translation.model).model_copy(update={"provider": provider})
         else:
             {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model = provider
+
+    def qa_shares_translation(self) -> bool:
+        """Whether QA runs the translation model itself, so it uses the provider loaded for translation."""
+        return self.qa.selection(self.translation.model) == self.translation.model
 
     def runtime_for(self, provider: str) -> Optional[str]:
         return self.runtimes.get(provider)
@@ -257,6 +299,10 @@ class PipelineConfig(BaseModel):
         if stage is Stage.TRANSLATION:
             settings = dict(self.providers.get(provider, {}))
             settings["translation"] = self.translation.model_dump(mode="json")
+            return settings
+        if stage is Stage.QA:
+            settings = dict(self.providers.get(provider, {}))
+            settings["translation"] = self.translation.model_copy(update={"model": self.qa.selection(self.translation.model)}).model_dump(mode="json")
             return settings
         return dict(self.processor.get(provider, {}))
 

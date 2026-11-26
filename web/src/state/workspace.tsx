@@ -75,7 +75,7 @@ export type SelectMode = "replace" | "toggle" | "range" | "add-range";
 export const STAGES = ["detection", "ocr", "translation", "inpainting"] as const;
 export type StageName = (typeof STAGES)[number];
 /** Optional stages run on their own, outside the stage picker. */
-export type RunStage = StageName | "censor_detection" | "decensor" | "colorization";
+export type RunStage = StageName | "censor_detection" | "decensor" | "colorization" | "qa";
 
 export interface JobState {
   id: string;
@@ -256,6 +256,8 @@ export interface Actions {
   updateBlock(layerId: string, patch: BlockPatch): Promise<void>;
   createBlock(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
   deleteBlock(layerId: string): Promise<void>;
+  /** Removes one QA finding (index into the block's `qaIssues`, whose kind it must have). */
+  dismissQaIssue(layerId: string, index: number, kind: string): Promise<void>;
   saveConfig(config: Config): Promise<void>;
   dismissError(): void;
   reportError(message: string): void;
@@ -991,6 +993,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.project, state.pageId, replacePage, fail],
   );
 
+  const dismissQaIssue = useCallback(
+    (layerId: string, index: number, kind: string) => pageCall((projectId, pageId) => client.dismissQaIssue({ projectId, pageId, layerId, index, kind })),
+    [pageCall],
+  );
+
   const setLayerVisibility = useCallback(
     (layerIds: string[], visible?: boolean, opacity?: number) =>
       pageCall((projectId, pageId) => client.setLayerVisibility({ projectId, pageId, layerIds, visible, opacity })),
@@ -1210,6 +1217,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       updateBlock,
       createBlock,
       deleteBlock,
+      dismissQaIssue,
       saveConfig,
       dismissError: () => setState((s) => ({ ...s, error: undefined })),
       reportError: (message) => setState((s) => ({ ...s, error: message })),
@@ -1241,6 +1249,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       updateBlock,
       createBlock,
       deleteBlock,
+      dismissQaIssue,
       saveConfig,
       setLayerVisibility,
       moveLayer,

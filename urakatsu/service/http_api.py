@@ -361,6 +361,10 @@ def api_router(ws: Workspace) -> APIRouter:
     def delete_block(project_id: str, page_id: str, layer_id: str):
         return guard(ws.delete_text_block, project_id, page_id, layer_id)
 
+    @router.delete("/projects/{project_id}/pages/{page_id}/blocks/{layer_id}/qa/{index}")
+    def dismiss_qa_issue(project_id: str, page_id: str, layer_id: str, index: int, kind: str):
+        return guard(ws.dismiss_qa_issue, project_id, page_id, layer_id, index, kind)
+
     # -- layers ------------------------------------------------------------------------------------------
 
     @router.patch("/projects/{project_id}/pages/{page_id}/layers/visibility")

@@ -37,6 +37,7 @@ _MODES: dict[Stage, tuple[str, tuple[str, ...]]] = {
     Stage.DECENSOR: ("censorship", ("off", "detect", "remove")),
     Stage.COLORIZATION: ("colorization", ("off", "colorize")),
     Stage.SOUND_EFFECTS: ("sound_effects", ("off", "typeset", "redraw")),
+    Stage.QA: ("qa", ("off", "flag", "fix")),
 }
 _STAGE_NOTES = {
     Stage.WATERMARKS: "removes repeated watermarks before detection (mode remove)",
@@ -48,6 +49,7 @@ _STAGE_NOTES = {
     Stage.DECENSOR: "reconstructs the art under censor bars (mode remove); shares its mode with censor_detection",
     Stage.COLORIZATION: "paints black-and-white pages in color (mode colorize)",
     Stage.SOUND_EFFECTS: "typesets (mode typeset) or redraws (mode redraw) sound effects; its model is an inpainting provider that follows prompts, empty for the fill model",
+    Stage.QA: "proofreads translated pages and checks their lettering (mode flag records findings, fix also corrects generated translations); its model is a translation provider, the translation model unless set",
 }
 
 
@@ -64,6 +66,8 @@ def _stage(value: str) -> Optional[Stage]:
 
 def _provider_stage(stage: Optional[Stage]) -> Stage:
     """The stage whose providers can serve ``stage`` (fill and sound effects use inpainting providers)."""
+    if stage is Stage.QA:
+        return Stage.TRANSLATION
     return Stage.INPAINTING if stage is None or stage is Stage.SOUND_EFFECTS else stage
 
 

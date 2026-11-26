@@ -236,6 +236,7 @@ function InferenceControl() {
 
   const censorship = config?.censorship || "off";
   const colorization = config?.colorization || "off";
+  const qa = config?.qa || "off";
   const runAlone = (stage: RunStage) => {
     setOpen(false);
     void ws.run({ kind: "only", stage, scope });
@@ -375,6 +376,17 @@ function InferenceControl() {
               <>
                 <hr />
                 <SelectorOption label="Run Colorization" detail="Paint black-and-white pages in color" selected={false} onClick={() => runAlone("colorization")} />
+              </>
+            )}
+            {qa !== "off" && (
+              <>
+                <hr />
+                <SelectorOption
+                  label="Run QA"
+                  detail={qa === "fix" ? "Proofread translations and fix what is wrong" : "Proofread translations and check the lettering"}
+                  selected={false}
+                  onClick={() => runAlone("qa")}
+                />
               </>
             )}
           </SelectorPanel>

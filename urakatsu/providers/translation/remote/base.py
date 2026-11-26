@@ -20,6 +20,8 @@
   ``REJECTED_COOLDOWN``, and the request moves on to the next key. Resting keys are
   tried last rather than skipped, so a request fails only once every key has failed,
   with the last key's error. Model listing uses the first key.
+- Structured completion (``TranslatorProvider.complete``, QA's proofreading) rotates keys the
+  same way. ``chat_completion`` serves the providers whose API is OpenAI's chat completions.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import re
 import time
 import urllib.parse
 from contextvars import ContextVar
-from typing import Any, ClassVar, Mapping, Optional
+from typing import Any, Awaitable, Callable, ClassVar, Mapping, Optional
 
 import httpx
 
@@ -38,7 +40,7 @@ from urakatsu.core.config import GenerationConfig
 from urakatsu.core.stop import interruptible
 
 from ..backend import TranslationRequest
-from ..base import TranslatorProvider
+from ..base import Completion, TranslatorProvider
 from ..errors import ApiError, QuotaExceeded, TranslationError
 
 TRANSLATE_TIMEOUT = httpx.Timeout(30.0, read=180.0)
@@ -200,15 +202,22 @@ class RemoteTranslator(TranslatorProvider):
         return key
 
     async def _dispatch(self, request: TranslationRequest, generation: GenerationConfig) -> list[str]:
+        return await self._rotate(lambda: self._translate(request, generation))
+
+    async def _dispatch_completion(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        return await self._rotate(lambda: self._complete(system, user, schema, name, generation))
+
+    async def _rotate(self, call: Callable[[], Awaitable[Any]]) -> Any:
+        """``call`` with each configured key in turn until one succeeds (see the module notes)."""
         keys = self.api_keys()
         if len(keys) < 2:
-            return await self._translate(request, generation)
+            return await call()
         ring = key_ring(self.id)
         failure: Optional[TranslationError] = None
         for key in ring.order(keys):
             token = _active_key.set(key)
             try:
-                translated = await self._translate(request, generation)
+                translated = await call()
             except QuotaExceeded as error:
                 ring.rest(key, QUOTA_COOLDOWN)
                 failure = error
@@ -230,3 +239,41 @@ class RemoteTranslator(TranslatorProvider):
 
     async def get(self, url: str, **kwargs: Any) -> Any:
         return await send_json(self.id, "GET", url, transport=self.transport, **kwargs)
+
+
+# -- structured completion ------------------------------------------------------------------------
+
+
+def chat_messages(system: str, user: str) -> list[dict[str, Any]]:
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def json_schema_format(name: str, schema: dict) -> dict[str, Any]:
+    """OpenAI's strict ``response_format`` for ``schema``."""
+    return {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}}
+
+
+def usage_counts(usage: Any, prompt_key: str = "prompt_tokens", completion_key: str = "completion_tokens") -> tuple[Optional[int], Optional[int]]:
+    """``(prompt, completion)`` tokens from a reply's usage object; ``None`` where it says nothing."""
+    if not isinstance(usage, dict):
+        return None, None
+    prompt_tokens = usage.get(prompt_key)
+    completion_tokens = usage.get(completion_key)
+    return (
+        prompt_tokens if isinstance(prompt_tokens, int) else None,
+        completion_tokens if isinstance(completion_tokens, int) else None,
+    )
+
+
+async def chat_completion(provider: RemoteTranslator, url: str, headers: Mapping[str, str], body: dict[str, Any]) -> Completion:
+    """One OpenAI-style chat completion: the first choice's content and the reply's ``usage``."""
+    response = await provider.post(url, headers=headers, json_body=body)
+    choices = field(provider.id, response, "choices")
+    if not choices:
+        raise TranslationError(f"{provider.name or provider.id} returned no choices")
+    message = field(provider.id, choices[0], "message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if content is None:
+        raise TranslationError(f"{provider.name or provider.id} returned no message content")
+    prompt_tokens, completion_tokens = usage_counts(response.get("usage") if isinstance(response, dict) else None)
+    return Completion(content, prompt_tokens, completion_tokens)

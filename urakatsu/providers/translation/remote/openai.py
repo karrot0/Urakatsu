@@ -20,7 +20,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model, display_name
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, chat_completion, chat_messages, credential, field, json_schema_format, send_json_sync
 
 URL = "https://api.openai.com/v1/chat/completions"
 MODELS_URL = "https://api.openai.com/v1/models"
@@ -134,6 +135,16 @@ class OpenAiTranslator(RemoteTranslator):
         if content is None:
             raise TranslationError("OpenAI returned no message content")
         return prompt.translations(self.id, content, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        body: dict[str, Any] = {"model": self.model_id(), "messages": chat_messages(system, user)}
+        _set(body, "temperature", generation.temperature)
+        _set(body, "top_p", generation.top_p)
+        _set(body, "max_completion_tokens", generation.max_tokens)
+        if generation.reasoning is not None:
+            body["reasoning_effort"] = "medium" if generation.reasoning else "none"
+        body["response_format"] = json_schema_format(name, schema)
+        return await chat_completion(self, URL, {"Authorization": f"Bearer {self.api_key()}"}, body)
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

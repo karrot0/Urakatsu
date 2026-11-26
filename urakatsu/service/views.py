@@ -75,6 +75,16 @@ class TextBlockView(BaseModel):
     visible: bool = True
     opacity: float = 1.0
     role: Optional[str] = None
+    qa_issues: list[QaIssueView] = Field(default_factory=list)  # the content's QaReview
+    qa_original: Optional[str] = None  # the translation a QA fix replaced
+
+
+class QaIssueView(BaseModel):
+    kind: str
+    severity: str = "warning"  # info | warning | error
+    message: str = ""
+    suggestion: Optional[str] = None
+    applied: bool = False
 
 
 class RegionView(BaseModel):
@@ -213,6 +223,7 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
         ocr = snapshot.component(region, c.OcrAnalysis) if region else None
         visibility = snapshot.component(layer, c.Visibility)
         role = snapshot.component(content, c.TextRole)
+        review = snapshot.component(content, c.QaReview)
         frame = snapshot.frame(layer)
         blocks.append(
             TextBlockView(
@@ -252,6 +263,8 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
                 visible=visibility.visible if visibility else True,
                 opacity=visibility.opacity if visibility else 1.0,
                 role=role.role if role else None,
+                qa_issues=[QaIssueView(**issue.model_dump()) for issue in review.issues] if review else [],
+                qa_original=review.original if review else None,
             )
         )
 

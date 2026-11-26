@@ -694,6 +694,20 @@ class Edit:
         target.components[value.KIND] = self._prepare(target.components.get(value.KIND), value)
 
     @_logged
+    def set_as(self, entity: str, value: c.Component, generation: c.Generation) -> None:
+        """``set`` in another producer's name (not in Koharu). A stage that revises what another
+        stage wrote (QA rewriting a generated translation) leaves that producer the owner, so the
+        producer can still replace the value on a re-run, and a user-owned value still refuses it."""
+        if self.generation is None:
+            raise AuthorshipError("only a pipeline edit writes in a producer's name")
+        own = self.generation
+        self.generation = generation
+        try:
+            self.set(entity, value)
+        finally:
+            self.generation = own
+
+    @_logged
     def remove(self, entity: str, cls: type[c.Component]) -> None:
         if cls.STRUCTURAL:
             raise SceneError("structural components use dedicated scene methods")

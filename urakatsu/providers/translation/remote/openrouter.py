@@ -21,7 +21,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, chat_completion, chat_messages, credential, field, json_schema_format, send_json_sync
 
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -111,6 +112,17 @@ class OpenRouterTranslator(RemoteTranslator):
         if content is None:
             raise TranslationError("OpenRouter returned no message content")
         return prompt.translations(self.id, content, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        body: dict[str, Any] = {"model": self.model_id(), "messages": chat_messages(system, user)}
+        _set(body, "temperature", generation.temperature)
+        _set(body, "top_p", generation.top_p)
+        _set(body, "max_tokens", generation.max_tokens)
+        if generation.reasoning is not None:
+            body["reasoning"] = {"enabled": generation.reasoning}
+        body["response_format"] = json_schema_format(name, schema)
+        body["provider"] = {"require_parameters": True}
+        return await chat_completion(self, CHAT_URL, {"Authorization": f"Bearer {self.api_key()}"}, body)
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

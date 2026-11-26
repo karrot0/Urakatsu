@@ -20,7 +20,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model, display_name
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, credential, field, send_json_sync, usage_counts
 
 RESPONSES_URL = "https://api.x.ai/v1/responses"
 MODELS_URL = "https://api.x.ai/v1/language-models"
@@ -115,6 +116,34 @@ class GrokTranslator(RemoteTranslator):
         if text is None:
             raise TranslationError("Grok returned no output text")
         return prompt.translations(self.id, text, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        body: dict[str, Any] = {
+            "model": self.model_id(),
+            "input": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "store": False,
+        }
+        _set(body, "temperature", generation.temperature)
+        _set(body, "top_p", generation.top_p)
+        _set(body, "max_output_tokens", generation.max_tokens)
+        if generation.reasoning:
+            body["reasoning"] = {"effort": "high"}
+        body["text"] = {"format": {"type": "json_schema", "name": name, "strict": True, "schema": schema}}
+        response = await self.post(RESPONSES_URL, headers={"Authorization": f"Bearer {self.api_key()}"}, json_body=body)
+        text = next(
+            (
+                content.get("text")
+                for item in field(self.id, response, "output")
+                if isinstance(item, dict)
+                for content in item.get("content") or []
+                if isinstance(content, dict) and content.get("type") == "output_text" and content.get("text") is not None
+            ),
+            None,
+        )
+        if text is None:
+            raise TranslationError("Grok returned no output text")
+        prompt_tokens, completion_tokens = usage_counts(response.get("usage"), "input_tokens", "output_tokens")
+        return Completion(text, prompt_tokens, completion_tokens)
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

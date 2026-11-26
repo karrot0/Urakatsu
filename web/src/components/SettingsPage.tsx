@@ -726,6 +726,51 @@ function ColorizationOptions({ providers, draft, update }: { providers: Provider
   return provider ? <SchemaSection provider={provider} map="processorJson" draft={draft} update={update} title="Colorization options" omit={["model"]} /> : null;
 }
 
+type QaMode = "off" | "flag" | "fix";
+
+const QA_MODES: { mode: QaMode; title: string; description: string; note?: string }[] = [
+  { mode: "off", title: "Off", description: "Translations are not checked after a run." },
+  { mode: "flag", title: "Flag", description: "Translations are proofread and the lettering checked. What is found shows on each text block." },
+  {
+    mode: "fix",
+    title: "Fix",
+    description: "Also rewrites generated translations it finds wrong. Translations you wrote are only flagged.",
+    note: "On on-device models QA flags reliably, but its corrections are weaker. Fix works best with a cloud model.",
+  },
+];
+
+/** Proofreading and layout checks after translation (not a Koharu setting: `pipeline/stages/qa.py`).
+ * QA uses the translation model; only the mode is set here, the rest is `[qa]` in pipeline.toml. */
+function QaSection({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
+  const mode = (draft.qa || "off") as QaMode;
+  return (
+    <PreferenceSection title="QA" description="Proofreads each translated page with the translation model and checks that the lettering fits, after translation.">
+      <div role="radiogroup" aria-label="QA" className="grid grid-cols-3 gap-3 py-3 max-[640px]:grid-cols-1">
+        {QA_MODES.map((option) => {
+          const active = mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update({ qa: option.mode })}
+              className={cn(
+                "flex min-w-0 cursor-pointer flex-col gap-1 rounded-card bg-surface p-2.5 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:shadow-focus",
+                active ? "shadow-[inset_0_0_0_2px_var(--brand)]" : "hover:bg-hover-faint",
+              )}
+            >
+              <span className="block font-medium">{option.title}</span>
+              <span className="block text-xs leading-4 text-fg-2">{option.description}</span>
+              {option.note && <span className="mt-auto block pt-1 text-xs leading-4 text-fg-3">{option.note}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </PreferenceSection>
+  );
+}
+
 function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const ws = useWorkspace();
   const caps = ws.capabilities;
@@ -783,6 +828,7 @@ function Pipeline({ draft, update }: { draft: Config; update: (patch: Partial<Co
           <WatermarksSection providers={watermarkers} draft={draft} update={update} />
           <CensorshipSection detectors={censorDetectors} models={decensors} draft={draft} update={update} />
           <ColorizationSection providers={colorizers} draft={draft} update={update} />
+          <QaSection draft={draft} update={update} />
         </>
       )}
       {VISION.map(({ stage }) => {

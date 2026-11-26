@@ -156,6 +156,11 @@ class UrakatsuStub:
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.TextBlockRef.SerializeToString,
                 response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
                 _registered_method=True)
+        self.DismissQaIssue = channel.unary_unary(
+                '/urakatsu.v1.Urakatsu/DismissQaIssue',
+                request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.DismissQaIssueRequest.SerializeToString,
+                response_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
+                _registered_method=True)
         self.SetLayerVisibility = channel.unary_unary(
                 '/urakatsu.v1.Urakatsu/SetLayerVisibility',
                 request_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.LayerVisibilityRequest.SerializeToString,
@@ -359,6 +364,12 @@ class UrakatsuServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DismissQaIssue(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SetLayerVisibility(self, request, context):
         """Layers of any kind (text or raster), as the layers panel and paint tools edit them.
         """
@@ -542,6 +553,11 @@ def add_UrakatsuServicer_to_server(servicer, server):
             'DeleteTextBlock': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteTextBlock,
                     request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.TextBlockRef.FromString,
+                    response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.SerializeToString,
+            ),
+            'DismissQaIssue': grpc.unary_unary_rpc_method_handler(
+                    servicer.DismissQaIssue,
+                    request_deserializer=urakatsu_dot_v1_dot_urakatsu__pb2.DismissQaIssueRequest.FromString,
                     response_serializer=urakatsu_dot_v1_dot_urakatsu__pb2.Page.SerializeToString,
             ),
             'SetLayerVisibility': grpc.unary_unary_rpc_method_handler(
@@ -1244,6 +1260,33 @@ class Urakatsu:
             target,
             '/urakatsu.v1.Urakatsu/DeleteTextBlock',
             urakatsu_dot_v1_dot_urakatsu__pb2.TextBlockRef.SerializeToString,
+            urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DismissQaIssue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/urakatsu.v1.Urakatsu/DismissQaIssue',
+            urakatsu_dot_v1_dot_urakatsu__pb2.DismissQaIssueRequest.SerializeToString,
             urakatsu_dot_v1_dot_urakatsu__pb2.Page.FromString,
             options,
             channel_credentials,

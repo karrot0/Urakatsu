@@ -756,6 +756,28 @@ class Workspace:
         self.store.touch(project_id)
         return self.page(project_id, page_id)
 
+    def dismiss_qa_issue(self, project_id: str, page_id: str, layer_id: str, index: int, kind: str) -> PageView:
+        """Removes one QA finding from a block's review (not in Koharu: ``pipeline/stages/qa.py``).
+
+        Written in the review's own producer's name, so the next QA pass may still rewrite the
+        review: a proofreading finding stays dismissed while the line is unchanged, a layout or
+        wording check comes back if it still holds. ``kind`` must match the finding at ``index``,
+        so a stale view cannot dismiss another one."""
+        session = self.session(project_id)
+        snapshot = session.snapshot()
+        if layer_id not in snapshot.text_layers(page_id):
+            raise KeyError(f"page {page_id} has no text layer {layer_id}")
+        content = snapshot.layer_content(layer_id)
+        review = snapshot.component(content, c.QaReview)
+        if review is None or not 0 <= index < len(review.issues) or review.issues[index].kind != kind:
+            raise KeyError(f"text layer {layer_id} has no QA issue {index} ({kind})")
+        origin = review.origin
+        edit = snapshot.edit_as(origin.generation) if isinstance(origin, c.GeneratedOrigin) else snapshot.edit()
+        edit.set(content, review.model_copy(update={"issues": [issue for n, issue in enumerate(review.issues) if n != index]}))
+        session.commit(edit.finish())
+        self.store.touch(project_id)
+        return self.page(project_id, page_id)
+
     def create_text_block(self, project_id: str, page_id: str, bounds: dict[str, float]) -> PageView:
         """A manual paragraph layer with its own frame (no detected region)."""
         session = self.session(project_id)

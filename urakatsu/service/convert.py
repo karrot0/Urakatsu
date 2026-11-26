@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, PROMPT_SIZES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
+from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, PROMPT_SIZES, QA_MODES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -147,6 +147,10 @@ def block_to_proto(block: TextBlockView) -> pb.TextBlock:
     typography = typography_to_proto(block.typography)
     if typography is not None:
         message.typography.CopyFrom(typography)
+    for issue in block.qa_issues:
+        item = message.qa_issues.add(kind=issue.kind, severity=issue.severity, message=issue.message, applied=issue.applied)
+        _opt(item, "suggestion", issue.suggestion)
+    _opt(message, "qa_original", block.qa_original)
     return message
 
 
@@ -250,6 +254,7 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         decensor_model=config.censorship.model,
         colorization=config.colorization.mode,
         colorization_model=config.colorization.model,
+        qa=config.qa.mode,
     )
     for key, value in config.processor.items():
         message.processor_json[key] = json.dumps(value)
@@ -328,6 +333,11 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
         if message.colorization not in COLORIZATION_MODES:
             raise ValueError(f"unknown colorization mode {message.colorization!r}; expected one of {list(COLORIZATION_MODES)}")
         config.colorization = ColorizationConfig(mode=message.colorization, model=message.colorization_model or config.colorization.model)
+    if message.qa:
+        if message.qa not in QA_MODES:
+            raise ValueError(f"unknown QA mode {message.qa!r}; expected one of {list(QA_MODES)}")
+        # Only the mode travels; the QA model and its budgets stay as pipeline.toml has them.
+        config.qa = config.qa.model_copy(update={"mode": message.qa})
     config.processor = _json_map(message.processor_json, "processor")
     config.providers = _json_map(message.providers_json, "provider")
     config.runtimes = dict(message.runtimes)

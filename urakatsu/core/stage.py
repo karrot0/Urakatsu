@@ -22,6 +22,10 @@ when asked for by itself. With ``off`` a run leaves both out.
 ``COLORIZATION`` is not in Koharu either (``pipeline/stages/colorization.py``). It runs after
 Decensor, over the cleaned page, and before sound effects, so a redraw sees the colors. With
 colorization ``off`` a run leaves it out.
+
+``QA`` is not in Koharu either (``pipeline/stages/qa.py``). With QA set to ``flag`` or ``fix`` it
+proofreads each translated page and checks its lettering's layout, after translation; with
+``off`` a run leaves it out. It is last in a run, so it reviews what the page ends up with.
 """
 
 from __future__ import annotations
@@ -40,10 +44,11 @@ class Stage(str, Enum):
     DECENSOR = "decensor"
     COLORIZATION = "colorization"
     SOUND_EFFECTS = "sound_effects"
+    QA = "qa"
 
     @classmethod
     def all(cls) -> list["Stage"]:
-        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.COLORIZATION, cls.SOUND_EFFECTS]
+        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.COLORIZATION, cls.SOUND_EFFECTS, cls.QA]
 
     @classmethod
     def parse(cls, value: "str | Stage") -> "Stage":
@@ -68,6 +73,7 @@ PREREQUISITES: dict[Stage, tuple[Stage, ...]] = {
     Stage.DECENSOR: (Stage.CENSOR_DETECTION, Stage.INPAINTING),
     Stage.COLORIZATION: (Stage.INPAINTING, Stage.DECENSOR),
     Stage.SOUND_EFFECTS: (Stage.TRANSLATION, Stage.INPAINTING, Stage.DECENSOR, Stage.COLORIZATION),
+    Stage.QA: (Stage.TRANSLATION,),
 }
 
 
@@ -110,7 +116,8 @@ class Operation:
                 Stage.INPAINTING: [Stage.DETECTION, Stage.INPAINTING],
                 Stage.DECENSOR: [Stage.CENSOR_DETECTION, Stage.DECENSOR],
                 Stage.COLORIZATION: [Stage.DETECTION, Stage.INPAINTING, Stage.COLORIZATION],
-                Stage.SOUND_EFFECTS: Stage.all(),
+                Stage.SOUND_EFFECTS: [stage for stage in Stage.all() if stage is not Stage.QA],
+                Stage.QA: [Stage.DETECTION, Stage.OCR, Stage.TRANSLATION, Stage.QA],
             }[Stage.parse(self.stage)]  # type: ignore[arg-type]
         elif self.kind == "only":
             selected = [Stage.parse(self.stage)]  # type: ignore[arg-type]

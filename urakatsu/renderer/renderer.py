@@ -168,6 +168,42 @@ class Renderer:
         compiled = self._compile(snapshot, page)
         return self._finish(compiled)
 
+    def measure_text(self, snapshot: Snapshot, page: str) -> tuple[list[Layer], list[RenderDiagnostic]]:
+        """The page's visible text layers and their diagnostics, laid out exactly as ``render`` lays
+        them out, without reading or decoding any image (not in Koharu: QA's layout checks,
+        ``pipeline/qa/layout.py``, need only this)."""
+        page_value = snapshot.component(page, c.Page)
+        if page_value is None:
+            raise RendererError(f"page {page} has no page component")
+        width, height = _surface_size(page_value)
+        traversal = _Traversal(
+            snapshot=snapshot,
+            page=page,
+            width=width,
+            height=height,
+            font_families=list(self.typesetting.font_families),
+            balloon_flows=_resolve_balloon_flows(snapshot, page),
+        )
+        group = snapshot.text_group(page)
+        if group is None:
+            return [], []
+        visibility = snapshot.component(group, c.Visibility) or c.Visibility(visible=True, opacity=1.0)
+        layers: list[Layer] = []
+        diagnostics: list[RenderDiagnostic] = []
+        for entity in snapshot.children(group):
+            layout = snapshot.component(entity, c.TextLayout)
+            own = snapshot.component(entity, c.Visibility) or c.Visibility(visible=True, opacity=1.0)
+            if layout is None or not (visibility.visible and own.visible):
+                continue
+            presentation = Presentation(visible=True, opacity=visibility.opacity * own.opacity)
+            draft = traversal.text_draft(entity, layout, presentation, [group])
+            if draft is None:
+                continue
+            layer, extra = self._build_text_layer(draft)
+            layers.append(layer)
+            diagnostics.extend(extra)
+        return layers, diagnostics
+
     # ---- compile -----------------------------------------------------------------------------
 
     def _compile(self, snapshot: Snapshot, page: str) -> CompiledPage:

@@ -124,7 +124,7 @@ class ModelSelection(_message.Message):
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., quantization: _Optional[str] = ..., vision: _Optional[bool] = ..., reasoning: _Optional[bool] = ...) -> None: ...
 
 class Config(_message.Message):
-    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes", "watermarks", "watermarks_model", "censorship", "censor_detector", "decensor_model", "colorization", "colorization_model", "prompt_size")
+    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes", "watermarks", "watermarks_model", "censorship", "censor_detector", "decensor_model", "colorization", "colorization_model", "prompt_size", "qa")
     class ProcessorJsonEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -171,6 +171,7 @@ class Config(_message.Message):
     COLORIZATION_FIELD_NUMBER: _ClassVar[int]
     COLORIZATION_MODEL_FIELD_NUMBER: _ClassVar[int]
     PROMPT_SIZE_FIELD_NUMBER: _ClassVar[int]
+    QA_FIELD_NUMBER: _ClassVar[int]
     device: str
     detection: str
     ocr: str
@@ -196,7 +197,8 @@ class Config(_message.Message):
     colorization: str
     colorization_model: str
     prompt_size: str
-    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ..., watermarks: _Optional[str] = ..., watermarks_model: _Optional[str] = ..., censorship: _Optional[str] = ..., censor_detector: _Optional[str] = ..., decensor_model: _Optional[str] = ..., colorization: _Optional[str] = ..., colorization_model: _Optional[str] = ..., prompt_size: _Optional[str] = ...) -> None: ...
+    qa: str
+    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ..., watermarks: _Optional[str] = ..., watermarks_model: _Optional[str] = ..., censorship: _Optional[str] = ..., censor_detector: _Optional[str] = ..., decensor_model: _Optional[str] = ..., colorization: _Optional[str] = ..., colorization_model: _Optional[str] = ..., prompt_size: _Optional[str] = ..., qa: _Optional[str] = ...) -> None: ...
 
 class TranslationModel(_message.Message):
     __slots__ = ("provider", "provider_name", "model", "name", "quantizations", "vision", "reasoning")
@@ -325,7 +327,7 @@ class TextStyle(_message.Message):
     def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., bold: _Optional[bool] = ..., italic: _Optional[bool] = ..., underline: _Optional[bool] = ..., strikethrough: _Optional[bool] = ..., color: _Optional[str] = ..., font: _Optional[str] = ..., scale: _Optional[float] = ..., gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
 
 class TextBlock(_message.Message):
-    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles")
+    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles", "qa_issues", "qa_original")
     LAYER_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_ID_FIELD_NUMBER: _ClassVar[int]
     REGION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -346,6 +348,8 @@ class TextBlock(_message.Message):
     ROLE_FIELD_NUMBER: _ClassVar[int]
     OPACITY_FIELD_NUMBER: _ClassVar[int]
     TRANSLATION_STYLES_FIELD_NUMBER: _ClassVar[int]
+    QA_ISSUES_FIELD_NUMBER: _ClassVar[int]
+    QA_ORIGINAL_FIELD_NUMBER: _ClassVar[int]
     layer_id: str
     content_id: str
     region_id: str
@@ -366,7 +370,37 @@ class TextBlock(_message.Message):
     role: str
     opacity: float
     translation_styles: _containers.RepeatedCompositeFieldContainer[TextStyle]
-    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ...) -> None: ...
+    qa_issues: _containers.RepeatedCompositeFieldContainer[QaIssue]
+    qa_original: str
+    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ..., qa_issues: _Optional[_Iterable[_Union[QaIssue, _Mapping]]] = ..., qa_original: _Optional[str] = ...) -> None: ...
+
+class QaIssue(_message.Message):
+    __slots__ = ("kind", "severity", "message", "suggestion", "applied")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    SUGGESTION_FIELD_NUMBER: _ClassVar[int]
+    APPLIED_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    severity: str
+    message: str
+    suggestion: str
+    applied: bool
+    def __init__(self, kind: _Optional[str] = ..., severity: _Optional[str] = ..., message: _Optional[str] = ..., suggestion: _Optional[str] = ..., applied: _Optional[bool] = ...) -> None: ...
+
+class DismissQaIssueRequest(_message.Message):
+    __slots__ = ("project_id", "page_id", "layer_id", "index", "kind")
+    PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    PAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    LAYER_ID_FIELD_NUMBER: _ClassVar[int]
+    INDEX_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    project_id: str
+    page_id: str
+    layer_id: str
+    index: int
+    kind: str
+    def __init__(self, project_id: _Optional[str] = ..., page_id: _Optional[str] = ..., layer_id: _Optional[str] = ..., index: _Optional[int] = ..., kind: _Optional[str] = ...) -> None: ...
 
 class Region(_message.Message):
     __slots__ = ("id", "kind", "label", "polygon", "bounds", "confidence")

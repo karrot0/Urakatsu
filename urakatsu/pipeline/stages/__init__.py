@@ -13,6 +13,7 @@ def processors() -> dict[Stage, StageProcessor]:
     from .detection import DetectionStage
     from .inpainting import InpaintingStage
     from .ocr import OcrStage
+    from .qa import QaStage
     from .sound_effects import SoundEffectsStage
     from .translation import TranslationStage
     from .watermarks import WatermarksStage
@@ -27,6 +28,7 @@ def processors() -> dict[Stage, StageProcessor]:
         Stage.DECENSOR: DecensorStage(),
         Stage.COLORIZATION: ColorizationStage(),
         Stage.SOUND_EFFECTS: SoundEffectsStage(),
+        Stage.QA: QaStage(),
     }
 
 

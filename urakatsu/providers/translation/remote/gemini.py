@@ -22,7 +22,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, credential, field, send_json_sync, usage_counts
 
 ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 ENV_KEY = "GEMINI_API_KEY"
@@ -150,3 +151,27 @@ class GeminiTranslator(RemoteTranslator):
         if not decoded or not decoded[0]:
             raise TranslationError("Gemini returned no candidate content")
         return prompt.translations(self.id, decoded[0][0], request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        model = self.model_id()
+        config: dict[str, Any] = {}
+        if generation.temperature is not None:
+            config["temperature"] = generation.temperature
+        if generation.max_tokens is not None:
+            config["maxOutputTokens"] = generation.max_tokens
+        if generation.reasoning is not None:
+            config["thinkingConfig"] = _thinking_config(model, generation.reasoning)
+        config["responseMimeType"] = "application/json"
+        config["responseJsonSchema"] = schema
+        body = {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": user}]}],
+            "generation_config": config,
+        }
+        response = await self.post(f"{ROOT}/{model}:generateContent", params={"key": self.api_key()}, json_body=body)
+        candidates = field(self.id, response, "candidates")
+        parts = field(self.id, field(self.id, candidates[0], "content"), "parts") if candidates else []
+        if not parts:
+            raise TranslationError("Gemini returned no candidate content")
+        prompt_tokens, completion_tokens = usage_counts(response.get("usageMetadata"), "promptTokenCount", "candidatesTokenCount")
+        return Completion(field(self.id, parts[0], "text"), prompt_tokens, completion_tokens)

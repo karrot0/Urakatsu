@@ -20,6 +20,8 @@ Divergences, all in the inference plumbing:
   sized per request. Before a request, the prompt is counted with the server's tokenizer and
   project knowledge is dropped, least useful first, until the prompt, the reply's
   ``max_tokens`` and an image reserve fit; only a page whose own text is too long fails.
+- ``complete`` (not in Koharu; QA's proofreading) renders the same chat template with thinking off
+  and constrains the reply with its own JSON schema on the server already loaded for translation.
 - Chat templates also get ``strftime_now``, as in Transformers and llama.cpp; Mistral-style
   templates call it to date their default system prompt, and upstream does not define it.
 """
@@ -45,7 +47,7 @@ from urakatsu.runtimes.store import HuggingFaceFile, ModelStore
 
 from . import prompt
 from .backend import TranslationRequest
-from .base import TranslationSettings, TranslatorProvider
+from .base import Completion, TranslationSettings, TranslatorProvider
 from .catalog import DEFAULT_MODEL, DEFAULT_QUANTIZATION, MODELS, LocalModelDescriptor, ModelGeneration, QuantizationDefinition
 from .errors import UnsupportedLanguage
 from .model import Model, Quantization
@@ -135,6 +137,8 @@ def weight_sources(model_id: str, quantization: Optional[str]) -> tuple[HuggingF
 class LocalTranslator(TranslatorProvider):
     # N_CTX also holds the prompt, the page's segments, the page image and up to 1000 output tokens.
     context_budget: ClassVar[int] = 2000
+    # On-device models pass flipped meanings in one proofreading call; QA reads and compares line by line.
+    meaning_check: ClassVar[bool] = True
 
     id: ClassVar[str] = "local"
     name: ClassVar[str] = "Local"
@@ -249,6 +253,35 @@ class LocalTranslator(TranslatorProvider):
             self._infer, system, payload, request.image, enable_thinking, schema, options
         )
         return prompt.translations(self.id, text, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        """A JSON-schema reply from the loaded server, with thinking off: the grammar leaves no room
+        for it, and a proofreading reply is short. The server's own counts are the usage.
+        No repeat penalty unless the settings set one: a correction copies most of the line it
+        corrects, and the catalog's 1.2 for translation misspells the copy ("SQWID")."""
+        options = sampling_options(descriptor_for(self.model_id()), generation)
+        if generation.repeat_penalty is None:
+            options.repeat_penalty = 1.0
+        return await asyncio.to_thread(self._complete_now, system, user, schema, options)
+
+    def _complete_now(self, system: str, user: str, schema: dict, options: _Sampling) -> Completion:
+        server = self._server
+        if server is None:
+            raise ProcessingError("local translator is not loaded")
+        prompt_text = server.strip_bos(self._render([{"role": "system", "content": system}, {"role": "user", "content": user}], False))
+        text, prompt_tokens, completion_tokens = server.complete_with_usage(
+            prompt_text,
+            json_schema=schema,
+            n_predict=options.max_tokens,
+            temperature=options.temperature,
+            top_k=options.top_k or 0,
+            top_p=options.top_p or 1.0,
+            min_p=options.min_p or 0.0,
+            repeat_penalty=options.repeat_penalty,
+            frequency_penalty=options.frequency_penalty,
+            presence_penalty=options.presence_penalty,
+        )
+        return Completion(text, prompt_tokens, completion_tokens)
 
     def _fit(self, request: TranslationRequest, enable_thinking: bool, max_tokens: int) -> tuple[str, str]:
         """The prompts, after dropping knowledge (``TranslationRequest.trim``) until they, the reply and

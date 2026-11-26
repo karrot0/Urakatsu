@@ -8,10 +8,15 @@ settings under ``translation`` and implements ``_translate``. The public
 - generation settings are narrowed to what the selected model supports;
 - the page image is kept (and resized) only when the model can see images;
 - the reply must contain exactly one translation per input segment.
+
+Not in Koharu: providers that are language models also answer a free prompt with a reply in a
+given JSON schema (``complete``), which QA uses to proofread. It needs no tool calling, so a small
+local GGUF model serves it as well as a hosted one; translation services leave it out.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Optional
 
 from pydantic import Field
@@ -20,11 +25,21 @@ from urakatsu.core.config import GenerationConfig, ModelSelection, TranslationCo
 from urakatsu.providers.base import ProviderSettings, TranslationProvider
 
 from .backend import TranslationRequest
-from .errors import SegmentCountError, TranslationError
+from .errors import CompletionUnsupported, SegmentCountError, TranslationError
 from .model import Model
 
 if TYPE_CHECKING:  # pragma: no cover
     import httpx
+
+
+@dataclass
+class Completion:
+    """A model's reply to ``TranslatorProvider.complete``, and its token usage when the backend
+    reports it (``None`` when it does not)."""
+
+    text: str
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
 
 
 class TranslationSettings(ProviderSettings):
@@ -37,6 +52,10 @@ class TranslatorProvider(TranslationProvider):
     Settings: ClassVar[type[TranslationSettings]] = TranslationSettings
     # Optional httpx transport override (tests inject ``httpx.MockTransport`` here).
     transport: ClassVar[Optional["httpx.BaseTransport"]] = None
+    # Whether QA's proofreading runs its meaning check by default with this provider's models
+    # (``QaConfig.meaning_check`` unset; ``pipeline/qa/proofread.py``): the small on-device models
+    # that need it. Hosted models proofread well without its extra calls.
+    meaning_check: ClassVar[bool] = False
 
     @property
     def selection(self) -> ModelSelection:
@@ -79,6 +98,30 @@ class TranslatorProvider(TranslationProvider):
         return await self._translate(request, generation)
 
     async def _translate(self, request: TranslationRequest, generation: GenerationConfig) -> list[str]:
+        raise NotImplementedError  # pragma: no cover - interface
+
+    # -- structured completion (not in Koharu) ---------------------------------------------------
+
+    def can_complete(self) -> bool:
+        """Whether the provider is a language model that answers a free prompt (``complete``).
+        Translation services (DeepL, Google Cloud, Caiyun) are not."""
+        return type(self)._complete is not TranslatorProvider._complete
+
+    async def complete(self, system: str, user: str, schema: dict, *, name: str = "reply", max_tokens: Optional[int] = None) -> Completion:
+        """One reply to ``system`` + ``user``, constrained to the JSON ``schema``: no image, no tool
+        calls, so any model with structured output can answer. Used by QA (``pipeline/stages/qa.py``).
+        Generation settings are the translation's, with ``max_tokens`` in place of its own."""
+        if not self.can_complete() or type(self)._complete is TranslatorProvider._complete:
+            raise CompletionUnsupported(self.id)
+        generation = self.generation()
+        if max_tokens is not None:
+            generation = generation.model_copy(update={"max_tokens": max_tokens})
+        return await self._dispatch_completion(system, user, schema, name, generation)
+
+    async def _dispatch_completion(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        return await self._complete(system, user, schema, name, generation)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
         raise NotImplementedError  # pragma: no cover - interface
 
     @classmethod

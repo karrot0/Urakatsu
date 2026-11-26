@@ -201,6 +201,10 @@ class UrakatsuServicer(rpc.UrakatsuServicer):
     async def DeleteTextBlock(self, request, context):
         return convert.page_to_proto(self.workspace.delete_text_block(request.project_id, request.page_id, request.layer_id))
 
+    @guarded
+    async def DismissQaIssue(self, request, context):
+        return convert.page_to_proto(self.workspace.dismiss_qa_issue(request.project_id, request.page_id, request.layer_id, request.index, request.kind))
+
     # -- layers --------------------------------------------------------------------------------------
 
     @guarded

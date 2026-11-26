@@ -54,3 +54,11 @@ class ApiError(TranslationError):
         self.provider = provider
         self.status = status
         self.message = message
+
+
+class CompletionUnsupported(TranslationError):
+    """The provider only translates: it cannot answer a free prompt (``TranslatorProvider.complete``)."""
+
+    def __init__(self, provider: str):
+        super().__init__(f"{provider} only translates and cannot answer a prompt")
+        self.provider = provider

@@ -61,3 +61,7 @@ class UrakatsuCloudTranslator(OpenAiCompatibleTranslator):
 
     def base_url(self) -> Optional[str]:
         return f"{cloud.url(self.settings.model_dump())}/v1"
+
+    # ``complete`` (QA's proofreading) is the inherited OpenAI-compatible one: the cloud's chat
+    # endpoint forwards any system and user messages, and turns a JSON-schema reply format into
+    # DeepSeek's ``json_object`` with the schema in a system message. It is metered like a page.

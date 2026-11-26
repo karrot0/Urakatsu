@@ -24,7 +24,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, credential, field, send_json_sync, usage_counts
 
 URL = "https://api.anthropic.com/v1/messages"
 MODELS_URL = "https://api.anthropic.com/v1/models?limit=1000"
@@ -115,3 +116,22 @@ class ClaudeTranslator(RemoteTranslator):
         if text is None:
             raise TranslationError("Claude returned no text content")
         return prompt.translations(self.id, text, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        body: dict[str, Any] = {
+            "model": self.model_id(),
+            "max_tokens": generation.max_tokens if generation.max_tokens is not None else DEFAULT_MAX_TOKENS,
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            "messages": [{"role": "user", "content": [{"type": "text", "text": user}]}],
+        }
+        if generation.temperature is not None:
+            body["temperature"] = generation.temperature
+        if generation.reasoning is not None:
+            body["thinking"] = {"type": "adaptive" if generation.reasoning else "disabled"}
+        body["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
+        response = await self.post(URL, headers=_headers(self.api_key()), json_body=body)
+        text = next((block.get("text") for block in field(self.id, response, "content") if isinstance(block, dict) and block.get("type") == "text"), None)
+        if text is None:
+            raise TranslationError("Claude returned no text content")
+        prompt_tokens, completion_tokens = usage_counts(response.get("usage"), "input_tokens", "output_tokens")
+        return Completion(text, prompt_tokens, completion_tokens)

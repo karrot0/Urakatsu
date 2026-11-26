@@ -22,7 +22,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model, display_name
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, chat_completion, chat_messages, credential, field, json_schema_format, send_json_sync
 
 DEFAULT_BASE_URL = "http://localhost:1234"
 ENV_KEY = "LM_STUDIO_API_KEY"
@@ -130,6 +131,17 @@ class LmStudioTranslator(RemoteTranslator):
         if content is None:
             raise TranslationError("LM Studio returned no message content")
         return prompt.translations(self.id, content, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        body: dict[str, Any] = {"model": self.model_id(), "messages": chat_messages(system, user)}
+        _set(body, "temperature", generation.temperature)
+        _set(body, "top_p", generation.top_p)
+        _set(body, "max_tokens", generation.max_tokens)
+        if generation.reasoning is not None:
+            body["reasoning_effort"] = "medium" if generation.reasoning else "none"
+        body["response_format"] = json_schema_format(name, schema)
+        url = endpoint(self.settings.base_url, "v1/chat/completions")
+        return await chat_completion(self, url, _auth_headers(self.optional_api_key()), body)
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Type,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -430,9 +431,83 @@ function LayerEditor({ row, name, opacity }: { row: Exclude<Row, { kind: "artwor
             styles={block.translationStyles}
             onCommit={(text, styles) => void ws.updateBlock(block.layerId, { translation: text, translationStyles: styles })}
           />
+          {(block.qaIssues.length > 0 || block.qaOriginal !== undefined) && <QaFindings block={block} />}
         </>
       )}
     </div>
+  );
+}
+
+// ---- QA findings (pipeline/stages/qa.py; not in Koharu) ------------------------------------------
+
+const SEVERITY_DOT: Record<string, string> = { error: "bg-danger", warning: "bg-warning", info: "bg-info" };
+const SEVERITY_LABEL: Record<string, string> = { error: "Error", warning: "Warning", info: "Hint" };
+
+/** What QA found on the selected block. Apply writes a suggestion as the translation, the same edit
+ * as typing it; Dismiss removes the finding from the block's review. Hints are folded away. */
+function QaFindings({ block }: { block: TextBlock }) {
+  const ws = useWorkspace();
+  const [hintsOpen, setHintsOpen] = useState(false);
+  const issues = block.qaIssues.map((issue, index) => ({ issue, index }));
+  const open = issues.filter(({ issue }) => issue.severity !== "info");
+  const hints = issues.filter(({ issue }) => issue.severity === "info");
+  const translation = block.translation ?? "";
+  const row = ({ issue, index }: (typeof issues)[number]) => {
+    const applied = issue.suggestion !== undefined && issue.suggestion === translation;
+    return (
+      <li key={`${index}:${issue.kind}`} className="flex min-w-0 flex-col gap-1 py-1.5 [&+&]:shadow-[inset_0_1px_0_var(--border-soft)]">
+        <div className="flex min-w-0 items-start gap-1.5">
+          <span className={cn("mt-1.5 size-1.5 flex-none rounded-full", SEVERITY_DOT[issue.severity] ?? "bg-fg-3")} role="img" aria-label={SEVERITY_LABEL[issue.severity] ?? issue.severity} />
+          <p className="min-w-0 flex-1 text-xs leading-4">{issue.message || issue.kind.replace(/_/g, " ")}</p>
+          <Tooltip content="Dismiss" side="left">
+            <Button type="button" variant="ghost" size="icon-xs" aria-label={`Dismiss: ${issue.message || issue.kind}`} onClick={() => void ws.dismissQaIssue(block.layerId, index, issue.kind)}>
+              <X size={12} />
+            </Button>
+          </Tooltip>
+        </div>
+        {issue.suggestion !== undefined && (
+          <div className="ml-3 flex min-w-0 items-start gap-1.5 rounded-control bg-surface px-1.5 py-1 shadow-[inset_0_0_0_1px_var(--border)]">
+            <p className="min-w-0 flex-1 text-xs leading-4 text-fg-2">{issue.suggestion}</p>
+            {applied ? (
+              <Badge tone="success" title={issue.applied ? "QA wrote this translation" : "You applied this suggestion"}>
+                {issue.applied ? "Fixed" : "Applied"}
+              </Badge>
+            ) : (
+              <Button type="button" variant="outline" size="xs" onClick={() => void ws.updateBlock(block.layerId, { translation: issue.suggestion, translationStyles: [] })}>
+                Apply
+              </Button>
+            )}
+          </div>
+        )}
+      </li>
+    );
+  };
+  return (
+    <section className="flex min-w-0 flex-col" aria-label="QA findings">
+      <span className={cn(FIELD_LABEL, "flex items-center gap-1")}>
+        QA <span className="tabular-nums normal-case tracking-normal">{open.filter(({ issue }) => issue.suggestion === undefined || issue.suggestion !== translation).length || ""}</span>
+      </span>
+      {block.qaOriginal !== undefined && block.qaOriginal !== translation && (
+        <p className="pt-1 text-xs leading-4 text-fg-3">
+          Before QA: <span className="text-fg-2">{block.qaOriginal}</span>
+        </p>
+      )}
+      {open.length > 0 && <ul className="flex min-w-0 flex-col">{open.map(row)}</ul>}
+      {hints.length > 0 && (
+        <>
+          <button
+            type="button"
+            aria-expanded={hintsOpen}
+            className="flex cursor-pointer items-center gap-1 self-start rounded-control py-1 text-xs text-fg-2 transition-colors duration-[20ms] ease-in hover:text-fg focus-visible:outline-none focus-visible:shadow-focus"
+            onClick={() => setHintsOpen((value) => !value)}
+          >
+            <ChevronDown size={12} className={cn("transition-transform duration-150 ease-settle", !hintsOpen && "-rotate-90")} />
+            Hints <span className="text-fg-3 tabular-nums">{hints.length}</span>
+          </button>
+          {hintsOpen && <ul className="flex min-w-0 flex-col">{hints.map(row)}</ul>}
+        </>
+      )}
+    </section>
   );
 }
 

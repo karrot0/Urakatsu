@@ -103,6 +103,8 @@ class Registry:
         stage = Stage.parse(stage)
         if stage is Stage.SOUND_EFFECTS:  # its model is an inpainting provider that follows prompts
             stage = Stage.INPAINTING
+        elif stage is Stage.QA:  # its model is a translation provider (an LLM proofreads)
+            stage = Stage.TRANSLATION
         try:
             return self._providers[stage][provider_id]
         except KeyError as error:

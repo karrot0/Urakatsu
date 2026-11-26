@@ -35,6 +35,7 @@ service Urakatsu {
   rpc UpdateTextBlock(UpdateTextBlockRequest) returns (Page);
   rpc CreateTextBlock(CreateTextBlockRequest) returns (Page);
   rpc DeleteTextBlock(TextBlockRef) returns (Page);
+  rpc DismissQaIssue(DismissQaIssueRequest) returns (Page);
 
   // Layers of any kind (text or raster), as the layers panel and paint tools edit them.
   rpc SetLayerVisibility(LayerVisibilityRequest) returns (Page);
@@ -143,6 +144,7 @@ message Config {
   string colorization = 23;                 // ColorizationConfig.mode: off | colorize (empty keeps it)
   string colorization_model = 24;           // colorizer; empty keeps it
   string prompt_size = 25;                  // TranslationConfig.prompt_size: lean | balanced | full (empty keeps it)
+  string qa = 27;                           // QaConfig.mode: off | flag | fix (empty keeps it)
 }
 
 message TranslationModel {
@@ -243,6 +245,26 @@ message TextBlock {
   string role = 18;
   double opacity = 19;
   repeated TextStyle translation_styles = 20;  // rich text over `translation`
+  repeated QaIssue qa_issues = 21;  // what QA found on this block (pipeline/stages/qa.py)
+  optional string qa_original = 22; // the translation a QA fix replaced
+}
+
+// One QA finding on a text block (scene QaIssue).
+message QaIssue {
+  string kind = 1;                  // overflow | mistranslation | untranslated | ...
+  string severity = 2;              // error | warning | info
+  string message = 3;
+  optional string suggestion = 4;   // the corrected translation, if QA has one
+  bool applied = 5;                 // QA wrote the suggestion (fix mode)
+}
+
+// Removes one finding from a block's QA review (index into TextBlock.qa_issues; kind must match).
+message DismissQaIssueRequest {
+  string project_id = 1;
+  string page_id = 2;
+  string layer_id = 3;
+  int32 index = 4;
+  string kind = 5;
 }
 
 message Region {

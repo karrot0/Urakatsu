@@ -1278,6 +1278,11 @@ function PageRowView({
 }) {
   // A lazy <img> by URL: only on-screen rows load, after the canvas image, and the browser caches them.
   const thumb = assetHref(projectId, page.id, "thumbnail", assetVersion(page, "thumbnail"));
+  // Open QA findings on the page's blocks; hints (info) and corrections already in place are not counted.
+  const qaOpen = page.blocks.reduce(
+    (count, block) => count + block.qaIssues.filter((issue) => issue.severity !== "info" && (issue.suggestion === undefined || issue.suggestion !== block.translation)).length,
+    0,
+  );
 
   return (
     <div
@@ -1293,7 +1298,16 @@ function PageRowView({
         <span className="truncate" title={page.name}>
           {page.name}
         </span>
-        {number > 0 && <span className="text-xs tabular-nums text-fg-3">Page {number}</span>}
+        {(number > 0 || qaOpen > 0) && (
+          <span className="flex min-w-0 gap-1.5 text-xs tabular-nums text-fg-3">
+            {number > 0 && <span>Page {number}</span>}
+            {qaOpen > 0 && (
+              <span className="truncate text-warning" title={`QA found ${qaOpen} issue${qaOpen === 1 ? "" : "s"} on this page (hints not counted)`}>
+                {qaOpen} QA
+              </span>
+            )}
+          </span>
+        )}
       </span>
       {actions && <span className={cn(ACTIONS, "right-11", active ? ACTIONS_BG_ACTIVE : ACTIONS_BG)}>{actions}</span>}
       <span className="inline-flex gap-[3px] px-1" title={STAGES.map((s) => `${s}: ${stageDone(page, s) ? "done" : "pending"}`).join("\n")}>

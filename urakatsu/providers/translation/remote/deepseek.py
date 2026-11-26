@@ -8,6 +8,7 @@ API key: settings ``api_key`` or ``DEEPSEEK_API_KEY``.
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar, Optional
 
 import httpx
@@ -21,7 +22,8 @@ from ..backend import TranslationRequest, encode_jpeg_data_url
 from ..base import TranslationSettings
 from ..errors import TranslationError
 from ..model import Model, display_name
-from .base import RemoteTranslator, credential, field, send_json_sync
+from ..base import Completion
+from .base import RemoteTranslator, chat_completion, chat_messages, credential, field, send_json_sync
 
 URL = "https://api.deepseek.com/chat/completions"
 MODELS_URL = "https://api.deepseek.com/models"
@@ -99,6 +101,19 @@ class DeepSeekTranslator(RemoteTranslator):
         if content is None:
             raise TranslationError("DeepSeek returned no message content")
         return prompt.translations(self.id, content, request.segments)
+
+    async def _complete(self, system: str, user: str, schema: dict, name: str, generation: GenerationConfig) -> Completion:
+        # JSON mode has no schema: the schema is stated in the prompt, and the caller parses tolerantly.
+        shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        system = "\n\n".join((system, "Reply with one JSON object that follows this JSON Schema:\n" + shape))
+        body: dict[str, Any] = {"model": self.model_id(), "messages": chat_messages(system, user)}
+        if generation.reasoning is not None:
+            body["thinking"] = {"type": "enabled" if generation.reasoning else "disabled"}
+        _set(body, "max_tokens", generation.max_tokens)
+        body["response_format"] = {"type": "json_object"}
+        _set(body, "temperature", generation.temperature if generation.temperature is not None else DEFAULT_TEMPERATURE)
+        _set(body, "top_p", generation.top_p)
+        return await chat_completion(self, URL, {"Authorization": f"Bearer {self.api_key()}"}, body)
 
 
 def _set(body: dict[str, Any], key: str, value: Any) -> None:

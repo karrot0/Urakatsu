@@ -15,7 +15,7 @@ from urakatsu.core.stage import Stage
 
 from . import local  # noqa: F401  (registers the local provider)
 from .backend import TranslationContext, TranslationRequest
-from .base import TranslationSettings, TranslatorProvider
+from .base import Completion, TranslationSettings, TranslatorProvider
 from .errors import (
     ApiError,
     QuotaExceeded,
@@ -80,6 +80,7 @@ def models(config: "PipelineConfig") -> list[Model]:
 
 __all__ = [
     "ApiError",
+    "Completion",
     "Language",
     "Model",
     "Quantization",

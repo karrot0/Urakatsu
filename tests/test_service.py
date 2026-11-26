@@ -69,7 +69,7 @@ async def test_native_grpc_roundtrip(workspace):
         async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
             stub = rpc.UrakatsuStub(channel)
             caps = await stub.GetCapabilities(pb.Empty())
-            assert caps.device.backend == "cpu" and list(caps.stages) == ["watermarks", "censor_detection", "detection", "ocr", "translation", "inpainting", "decensor", "colorization", "sound_effects"]
+            assert caps.device.backend == "cpu" and list(caps.stages) == ["watermarks", "censor_detection", "detection", "ocr", "translation", "inpainting", "decensor", "colorization", "sound_effects", "qa"]
             detector = next(p for p in caps.providers if p.id == "fake-detector")
             assert [r.name for r in detector.runtimes] == ["torch", "onnx", "remote", "cloud"]
 
@@ -803,3 +803,73 @@ async def test_selected_pages_remove_in_one_undo_step(workspace):
         response = await client.post(f"/api/v1/projects/{project}/pages/remove", json={"page_ids": ids[:2]})
         assert response.status_code == 200
     assert [p.id for p in workspace.project_view(project).pages] == ids[2:]
+
+
+async def test_qa_findings_reach_the_page_view_and_dismiss_one_at_a_time(workspace):
+    from urakatsu.pipeline.qa import PRODUCER
+    from urakatsu.scene import Generation, QaIssue, QaReview
+
+    project = workspace.create_project("QA").id
+    page = workspace.add_page(project, "p.png", page_png()).id
+    workspace.create_text_block(project, page, {"x": 10, "y": 10, "width": 200, "height": 60})
+    [block] = workspace.page(project, page).blocks
+    workspace.update_text_block(project, page, block.layer_id, {"translation": "Big sister"})
+    session = workspace.session(project)
+    snapshot = session.snapshot()
+    content = snapshot.layer_content(block.layer_id)
+    issues = [
+        QaIssue(kind="overflow", severity="warning", message="Runs past its balloon"),
+        QaIssue(kind="mistranslation", severity="error", message="Reads as a name", suggestion="Sis"),
+        QaIssue(kind="small_font", severity="info", message="Smaller than its neighbours"),
+    ]
+    edit = snapshot.edit_as(Generation(producer=PRODUCER, model="fake-translator"))
+    edit.set(content, QaReview(issues=issues, original="Older sister"))
+    session.commit(edit.finish())
+
+    message = convert.page_to_proto(workspace.page(project, page)).blocks[0]
+    assert [(i.kind, i.severity, i.suggestion if i.HasField("suggestion") else None) for i in message.qa_issues] == [
+        ("overflow", "warning", None),
+        ("mistranslation", "error", "Sis"),
+        ("small_font", "info", None),
+    ]
+    assert message.qa_original == "Older sister"
+
+    # A stale index or kind dismisses nothing.
+    with pytest.raises(KeyError):
+        workspace.dismiss_qa_issue(project, page, block.layer_id, 0, "mistranslation")
+    view = workspace.dismiss_qa_issue(project, page, block.layer_id, 1, "mistranslation")
+    assert [i.kind for i in view.blocks[0].qa_issues] == ["overflow", "small_font"]
+    # The review stays QA's, so its next pass can still rewrite it; undo brings the finding back.
+    review = session.snapshot().component(content, QaReview)
+    assert review.origin.generation.producer == PRODUCER and review.original == "Older sister"
+    session.snapshot().edit_as(Generation(producer=PRODUCER, model="fake-translator")).set(content, review)  # no AuthorshipError
+    workspace.undo(project)
+    assert len(workspace.page(project, page).blocks[0].qa_issues) == 3
+
+    app = build_app(workspace, UrakatsuServicer(workspace), serve_ui=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        request = pb.DismissQaIssueRequest(project_id=project, page_id=page, layer_id=block.layer_id, index=0, kind="overflow")
+        frames = parse_frames((await client.post("/urakatsu.v1.Urakatsu/DismissQaIssue", content=frame(DATA_FRAME, request.SerializeToString()))).content)
+        assert b"grpc-status:0" in frames[-1][1]
+        assert [i.kind for i in pb.Page.FromString(frames[0][1]).blocks[0].qa_issues] == ["mistranslation", "small_font"]
+        response = await client.delete(f"/api/v1/projects/{project}/pages/{page}/blocks/{block.layer_id}/qa/1", params={"kind": "small_font"})
+        assert response.status_code == 200, response.text
+        assert [i["kind"] for i in response.json()["blocks"][0]["qa_issues"]] == ["mistranslation"]
+        response = await client.delete(f"/api/v1/projects/{project}/pages/{page}/blocks/{block.layer_id}/qa/5", params={"kind": "overflow"})
+        assert response.status_code == 404
+
+
+def test_qa_mode_travels_with_the_config(workspace):
+    config = workspace.get_config().model_copy(deep=True)
+    config.qa.mode = "fix"
+    config.qa.context_tokens = 900
+    message = convert.config_to_proto(config)
+    assert message.qa == "fix"
+    base = workspace.get_config()
+    restored = convert.config_from_proto(message, base)
+    assert restored.qa.mode == "fix" and restored.qa.context_tokens == base.qa.context_tokens  # only the mode travels
+    message.qa = ""
+    assert convert.config_from_proto(message, base).qa.mode == base.qa.mode  # empty keeps it
+    message.qa = "rewrite"
+    with pytest.raises(ValueError):
+        convert.config_from_proto(message, base)

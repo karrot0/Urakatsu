@@ -334,6 +334,7 @@ export const STAGE_LABEL: Record<string, string> = {
   censor_detection: "Censor detection",
   decensor: "Decensor",
   colorization: "Colorization",
+  qa: "QA",
 };
 
 export const RUNTIME_LABEL: Record<CatalogRuntime, string> = {

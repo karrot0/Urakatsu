@@ -78,6 +78,10 @@ class LlamaServer:
 
     def complete(self, prompt: str, images: Sequence[bytes] = (), **params: Any) -> str:
         """``POST /completion`` with a raw prompt; returns the generated text."""
+        return self.complete_with_usage(prompt, images, **params)[0]
+
+    def complete_with_usage(self, prompt: str, images: Sequence[bytes] = (), **params: Any) -> tuple[str, Optional[int], Optional[int]]:
+        """``complete``, with the prompt and generated token counts the server reports."""
         if images and not self.vision:
             raise ProcessingError("this model has no vision projector")
         body: dict[str, Any] = {
@@ -92,7 +96,14 @@ class LlamaServer:
         response = self.process.client.post("/completion", json=body)
         if response.status_code >= 400:
             raise ProcessingError(f"llama-server: {_error_text(response)}")
-        return response.json().get("content", "")
+        reply = response.json()
+        prompt_tokens = reply.get("tokens_evaluated")
+        completion_tokens = reply.get("tokens_predicted")
+        return (
+            reply.get("content", ""),
+            prompt_tokens if isinstance(prompt_tokens, int) else None,
+            completion_tokens if isinstance(completion_tokens, int) else None,
+        )
 
     def close(self) -> None:
         self.process.stop()

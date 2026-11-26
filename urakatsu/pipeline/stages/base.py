@@ -9,12 +9,15 @@ swapped in without touching stage logic.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from urakatsu.pipeline.images import ImageCache
 from urakatsu.pipeline.scope import Bounds, contains_entity
 from urakatsu.providers.base import Provider
 from urakatsu.scene import Edit, Generation, Patch, Snapshot
+
+if TYPE_CHECKING:  # pragma: no cover
+    from urakatsu.core.config import QaConfig, TypesettingConfig
 
 
 @dataclass
@@ -41,6 +44,9 @@ class StageInput:
     # Redo (an Urakatsu addition): stages that skip a page they already did (``done``) do it again,
     # replacing their own results but never what the user edited.
     force: bool = False
+    # QA (not in Koharu) reads its settings and lays text out with the run's fonts.
+    qa: Optional["QaConfig"] = None
+    typesetting: Optional["TypesettingConfig"] = None
 
     def contains_entity(self, entity: str) -> bool:
         return contains_entity(self.scene, self.page, self.entities, self.region, entity)
@@ -48,6 +54,9 @@ class StageInput:
 
 class StageProcessor:
     """One stage. ``skip`` is cheap and runs before the provider is loaded."""
+
+    # Whether ``process`` loads the provider itself, when it needs it (QA); the pipeline loads it otherwise.
+    loads_provider = False
 
     def skip(self, input: StageInput, provider: Provider) -> bool:
         return False

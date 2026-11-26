@@ -452,6 +452,65 @@ class TextRole(Component):
     role: str
 
 
+# ---- quality assurance (not in Koharu: pipeline/stages/qa.py) -------------------------------------
+
+
+class QaIssue(BaseModel):
+    """One problem QA found on a text block.
+
+    ``kind`` is a layout check (``overflow``, ``small_font``, ``overlong``, ``font_outlier``,
+    ``off_centre``, ``touches_contour``, ``crosses_contour``, ``overlap``, ``off_page``), a
+    model-free wording check (``untranslated``, ``glossary``, ``number``, ``full_width``) or a proofreading
+    category (``mistranslation``, ``omission``, ``addition``, ``grammar``, ``too_long``; reviews
+    from before QA's second round may also hold ``tone``, ``consistency``, ``other``).
+    ``suggestion`` is the corrected translation; ``applied`` says QA wrote it (fix mode)."""
+
+    kind: str
+    severity: str = "warning"  # info | warning | error
+    message: str = ""
+    suggestion: Optional[str] = None
+    applied: bool = False
+
+
+class QaReview(Component):
+    """What QA found on one text block, on its text content."""
+
+    KIND: ClassVar[str] = "dev.urakatsu.qa.review"
+    origin: Origin = Field(default_factory=UserOrigin)
+    issues: list[QaIssue] = Field(default_factory=list)
+    # What the model last proofread (source, translation, language, length hint); None when no model
+    # has. A block whose fingerprint still matches is not sent again.
+    fingerprint: Optional[str] = None
+    # The translation before QA rewrote it (fix mode), so the change can be shown and undone by hand,
+    # and ``written``, what QA wrote in its place: ``original`` holds only while the block's
+    # translation is still ``written`` (a re-translation or a hand edit makes it another line's past).
+    original: Optional[str] = None
+    written: Optional[str] = None
+
+
+class QaPage(Component):
+    """A page's last QA pass: what was sent, what it cost, and why the model was not asked."""
+
+    KIND: ClassVar[str] = "dev.urakatsu.qa.page"
+    origin: Origin = Field(default_factory=UserOrigin)
+    model: Optional[str] = None
+    proofread: bool = False
+    # Why the proofreading half did not run or did not finish ("deepl cannot proofread", a bad reply).
+    reason: str = ""
+    sent: int = 0  # blocks sent to the model
+    unchanged: int = 0  # blocks not sent: reviewed before and unchanged since
+    issues: int = 0
+    fixed: int = 0
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    # Whether a count is estimated from the text because the backend reported none.
+    tokens_estimated: bool = False
+    # Every pass on this page so far.
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+
+
 # ---- assets (components/assets.rs) ---------------------------------------------------------------
 
 
@@ -521,5 +580,7 @@ COMPONENTS: dict[str, type[Component]] = {
         SourceText,
         Translation,
         TextRole,
+        QaReview,
+        QaPage,
     )
 }

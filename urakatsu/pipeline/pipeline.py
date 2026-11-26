@@ -17,6 +17,10 @@
   (``unload``), outside a run.
 - Every unload goes through ``_unload``, which also hands the memory back: dropping a model
   leaves PyTorch's share of it reserved, out of reach of native servers and other programs.
+- QA (an Urakatsu addition, ``pipeline/stages/qa.py``) runs the translation model: when its
+  selection is translation's, ``provider(Stage.QA)`` is the translation stage's own instance, so
+  one model is loaded once. Its processor loads the model itself (``loads_provider``), only when
+  a page has text the model has not read.
 """
 
 from __future__ import annotations
@@ -151,6 +155,11 @@ class Pipeline:
         """The stage's provider. ``fill`` asks for the generative fill model, which takes the
         inpainting slot while it runs, so it is loaded only when used and never beside the
         inpainting model (the next inpainting run swaps them back)."""
+        if stage is Stage.QA and self.config.qa_shares_translation():
+            separate = self._providers.pop(Stage.QA, None)
+            if separate is not None:
+                self._unload(separate)
+            return self.provider(Stage.TRANSLATION)
         wanted = self.config.fill_provider() if fill else self.config.provider_for(stage)
         existing = self._providers.get(stage)
         if existing is not None and existing.id == wanted:
@@ -355,8 +364,9 @@ class Pipeline:
     async def _load_and_process(self, stage, processor, provider, input, stop, progress):
         _emit(progress, Progress(kind=ProgressKind.LOADING, page=input.page, stage=stage, model=provider.id))
         try:
-            with stopping(stop):
-                await provider.load()
+            if not getattr(processor, "loads_provider", False):
+                with stopping(stop):
+                    await provider.load()
         except Exception as error:
             return _STOPPED if stop.stopped else _Attempt(ErrorKind.MODEL_LOAD, error)
         if stop.stopped:
@@ -445,6 +455,16 @@ def _censorship_stages(stages: list[Stage], mode: str, operation: Operation) -> 
     return kept
 
 
+def _qa_stages(stages: list[Stage], mode: str) -> list[Stage]:
+    """``stages`` without QA while ``mode`` is off."""
+    if mode != "off":
+        return stages
+    kept = [stage for stage in stages if stage is not Stage.QA]
+    if not kept:
+        raise ValueError("QA is off (Settings, Pipeline, QA)")
+    return kept
+
+
 def _colorization_stages(stages: list[Stage], mode: str) -> list[Stage]:
     """``stages`` without colorization while ``mode`` is off."""
     if mode != "off":
@@ -486,6 +506,7 @@ class _Execution:
                 stages = [Stage.WATERMARKS, *stages]
             stages = _censorship_stages(stages, pipeline.config.censorship.mode, request.operation)
             stages = _colorization_stages(stages, pipeline.config.colorization.mode)
+            stages = _qa_stages(stages, pipeline.config.qa.mode)
             self.scope = NormalizedScope(self.scene, request.scope, stages)
         except (ValueError, KeyError) as error:
             raise PipelineError(ErrorKind.INVALID_INPUT, None, str(error)) from error
@@ -544,7 +565,7 @@ class _Execution:
             self.busy.add(stage)
             self._once_running.add((page, stage))
             # Its own image cache: the page's cache is dropped when it commits (``_mark_complete``).
-            return stage, StageInput(self.scene, page, None, None, ImageCache(), mask, sound_effects, False)
+            return stage, StageInput(self.scene, page, None, None, ImageCache(), mask, sound_effects, False, **self._settings())
         job = self.scheduler.start_next(self.busy)
         if job is None:
             return None
@@ -553,7 +574,12 @@ class _Execution:
         images = self.images.setdefault(page, ImageCache())
         mask = self.inpainting_mask if (stage in MASKED_STAGES and self.inpainting_mask and self.inpainting_mask.page == page) else None
         force = self.force or self.scheduler.forced(page, stage)
-        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, force)
+        return stage, StageInput(self.scene, page, self.scope.entities, self.scope.region(page), images, mask, sound_effects, force, **self._settings())
+
+    def _settings(self) -> dict:
+        """The settings a stage reads besides its provider's (QA's)."""
+        config = self.pipeline.config
+        return {"qa": config.qa, "typesetting": config.typesetting}
 
     def prioritize(self, page: str, stages: Optional[list[Stage]], force: bool, mask: Optional[InpaintingMask] = None) -> bool:
         """Next on ``page`` (``Pipeline.prioritize``). Only whole-page runs take it: a run limited
