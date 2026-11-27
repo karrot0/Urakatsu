@@ -33,7 +33,7 @@ import type { Page, RasterLayer, TextBlock } from "../gen/urakatsu/v1/urakatsu_p
 import { matches } from "../shortcuts";
 import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, chapterOf, currentPage, selectedPages, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
 import { Slider } from "./primitives";
-import { useLayerFonts } from "../fontFaces";
+import { useFontFaces } from "../fontFaces";
 import { cssGradient } from "../richText";
 import { useDefaultFont } from "./FontPicker";
 import { RichTextField } from "./RichTextField";
@@ -1905,7 +1905,7 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
   const size = (layout?.font_size ?? typography?.size ?? fittedSize(text, vertical ? box.h : box.w, vertical ? box.w : box.h)) * zoom;
   const align = { Start: "left", Center: "center", End: "right", Justify: "justify" }[typography?.alignment ?? ""] ?? "center";
   const family = typography?.preferredFont || defaultFont;
-  useLayerFonts([family, ...block.translationStyles.map((style) => style.font)]);
+  useFontFaces([family, ...block.translationStyles.map((style) => style.font)]);
   if (!layouts && !waited) return null;
 
   const strokeWidth = typography?.strokeWidth ?? 0;

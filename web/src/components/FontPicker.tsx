@@ -9,6 +9,7 @@ import { cn } from "cn";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { client } from "../api/client";
+import { useFontFaces } from "../fontFaces";
 import { useWorkspace } from "../state/workspace";
 import { Popover } from "./primitives";
 
@@ -58,6 +59,7 @@ export function FontPicker({
     const needle = query.trim().toLowerCase();
     return (needle ? families.filter((f) => f.toLowerCase().includes(needle)) : families).slice(0, 300);
   }, [families, query]);
+  useFontFaces(open ? [value || defaultFont, ...shown] : [value || defaultFont]);
   return (
     <Popover
       open={open}

@@ -15,6 +15,7 @@ import { BRUSH_SIZES, DEFAULT_SHORTCUTS, NUDGES, TOOLS, useWorkspace, type Short
 import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./ModelsStorage";
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
+import { useFontFaces } from "../fontFaces";
 import { CensorshipPreview, type CensorshipMode } from "./CensorshipPreview";
 import { ColorizationPreview, type ColorizationMode } from "./ColorizationPreview";
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
@@ -1224,6 +1225,7 @@ function Translation({ draft, update }: { draft: Config; update: (patch: Partial
 function Typesetting({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const [adding, setAdding] = useState("");
   const families = draft.fontFamilies;
+  useFontFaces(families);
   const set = (next: string[]) => update({ fontFamilies: next });
   const move = (index: number, delta: number) => {
     const next = [...families];
