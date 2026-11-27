@@ -17,6 +17,9 @@
   on an NVIDIA, AMD or Intel GPU, or on your CPU.
 - **Edit everything.** Text blocks, rich text, typography, layers, cleanup brushes and generative
   fill. A re-run never overwrites your edits.
+- **Lettering that matches the original.** Reads what kind of typeface each line is lettered in
+  and how heavy, and sets its translation in a matching font: dialogue, narration, shouts and
+  thoughts each keep their own look.
 - **Uncensoring.** Optionally finds censor bars and reconstructs the art under them, on a layer
   of its own, on your computer. For works whose characters are all adults.
 - **Chapters from the sites you read.** Download series from Suwayomi (Tachiyomi and Mihon

@@ -236,6 +236,7 @@ function InferenceControl() {
 
   const censorship = config?.censorship || "off";
   const colorization = config?.colorization || "off";
+  const lettering = config?.lettering || "off";
   const runAlone = (stage: RunStage) => {
     setOpen(false);
     void ws.run({ kind: "only", stage, scope });
@@ -364,6 +365,12 @@ function InferenceControl() {
             {STAGES.map((stage) => (
               <SelectorOption key={stage} label={STAGE_LABEL[stage]} detail={STAGE_DETAIL[stage]} selected={ws.runStages.includes(stage)} onClick={() => toggleStage(stage)} />
             ))}
+            {lettering !== "off" && (
+              <>
+                <hr />
+                <SelectorOption label="Run Lettering" detail="Match each text's style to the original's lettering" selected={false} onClick={() => runAlone("lettering")} />
+              </>
+            )}
             {censorship !== "off" && (
               <>
                 <hr />

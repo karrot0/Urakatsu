@@ -11,6 +11,7 @@ else comes from the Models page, a Hugging Face catalog rated for your machine.
 | OCR | PaddleOCR-VL 1.6 |
 | Translation | a local GGUF model run by llama.cpp |
 | Inpainting | LaMa |
+| Lettering | YuzuMarker Font Detection (`yuzumarker-font-detection`, needs PyTorch) |
 
 Weights go to the models folder: `URAKATSU_HOME/models` by default, or the folder chosen in
 Settings, then Pipeline, then Storage (also offered by the Windows setup).
@@ -52,6 +53,33 @@ installed release (`urakatsu/catalog/recipes.py`):
 - Video models, and recipes that need an adapter input (ControlNet, IP-Adapter), are not offered.
 - A repo that only holds a text encoder (its GGUF architecture is a language model llama.cpp
   runs) is marked as such and is not installed as an image model.
+
+## Lettering styles
+
+A manga letters each kind of line in its own kind of typeface: dialogue in antique, narration in
+mincho, shouts in a heavy gothic, thoughts in a rounded gothic. The lettering stage reads which
+one each line is in and gives its translation the matching style, as Koharu 0.100 does.
+
+- It runs after text recognition, in any run that reads or translates text. **Run Lettering**
+  in the stage menu runs it alone, so pages that are already detected and read get styles
+  without being detected again. Settings, then Typesetting turns it off.
+- The font reader names the likeliest of 6,150 Chinese, Japanese and Korean fonts for five crops
+  of each line, and their probabilities are summed into 19 styles. A line takes a style only
+  when the reader is sure of it; otherwise it is set as dialogue. A book's dialogue keeps one
+  face from balloon to balloon.
+- A line is set bold when its original's strokes are 1.3 times as thick as the book's
+  dialogue, as in Koharu. The weights of the fonts the reader named guard that: a line whose
+  fonts read lighter than the dialogue's is not bold, however thick its box measured (a
+  balloon's outline or line art inside it), and they decide when no stroke could be measured.
+- Settings, then Typesetting lists each style's font, weight and slant per script (Latin,
+  Cyrillic, Greek, Chinese and Japanese), with **Restore defaults**. Changing a style's font
+  restyles every text of that style. The type panel's **Lettering style** menu sets one text's
+  style by hand; a font, weight or slant set on a text wins over its style's.
+- The reader is trained on Chinese, Japanese and Korean lettering; what it makes of other
+  scripts is not to be relied on. Without PyTorch a run leaves the stage out.
+
+The rules and the measurements behind them are in `urakatsu/pipeline/lettering.py`, the style
+table in `urakatsu/core/styles.py`.
 
 ## Hosted translation
 

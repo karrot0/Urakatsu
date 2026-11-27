@@ -12,6 +12,7 @@ def processors() -> dict[Stage, StageProcessor]:
     from .colorization import ColorizationStage
     from .detection import DetectionStage
     from .inpainting import InpaintingStage
+    from .lettering import LetteringStage
     from .ocr import OcrStage
     from .sound_effects import SoundEffectsStage
     from .translation import TranslationStage
@@ -22,6 +23,7 @@ def processors() -> dict[Stage, StageProcessor]:
         Stage.CENSOR_DETECTION: CensorDetectionStage(),
         Stage.DETECTION: DetectionStage(),
         Stage.OCR: OcrStage(),
+        Stage.LETTERING: LetteringStage(),
         Stage.TRANSLATION: TranslationStage(),
         Stage.INPAINTING: InpaintingStage(),
         Stage.DECENSOR: DecensorStage(),

@@ -510,6 +510,30 @@ class WatermarkProvider(Provider):
         raise NotImplementedError
 
 
+class FontReading(BaseModel):
+    """What a font reader makes of one crop of lettering.
+
+    ``kernels`` is how likely each lettering style (``core/styles.py``) is to be the crop's face,
+    summing to 1 at most. ``weight`` is the weight of the fonts the reader took it for, on the
+    100 to 900 scale, or None when it cannot say.
+    """
+
+    kernels: dict[str, float] = Field(default_factory=dict)
+    weight: Optional[float] = None
+
+
+class LetteringProvider(Provider):
+    """Reads what kind of face a crop of lettering is in; the lettering stage picks its style."""
+
+    stage = Stage.LETTERING
+
+    async def read_fonts(self, crops: list[Image.Image]) -> list[FontReading]:
+        return await asyncio.to_thread(self._read_fonts, crops)
+
+    def _read_fonts(self, crops: list[Image.Image]) -> list[FontReading]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
 class TranslationProvider(Provider):
     """Translates segments."""
 

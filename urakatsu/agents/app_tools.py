@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from urakatsu.core.progress import ProgressKind
 from urakatsu.core.stage import Operation, Stage
+from urakatsu.core.styles import STYLES
 from urakatsu.pipeline import knowledge
 from urakatsu.providers.translation.language import Language
 
@@ -278,6 +279,11 @@ _TYPOGRAPHY = {
     "auto_fit": {"type": "boolean"},
     "weight": {"type": "integer", "minimum": 100, "maximum": 900},
     "style": {"type": "string", "enum": ["normal", "italic", "oblique"]},
+    "lettering_style": {
+        "type": "string",
+        "enum": ["", *STYLES],
+        "description": "The kind of face the text is set in, which picks its font where none is set: antique for dialogue, mincho for narration, gothic for shouts, rounded for thoughts, handwriting, brush, pop for side text. Empty for the one read from the original.",
+    },
     "color": {"type": "string", "description": "#rrggbb or #rrggbbaa"},
     "stroke_color": {"type": "string", "description": "#rrggbb or #rrggbbaa; alpha 00 removes the border"},
     "stroke_width": {"type": "number"},
@@ -290,6 +296,7 @@ _TYPOGRAPHY_KEYS = {
     "auto_fit": "auto_fit",
     "weight": "font_weight",
     "style": "font_style",
+    "lettering_style": "style",
     "color": "color",
     "stroke_color": "stroke_color",
     "stroke_width": "stroke_width",

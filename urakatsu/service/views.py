@@ -39,6 +39,7 @@ class GradientView(BaseModel):
 
 
 class TypographyView(BaseModel):
+    style: Optional[str] = None  # lettering style (core/styles.py)
     preferred_font: Optional[str] = None
     font_weight: Optional[int] = None
     font_style: Optional[str] = None
@@ -72,6 +73,8 @@ class TextBlockView(BaseModel):
     translation_styles: list[TextStyleView] = Field(default_factory=list)
     ocr_direction: Optional[str] = None
     typography: Optional[TypographyView] = None
+    lettering_style: Optional[str] = None  # what the lettering stage placed; the typography's own wins
+    lettering_weight: Optional[int] = None
     visible: bool = True
     opacity: float = 1.0
     role: Optional[str] = None
@@ -178,6 +181,7 @@ def typography_view(value: Optional[c.Typography]) -> Optional[TypographyView]:
     if value is None:
         return None
     return TypographyView(
+        style=value.style,
         preferred_font=value.preferred_font,
         font_weight=value.font_weight,
         font_style=value.font_style.value if value.font_style else None,
@@ -214,6 +218,7 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
         visibility = snapshot.component(layer, c.Visibility)
         role = snapshot.component(content, c.TextRole)
         frame = snapshot.frame(layer)
+        lettering = snapshot.component(layer, c.LetteringStyle)
         blocks.append(
             TextBlockView(
                 layer_id=layer,
@@ -249,6 +254,8 @@ def page_view(snapshot: Snapshot, page: str, extra_assets: list[str] | None = No
                 else [],
                 ocr_direction=ocr.direction.value if ocr else None,
                 typography=typography_view(snapshot.component(layer, c.Typography)),
+                lettering_style=lettering.style if lettering else None,
+                lettering_weight=lettering.font_weight if lettering else None,
                 visible=visibility.visible if visibility else True,
                 opacity=visibility.opacity if visibility else 1.0,
                 role=role.role if role else None,

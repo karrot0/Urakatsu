@@ -161,6 +161,7 @@ def fake_config(translator: str = "fake-translator", runtimes: Optional[dict[str
     config.ocr.model = "fake-ocr"
     config.translation.model.provider = translator
     config.inpainting.model = "fake-inpainter"
+    config.lettering.mode = "off"  # the fake stages hold no lettering stage; tests/test_lettering.py runs it
     config.runtimes = runtimes or {}
     return config
 

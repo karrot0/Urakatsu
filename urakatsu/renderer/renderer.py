@@ -19,6 +19,8 @@ from typing import Optional
 
 
 from ..core.config import TypesettingConfig
+from ..core.styles import StyleTable, fallback_families, script_of
+from ..core.styles import face as style_face
 from ..scene import components as c
 from ..scene.scene import Snapshot
 from .bubble import GeometryFrame, LayoutBox, contour, flow_cells, geometry_bounds, geometry_frame
@@ -182,6 +184,7 @@ class Renderer:
             width=width,
             height=height,
             font_families=list(self.typesetting.font_families),
+            styles=self.typesetting.styles,
             balloon_flows=flow_placements,
         )
         source = snapshot.asset(page, SOURCE_ROLE)
@@ -361,12 +364,14 @@ class _Traversal:
         height: int,
         font_families: list[str],
         balloon_flows: dict[str, ResolvedPlacement],
+        styles: Optional[StyleTable] = None,
     ) -> None:
         self.snapshot = snapshot
         self.page = page
         self.width = width
         self.height = height
         self.font_families = font_families
+        self.styles = styles or {}
         self.balloon_flows = balloon_flows
         self.layers: list[LayerDraft] = []
         self.diagnostics: list[RenderDiagnostic] = []
@@ -485,6 +490,25 @@ class _Traversal:
             direction == "rtl",
         )
         preferred_font = typography.preferred_font if typography is not None else None
+        font_weight = typography.font_weight if typography is not None else None
+        font_style = _font_style(typography.font_style) if typography is not None else None
+        font_families = list(self.font_families)
+        lettering = self.snapshot.component(entity, c.LetteringStyle)
+        style = (typography.style if typography is not None else None) or (lettering.style if lettering is not None else None)
+        if style:
+            # ``lettered``: a styled text's font, weight and italic, where it sets none of its own,
+            # are its style's for the translation's script; its glyphs fall back on antique's. The
+            # style is the typography's, else the one the lettering stage placed, with its weight.
+            script = script_of(text, translation.language)
+            face = style_face(self.styles, style, script)
+            preferred_font = preferred_font or face.family
+            if font_weight is None and lettering is not None:
+                font_weight = lettering.font_weight
+            font_weight = font_weight if font_weight is not None else face.weight
+            if font_style is None and face.italic:
+                font_style = FontStyle.ITALIC
+            styled = fallback_families(self.styles, script)
+            font_families = styled + [family for family in font_families if family not in styled]
         is_bubble = balloon is not None
         descriptor = TextNodeDescriptor(
             entity=entity,
@@ -494,9 +518,9 @@ class _Traversal:
             height=frame.bounds.height,
             balloon_contour=balloon,
             preferred_font=preferred_font,
-            font_families=list(self.font_families),
-            font_weight=typography.font_weight if typography is not None else None,
-            font_style=_font_style(typography.font_style) if typography is not None else None,
+            font_families=font_families,
+            font_weight=font_weight,
+            font_style=font_style,
             font_size=typography.size if typography is not None else None,
             minimum_font_size=MINIMUM_FONT_SIZE,
             auto_fit=typography.auto_fit if typography is not None else True,

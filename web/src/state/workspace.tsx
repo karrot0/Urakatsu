@@ -75,7 +75,7 @@ export type SelectMode = "replace" | "toggle" | "range" | "add-range";
 export const STAGES = ["detection", "ocr", "translation", "inpainting"] as const;
 export type StageName = (typeof STAGES)[number];
 /** Optional stages run on their own, outside the stage picker. */
-export type RunStage = StageName | "censor_detection" | "decensor" | "colorization";
+export type RunStage = StageName | "censor_detection" | "decensor" | "colorization" | "lettering";
 
 export interface JobState {
   id: string;

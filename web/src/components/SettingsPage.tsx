@@ -16,6 +16,7 @@ import { ModelsFolder, StorageBar, StorageBreakdown, useModelsStorage } from "./
 import { NumberField, Select, Switch, type Option } from "./primitives";
 import { FontPicker } from "./FontPicker";
 import { useFontFaces } from "../fontFaces";
+import { COMMON_STYLES, DEFAULT_STYLE, SCRIPTS, STYLES as LETTERING_STYLES, parseStyles, styleFace, styleLabel, type StyleFace } from "../lettering";
 import { CensorshipPreview, type CensorshipMode } from "./CensorshipPreview";
 import { ColorizationPreview, type ColorizationMode } from "./ColorizationPreview";
 import { SoundEffectPreview, type SoundEffectMode } from "./SoundEffectPreview";
@@ -1222,6 +1223,83 @@ function Translation({ draft, update }: { draft: Config; update: (patch: Partial
 
 // ---- typesetting -------------------------------------------------------------------------------
 
+const STYLE_WEIGHTS: Option[] = [{ value: "", label: "Auto" }, ...[100, 200, 300, 400, 500, 600, 700, 800, 900].map((w) => ({ value: String(w), label: String(w) }))];
+const STYLE_SLANTS: Option[] = [
+  { value: "", label: "Auto" },
+  { value: "italic", label: "Italic" },
+  { value: "upright", label: "Upright" },
+];
+
+/** Each lettering style's font, weight and slant for one script. What a style leaves on Auto is
+ *  Dialogue's; what Dialogue leaves is the default fonts'. */
+function LetteringStyles({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
+  const [script, setScript] = useState("Latn");
+  const [all, setAll] = useState(false);
+  const styles = useMemo(() => parseStyles(draft.stylesJson), [draft.stylesJson]);
+  const shown = all ? [...COMMON_STYLES, ...LETTERING_STYLES.filter((style) => !COMMON_STYLES.includes(style))] : COMMON_STYLES;
+  useFontFaces(shown.map((style) => styleFace(styles, style, script).family));
+  const set = (style: string, patch: StyleFace) => {
+    const face: StyleFace = { ...styles[style]?.[script], ...patch };
+    if (!face.family) delete face.family;
+    if (face.weight === undefined) delete face.weight;
+    if (face.italic === undefined) delete face.italic;
+    update({ stylesJson: JSON.stringify({ ...styles, [style]: { ...styles[style], [script]: face } }) });
+  };
+  return (
+    <PreferenceSection title="Lettering styles" description="The font each kind of line is set in. A style left on Auto takes Dialogue's font, weight and slant.">
+      <div className={cn(PREF_ROW, "items-center")}>
+        <p className="font-medium">Script</p>
+        <div className={CONTROL_PAIR}>
+          <Select label="Script" value={script} options={SCRIPTS} onChange={setScript} />
+          <Button variant="outline" disabled={!draft.defaultStylesJson || draft.stylesJson === draft.defaultStylesJson} onClick={() => update({ stylesJson: draft.defaultStylesJson })}>
+            Restore defaults
+          </Button>
+        </div>
+      </div>
+      {shown.map((style) => {
+        const own = styles[style]?.[script] ?? {};
+        const inherited = styleFace(styles, style === DEFAULT_STYLE ? undefined : DEFAULT_STYLE, script);
+        return (
+          <div key={style} className={cn(PREF_ROW, "items-center")}>
+            <p className="font-medium">{styleLabel(style)}</p>
+            <div className="flex min-w-0 items-center gap-1">
+              <div className="min-w-0 flex-1">
+                <FontPicker
+                  value={own.family ?? ""}
+                  placeholder="Default fonts"
+                  defaultFont={style === DEFAULT_STYLE ? undefined : inherited.family}
+                  onChange={(family) => set(style, { family: family || undefined })}
+                />
+              </div>
+              <Select
+                size="sm"
+                className="w-[76px] flex-none"
+                label={`${styleLabel(style)} weight`}
+                value={own.weight === undefined ? "" : String(own.weight)}
+                options={STYLE_WEIGHTS}
+                onChange={(weight) => set(style, { weight: weight ? Number(weight) : undefined })}
+              />
+              <Select
+                size="sm"
+                className="w-[88px] flex-none"
+                label={`${styleLabel(style)} slant`}
+                value={own.italic === undefined ? "" : own.italic ? "italic" : "upright"}
+                options={STYLE_SLANTS}
+                onChange={(slant) => set(style, { italic: slant ? slant === "italic" : undefined })}
+              />
+            </div>
+          </div>
+        );
+      })}
+      <div className="py-2">
+        <Button variant="ghost" onClick={() => setAll(!all)}>
+          {all ? "Show the common styles" : "Show all styles"}
+        </Button>
+      </div>
+    </PreferenceSection>
+  );
+}
+
 function Typesetting({ draft, update }: { draft: Config; update: (patch: Partial<Config>) => void }) {
   const [adding, setAdding] = useState("");
   const families = draft.fontFamilies;
@@ -1233,9 +1311,19 @@ function Typesetting({ draft, update }: { draft: Config; update: (patch: Partial
     next.splice(index + delta, 0, item);
     set(next);
   };
+  const matching = (draft.lettering || "match") !== "off";
   return (
     <PreferencePage title="Typesetting" description="Fonts used for translated text when a block does not choose one.">
-      <PreferenceSection title="Default fonts" description="Tried in order; the first font with the needed characters is used.">
+      <PreferenceSection title="Lettering">
+        <PreferenceRow
+          title="Match the original's lettering"
+          description="Reads what kind of typeface each line is lettered in, and how heavy, and sets its translation in the matching style. Runs after text recognition; Run Lettering in the stage menu does it for pages that are already read."
+        >
+          <Switch label="Match the original's lettering" checked={matching} onChange={(on) => update({ lettering: on ? "match" : "off" })} />
+        </PreferenceRow>
+      </PreferenceSection>
+      <LetteringStyles draft={draft} update={update} />
+      <PreferenceSection title="Default fonts" description="For text without a lettering style, and for characters a style's font lacks. Tried in order; the first font with the needed characters is used.">
         {families.length === 0 && <p className="py-3 text-fg-2 shadow-[inset_0_-1px_0_var(--border-soft)]">No default fonts. The renderer falls back to system fonts.</p>}
         {families.map((family, index) => (
           <div key={family} className={cn(PREF_ROW, "items-center")}>

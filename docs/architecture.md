@@ -17,6 +17,7 @@ urakatsu/
 │   │                baberu-ocr, hayai-ocr, charspot-ocr (ONNX)
 │   ├── inpainting/  lama, aot (Torch); flux2-klein, rorem-mixed, any catalog diffusion model
 │   │                (stable-diffusion.cpp)
+│   ├── lettering/   yuzumarker-font-detection (Torch): reads the kind of face a line is lettered in
 │   └── translation/ local GGUF models (llama.cpp) and hosted APIs (Claude, OpenAI, DeepL, ...)
 ├── scene/       scene model: entities, components, relations, undo
 ├── pipeline/    project store (Project, then Chapters, then Pages), scheduler, stage processors
@@ -38,6 +39,8 @@ Urakatsu keeps Koharu's stage semantics:
 - A stage runs on one page. OCR needs detection, translation needs OCR, inpainting needs
   detection, and rendering needs translation and inpainting. Pages enter in project order,
   and a page's later stages become eligible as soon as their prerequisites finish.
+- The lettering stage (not a stage in Koharu, which reads faces inside detection) runs after OCR
+  and gives each text the style of its original's lettering (`docs/models.md`).
 - Pages run one at a time: every stage of a page finishes before the next page starts, so
   finished pages appear from the first seconds of a run.
 - At most one job per stage runs at a time, and accelerated stages share one admission lane.

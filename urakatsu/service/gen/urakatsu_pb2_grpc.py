@@ -5,7 +5,7 @@ import warnings
 
 from . import urakatsu_pb2 as urakatsu_dot_v1_dot_urakatsu__pb2
 
-GRPC_GENERATED_VERSION = '1.84.1'
+GRPC_GENERATED_VERSION = '1.85.4'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

@@ -163,6 +163,19 @@ class Pipeline:
         self._providers[stage] = provider
         return provider
 
+    def can_letter(self) -> bool:
+        """Whether the lettering stage's font reader can run on this installation."""
+        wanted = self.config.provider_for(Stage.LETTERING)
+        try:
+            cls = self.registry.get(Stage.LETTERING, wanted)
+        except KeyError:
+            log.info("lettering is left out: no font reader %r is registered", wanted)
+            return False
+        availability = cls.available(self.config.runtime_for(wanted))
+        if not availability.ok:
+            log.info("lettering is left out: %s cannot run (%s)", wanted, availability.reason)
+        return availability.ok
+
     def unload_all(self, keep: Stage | None = None) -> list[Stage]:
         wanted = [(stage, provider) for stage, provider in self._providers.items() if stage is not keep]
         unloaded = self._unload(*[provider for _, provider in wanted])
@@ -455,6 +468,19 @@ def _colorization_stages(stages: list[Stage], mode: str) -> list[Stage]:
     return kept
 
 
+def _lettering_stages(stages: list[Stage], mode: str) -> list[Stage]:
+    """``stages`` without lettering while ``mode`` is off; with it on, a run that reads or
+    translates text letters it too, since a text's style is read from its source."""
+    if mode == "off":
+        kept = [stage for stage in stages if stage is not Stage.LETTERING]
+        if not kept:
+            raise ValueError("lettering is off (Settings, Typesetting, Match the original's lettering)")
+        return kept
+    if Stage.LETTERING in stages or not (Stage.OCR in stages or Stage.TRANSLATION in stages):
+        return stages
+    return [stage for stage in Stage.all() if stage in stages or stage is Stage.LETTERING]
+
+
 class _Execution:
     def __init__(self, pipeline: Pipeline, session: Session, request: Request):
         self.started = time.perf_counter()
@@ -486,6 +512,11 @@ class _Execution:
                 stages = [Stage.WATERMARKS, *stages]
             stages = _censorship_stages(stages, pipeline.config.censorship.mode, request.operation)
             stages = _colorization_stages(stages, pipeline.config.colorization.mode)
+            stages = _lettering_stages(stages, pipeline.config.lettering.mode)
+            if Stage.LETTERING in stages and len(stages) > 1 and not pipeline.can_letter():
+                # A run of more than lettering goes on without it when its font reader cannot run
+                # here (an installation without PyTorch); lettering run by itself says why.
+                stages = [stage for stage in stages if stage is not Stage.LETTERING]
             self.scope = NormalizedScope(self.scene, request.scope, stages)
         except (ValueError, KeyError) as error:
             raise PipelineError(ErrorKind.INVALID_INPUT, None, str(error)) from error

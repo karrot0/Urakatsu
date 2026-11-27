@@ -143,6 +143,12 @@ message Config {
   string colorization = 23;                 // ColorizationConfig.mode: off | colorize (empty keeps it)
   string colorization_model = 24;           // colorizer; empty keeps it
   string prompt_size = 25;                  // TranslationConfig.prompt_size: lean | balanced | full (empty keeps it)
+  string lettering = 26;                    // LetteringConfig.mode: off | match (empty keeps it)
+  string lettering_model = 27;              // font reader; empty keeps it
+  // TypesettingConfig.styles as JSON: {style: {script: {family?, weight?, italic?}}}, scripts as
+  // ISO 15924 codes (Latn, Cyrl, Grek, Hans, Hant, Jpan). Empty keeps it.
+  string styles_json = 28;
+  string default_styles_json = 29;          // output only: the styles a new installation starts with
 }
 
 message TranslationModel {
@@ -205,6 +211,7 @@ message Typography {
   bool authored = 11;               // output only: set by the user, not a pipeline guess (a guessed writing mode is only a hint)
   Gradient fill_gradient = 12;      // unset: the solid color
   Gradient stroke_gradient = 13;    // unset: the solid stroke color
+  string style = 14;                // lettering style (antique, mincho, gothic, ...) whose font the text takes where it sets none; "" for none
 }
 
 // Rich text formatting over [start, end) of a text, in code points (Unicode scalar values).
@@ -243,6 +250,11 @@ message TextBlock {
   string role = 18;
   double opacity = 19;
   repeated TextStyle translation_styles = 20;  // rich text over `translation`
+  // Output only: the lettering style the lettering stage placed the text in, and the weight it set
+  // (bold for a source heavier than the book's dialogue). `typography.style` and
+  // `typography.font_weight`, when set, win over them.
+  string lettering_style = 21;
+  optional int32 lettering_weight = 22;
 }
 
 message Region {

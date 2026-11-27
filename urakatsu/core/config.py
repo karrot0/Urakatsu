@@ -8,7 +8,10 @@
   so switching models keeps the other profiles (``ProcessorConfig``).
 - ``providers`` holds the translation providers' settings (API keys, base URLs).
 - ``runtimes`` selects the runtime for any provider that supports more than one.
-- ``typesetting`` holds the renderer's font family list (``TypesettingConfig``).
+- ``typesetting`` holds the renderer's font family list and each lettering style's font
+  (``TypesettingConfig``, ``core/styles.py``).
+- ``lettering`` says whether a translation is lettered in its source's kind of face
+  (``LetteringConfig``).
 - ``storage`` holds how page images are stored (``StorageConfig``; not an upstream setting).
 - ``sound_effects`` says what happens to detected onomatopoeia (``SoundEffectsConfig``; not an
   upstream setting: Koharu keeps them as regions that nothing downstream uses).
@@ -25,6 +28,7 @@ import tomli_w
 from pydantic import BaseModel, Field
 
 from .stage import Stage
+from .styles import StyleTable, default_styles
 
 
 def home() -> Path:
@@ -114,6 +118,25 @@ class TypesettingConfig(BaseModel):
     """``TypesettingConfig``."""
 
     font_families: list[str] = Field(default_factory=lambda: ["CCWildWords", "Adobe 黑体 Std"])
+    # ``RendererConfig.styles``: each lettering style's font, weight and italic by script. A text
+    # with a style (``Typography.style``) and no font of its own is set in them.
+    styles: StyleTable = Field(default_factory=default_styles)
+
+
+LETTERING_MODES = ("off", "match")
+
+
+class LetteringConfig(BaseModel):
+    """Whether a translation is lettered in its source's kind of face.
+
+    ``match`` runs the lettering stage after OCR: ``model`` (a font reader) says what kind of
+    face each line is lettered in and how heavy, and the line's translation takes that style
+    (``pipeline/stages/lettering.py``). ``off`` leaves every text in the default fonts. Koharu
+    reads the faces inside detection and has no switch.
+    """
+
+    mode: Literal["off", "match"] = "match"
+    model: str = "yuzumarker-font-detection"
 
 
 class StorageConfig(BaseModel):
@@ -202,6 +225,7 @@ class PipelineConfig(BaseModel):
     providers: dict[str, dict[str, Any]] = Field(default_factory=dict)
     runtimes: dict[str, str] = Field(default_factory=dict)
     typesetting: TypesettingConfig = Field(default_factory=TypesettingConfig)
+    lettering: LetteringConfig = Field(default_factory=LetteringConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     sound_effects: SoundEffectsConfig = Field(default_factory=SoundEffectsConfig)
     watermarks: WatermarksConfig = Field(default_factory=WatermarksConfig)
@@ -221,6 +245,8 @@ class PipelineConfig(BaseModel):
             return self.censorship.model
         if stage is Stage.COLORIZATION:
             return self.colorization.model
+        if stage is Stage.LETTERING:
+            return self.lettering.model
         return {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model
 
     def fill_provider(self) -> str:
@@ -242,6 +268,8 @@ class PipelineConfig(BaseModel):
             self.censorship.model = provider
         elif stage is Stage.COLORIZATION:
             self.colorization.model = provider
+        elif stage is Stage.LETTERING:
+            self.lettering.model = provider
         else:
             {Stage.DETECTION: self.detection, Stage.OCR: self.ocr, Stage.INPAINTING: self.inpainting}[stage].model = provider
 

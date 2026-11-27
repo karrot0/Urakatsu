@@ -31,6 +31,7 @@ import { currentBlock, currentPage, useWorkspace } from "../state/workspace";
 import { ActivityPanel } from "./ActivityTrace";
 import { AgentPanel } from "./AgentPanel";
 import { ColorWell, NumberField, RadioMenu, Select, Slider, Tooltip, type Option } from "./primitives";
+import { COMMON_STYLES, STYLES as LETTERING_STYLES, blockFace, styleLabel, useStyles } from "../lettering";
 import { FontPicker, useDefaultFont } from "./FontPicker";
 import { GradientField } from "./GradientField";
 import { RichTextField } from "./RichTextField";
@@ -127,6 +128,15 @@ function TypeInspector() {
     void ws.updateBlock(block.layerId, { typography: { ...typography, ...patch } as Typography, typographyFields });
   };
   const defaultFont = useDefaultFont();
+  // The block's lettering style: the one chosen for it, else the one matched from the original.
+  // It sets the font, weight and slant wherever the block sets none.
+  const face = blockFace(useStyles(), block);
+  const matched = block?.letteringStyle ?? "";
+  const letteringOptions: Option[] = [
+    { value: "", label: matched ? `Matched: ${styleLabel(matched)}` : "None" },
+    ...COMMON_STYLES.map((style) => ({ value: style, label: styleLabel(style) })),
+    ...LETTERING_STYLES.filter((style) => !COMMON_STYLES.includes(style)).map((style) => ({ value: style as string, label: styleLabel(style) })),
+  ];
   // A pipeline-made style's writing mode is only a hint the renderer ignores for horizontal
   // scripts, so it shows as Auto until the user picks one.
   const writingMode = typography.authored ? typography.writingMode : "";
@@ -136,9 +146,12 @@ function TypeInspector() {
 
   return (
     <section className="flex flex-none flex-col gap-2 px-3 pt-2 pb-3 shadow-[inset_0_-1px_0_var(--border-soft)] aria-disabled:opacity-[0.55]" aria-disabled={disabled}>
+      <InspectorField label="Lettering style">
+        <Select size="sm" label="Lettering style" disabled={disabled} value={typography.style || ""} options={letteringOptions} onChange={(style) => apply({ style })} />
+      </InspectorField>
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px_52px] gap-1">
         <InspectorField label="Font">
-          <FontPicker value={typography.preferredFont} disabled={disabled} defaultFont={defaultFont} onChange={(preferredFont) => apply({ preferredFont })} />
+          <FontPicker value={typography.preferredFont} disabled={disabled} defaultFont={face.family || defaultFont} onChange={(preferredFont) => apply({ preferredFont })} />
         </InspectorField>
         <InspectorField label="Color">
           <ColorWell size="sm" label="Text color" disabled={disabled} value={rgb(typography.color) ?? "#000000"} onChange={(color) => color && apply({ color: `${color}ff` })} />
@@ -179,10 +192,10 @@ function TypeInspector() {
           />
         </InspectorField>
         <InspectorField label="Weight">
-          <Select size="sm" label="Font weight" disabled={disabled} value={String(typography.fontWeight ?? 400)} options={WEIGHTS} onChange={(w) => apply({ fontWeight: Number(w) })} />
+          <Select size="sm" label="Font weight" disabled={disabled} value={String(typography.fontWeight ?? face.weight ?? 400)} options={WEIGHTS} onChange={(w) => apply({ fontWeight: Number(w) })} />
         </InspectorField>
         <InspectorField label="Style">
-          <Select size="sm" label="Font style" disabled={disabled} value={typography.fontStyle || "normal"} options={STYLES} onChange={(fontStyle) => apply({ fontStyle })} />
+          <Select size="sm" label="Font style" disabled={disabled} value={typography.fontStyle || (face.italic ? "italic" : "normal")} options={STYLES} onChange={(fontStyle) => apply({ fontStyle })} />
         </InspectorField>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-1">

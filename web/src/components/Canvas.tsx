@@ -34,6 +34,7 @@ import { matches } from "../shortcuts";
 import { BRUSH_SIZES, DEFAULT_SHORTCUTS, MIN_BRUSH, NUDGES, TOOLS, chapterOf, currentPage, selectedPages, useWorkspace, type FillShape, type ShortcutAction, type Tool } from "../state/workspace";
 import { Slider } from "./primitives";
 import { useFontFaces } from "../fontFaces";
+import { blockFace, useStyles } from "../lettering";
 import { cssGradient } from "../richText";
 import { useDefaultFont } from "./FontPicker";
 import { RichTextField } from "./RichTextField";
@@ -1904,7 +1905,9 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
   const vertical = layout ? layout.writing_mode === "vertical-rl" : typography?.writingMode === "Vertical" || (!typography?.writingMode && block.ocrDirection === "Vertical" && CJK.test(text));
   const size = (layout?.font_size ?? typography?.size ?? fittedSize(text, vertical ? box.h : box.w, vertical ? box.w : box.h)) * zoom;
   const align = { Start: "left", Center: "center", End: "right", Justify: "justify" }[typography?.alignment ?? ""] ?? "center";
-  const family = typography?.preferredFont || defaultFont;
+  // A block's style sets its font, weight and slant where the block sets none, as the renderer does.
+  const face = blockFace(useStyles(), block);
+  const family = typography?.preferredFont || face.family || defaultFont;
   useFontFaces([family, ...block.translationStyles.map((style) => style.font)]);
   if (!layouts && !waited) return null;
 
@@ -1957,8 +1960,8 @@ function CanvasTextEditor({ block, page, projectId, zoom, onDone }: { block: Tex
             fontFamily: family ? `"${family}", var(--font), sans-serif` : undefined,
             fontSize: size,
             lineHeight: 1.2,
-            fontWeight: typography?.fontWeight ?? undefined,
-            fontStyle: typography?.fontStyle === "italic" ? "italic" : undefined,
+            fontWeight: typography?.fontWeight ?? face.weight ?? undefined,
+            fontStyle: (typography?.fontStyle ? typography.fontStyle === "italic" : face.italic) ? "italic" : undefined,
             textAlign: align as CSSProperties["textAlign"],
             writingMode: vertical ? "vertical-rl" : undefined,
           },

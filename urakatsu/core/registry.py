@@ -52,6 +52,8 @@ BUILTIN_MODULES = (
     "urakatsu.providers.colorization.diffusion_colorizer",
     "urakatsu.providers.colorization.manga_light_colorizer",
     "urakatsu.providers.colorization.manga_colorization_v2",
+    # font reading (the lettering stage)
+    "urakatsu.providers.lettering.yuzumarker_font_detection",
 )
 
 # config.rs: the first entry of each list is the stage default.
@@ -64,6 +66,7 @@ DEFAULTS: dict[Stage, str] = {
     Stage.CENSOR_DETECTION: "er0mangaseg",
     Stage.DECENSOR: "flux2-klein-decensor",
     Stage.COLORIZATION: "diffusion-colorizer",
+    Stage.LETTERING: "yuzumarker-font-detection",
 }
 
 

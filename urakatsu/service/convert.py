@@ -6,7 +6,8 @@ import json
 from typing import Any, Optional
 
 from urakatsu import __version__
-from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, PROMPT_SIZES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
+from urakatsu.core.styles import SCRIPTS, STYLES, StyleFace, StyleTable, default_styles
+from urakatsu.core.config import CENSORSHIP_MODES, COLORIZATION_MODES, LETTERING_MODES, PROMPT_SIZES, SOUND_EFFECT_MODES, WATERMARK_MODES, CensorshipConfig, ColorizationConfig, GenerationConfig, LetteringConfig, ModelSelection, PipelineConfig, SoundEffectsConfig, TypesettingConfig, WatermarksConfig
 from urakatsu.core.progress import Progress
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.runtimes.device import Device
@@ -77,6 +78,7 @@ def typography_to_proto(view: Optional[TypographyView]) -> Optional[pb.Typograph
         alignment=view.alignment or "",
         writing_mode=view.writing_mode or "",
         authored=view.authored,
+        style=view.style or "",
     )
     _opt(message, "font_weight", view.font_weight)
     _opt(message, "size", view.size)
@@ -116,6 +118,7 @@ def typography_from_proto(message: pb.Typography) -> dict[str, Any]:
         "stroke_width": message.stroke_width if message.HasField("stroke_width") else None,
         "alignment": message.alignment or None,
         "writing_mode": message.writing_mode or None,
+        "style": message.style or None,
         "fill_gradient": _gradient_from_proto(message, "fill_gradient"),
         "stroke_gradient": _gradient_from_proto(message, "stroke_gradient"),
     }
@@ -141,7 +144,9 @@ def block_to_proto(block: TextBlockView) -> pb.TextBlock:
         visible=block.visible,
         opacity=block.opacity,
         role=block.role or "",
+        lettering_style=block.lettering_style or "",
     )
+    _opt(message, "lettering_weight", block.lettering_weight)
     if block.bounds:
         message.bounds.CopyFrom(box_to_proto(block.bounds))
     typography = typography_to_proto(block.typography)
@@ -250,6 +255,10 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
         decensor_model=config.censorship.model,
         colorization=config.colorization.mode,
         colorization_model=config.colorization.model,
+        lettering=config.lettering.mode,
+        lettering_model=config.lettering.model,
+        styles_json=styles_to_json(config.typesetting.styles),
+        default_styles_json=styles_to_json(default_styles()),
     )
     for key, value in config.processor.items():
         message.processor_json[key] = json.dumps(value)
@@ -258,6 +267,39 @@ def config_to_proto(config: PipelineConfig) -> pb.Config:
     for key, value in config.runtimes.items():
         message.runtimes[key] = value
     return message
+
+
+def styles_to_json(styles: StyleTable) -> str:
+    """The style table as the API carries it, without the values a face leaves out."""
+    return json.dumps(
+        {style: {script: face.model_dump(exclude_none=True) for script, face in faces.items()} for style, faces in styles.items()},
+        ensure_ascii=False,
+    )
+
+
+def styles_from_json(raw: str) -> StyleTable:
+    """A style table from the API: known styles and scripts only, each face checked."""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"styles are not valid JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError("styles must be a JSON object")
+    table: StyleTable = {}
+    for style, faces in value.items():
+        if style not in STYLES:
+            raise ValueError(f"unknown lettering style {style!r}; expected one of {list(STYLES)}")
+        if not isinstance(faces, dict):
+            raise ValueError(f"style {style} must map scripts to faces")
+        for script, face in faces.items():
+            if script not in SCRIPTS:
+                raise ValueError(f"unknown script {script!r} in style {style}; expected one of {list(SCRIPTS)}")
+            parsed = StyleFace.model_validate(face)
+            if parsed.weight is not None and not 1 <= parsed.weight <= 1000:
+                raise ValueError(f"style {style} has a weight outside 1 to 1000")
+            if parsed.family or parsed.weight is not None or parsed.italic is not None:
+                table.setdefault(style, {})[script] = parsed
+    return table
 
 
 def _json_map(entries, label: str) -> dict[str, dict[str, Any]]:
@@ -306,7 +348,13 @@ def config_from_proto(message: pb.Config, base: PipelineConfig) -> PipelineConfi
             raise ValueError(f"unknown prompt size {message.prompt_size!r}; expected one of {list(PROMPT_SIZES)}")
         config.translation.prompt_size = message.prompt_size
     if message.font_families:
-        config.typesetting = TypesettingConfig(font_families=list(message.font_families))
+        config.typesetting = config.typesetting.model_copy(update={"font_families": list(message.font_families)})
+    if message.styles_json:
+        config.typesetting = config.typesetting.model_copy(update={"styles": styles_from_json(message.styles_json)})
+    if message.lettering:
+        if message.lettering not in LETTERING_MODES:
+            raise ValueError(f"unknown lettering mode {message.lettering!r}; expected one of {list(LETTERING_MODES)}")
+        config.lettering = LetteringConfig(mode=message.lettering, model=message.lettering_model or config.lettering.model)
     config.storage = config.storage.model_copy(update={"lossless_pages": message.lossless_pages})
     if message.sound_effects:
         if message.sound_effects not in SOUND_EFFECT_MODES:

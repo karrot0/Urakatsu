@@ -328,6 +328,7 @@ export const FIT_TONE: Record<FitLevel, "success" | "info" | "warning" | "danger
 export const STAGE_LABEL: Record<string, string> = {
   detection: "Detection",
   ocr: "Text recognition",
+  lettering: "Lettering",
   inpainting: "Inpainting",
   translation: "Translation",
   sound_effects: "Sound effects",

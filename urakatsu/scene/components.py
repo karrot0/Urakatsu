@@ -229,6 +229,22 @@ class DetectionAnalysis(Component):
     labels: list[DetectionLabel] = Field(default_factory=list)
 
 
+class LetteringAnalysis(Component):
+    """What the lettering stage read of a text region's face. Not a component in Koharu, which keeps
+    the same reading in its detection attributes.
+
+    ``kernels`` is how likely each lettering style (``core/styles.py``) is to be the face, without
+    those under a hundredth. ``weight`` is the weight of the fonts the reader took it for (100 to
+    900) and ``stroke`` its glyph stroke over its glyph size: two readings of how heavy it is.
+    """
+
+    KIND: ClassVar[str] = "dev.urakatsu.analysis.lettering"
+    origin: Origin = Field(default_factory=UserOrigin)
+    kernels: dict[str, float] = Field(default_factory=dict)
+    weight: Optional[float] = None
+    stroke: Optional[float] = None
+
+
 # ---- layers (components/layers.rs) ---------------------------------------------------------------
 
 
@@ -312,6 +328,10 @@ class Gradient(BaseModel):
 class Typography(Component):
     KIND: ClassVar[str] = "dev.koharu.text.typography"
     origin: Origin = Field(default_factory=UserOrigin)
+    # The lettering style (``core/styles.py``) the text is set in: its font, weight and italic
+    # where the fields below set none. Koharu keeps it as the text style's kernel. Unset, the
+    # layer's ``LetteringStyle`` (what the lettering stage placed) stands.
+    style: Optional[str] = None
     preferred_font: Optional[str] = None
     font_weight: Optional[int] = None
     font_style: Optional[FontStyle] = None
@@ -326,6 +346,18 @@ class Typography(Component):
     fill_gradient: Optional[Gradient] = None
     stroke_gradient: Optional[Gradient] = None
     extensions: dict[str, str] = Field(default_factory=dict)
+
+
+class LetteringStyle(Component):
+    """The style the lettering stage placed a text layer in, and the weight it set it at when its
+    source is heavier than the book's dialogue. A component of its own, not fields of
+    ``Typography``, which detection or the user owns: the stage can place it again without
+    touching either, and what the typography sets itself wins over it."""
+
+    KIND: ClassVar[str] = "dev.urakatsu.text.lettering"
+    origin: Origin = Field(default_factory=UserOrigin)
+    style: str
+    font_weight: Optional[int] = None
 
 
 # ---- groups (components/groups.rs) ---------------------------------------------------------------
@@ -510,11 +542,13 @@ COMPONENTS: dict[str, type[Component]] = {
         Page,
         EntityOrigin,
         OcrAnalysis,
+        LetteringAnalysis,
         Region,
         DetectionAnalysis,
         RasterLayer,
         TextLayout,
         Typography,
+        LetteringStyle,
         Group,
         TextGroup,
         TextContent,

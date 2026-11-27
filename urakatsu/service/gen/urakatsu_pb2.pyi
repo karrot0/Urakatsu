@@ -124,7 +124,7 @@ class ModelSelection(_message.Message):
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., quantization: _Optional[str] = ..., vision: _Optional[bool] = ..., reasoning: _Optional[bool] = ...) -> None: ...
 
 class Config(_message.Message):
-    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes", "watermarks", "watermarks_model", "censorship", "censor_detector", "decensor_model", "colorization", "colorization_model", "prompt_size")
+    __slots__ = ("device", "detection", "ocr", "inpainting", "translation", "generation_json", "target_language", "instructions", "processor_json", "providers_json", "runtimes", "font_families", "fill", "lossless_pages", "sound_effects", "sound_effects_model", "idle_unload_minutes", "watermarks", "watermarks_model", "censorship", "censor_detector", "decensor_model", "colorization", "colorization_model", "prompt_size", "lettering", "lettering_model", "styles_json", "default_styles_json")
     class ProcessorJsonEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -171,6 +171,10 @@ class Config(_message.Message):
     COLORIZATION_FIELD_NUMBER: _ClassVar[int]
     COLORIZATION_MODEL_FIELD_NUMBER: _ClassVar[int]
     PROMPT_SIZE_FIELD_NUMBER: _ClassVar[int]
+    LETTERING_FIELD_NUMBER: _ClassVar[int]
+    LETTERING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    STYLES_JSON_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_STYLES_JSON_FIELD_NUMBER: _ClassVar[int]
     device: str
     detection: str
     ocr: str
@@ -196,7 +200,11 @@ class Config(_message.Message):
     colorization: str
     colorization_model: str
     prompt_size: str
-    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ..., watermarks: _Optional[str] = ..., watermarks_model: _Optional[str] = ..., censorship: _Optional[str] = ..., censor_detector: _Optional[str] = ..., decensor_model: _Optional[str] = ..., colorization: _Optional[str] = ..., colorization_model: _Optional[str] = ..., prompt_size: _Optional[str] = ...) -> None: ...
+    lettering: str
+    lettering_model: str
+    styles_json: str
+    default_styles_json: str
+    def __init__(self, device: _Optional[str] = ..., detection: _Optional[str] = ..., ocr: _Optional[str] = ..., inpainting: _Optional[str] = ..., translation: _Optional[_Union[ModelSelection, _Mapping]] = ..., generation_json: _Optional[str] = ..., target_language: _Optional[str] = ..., instructions: _Optional[str] = ..., processor_json: _Optional[_Mapping[str, str]] = ..., providers_json: _Optional[_Mapping[str, str]] = ..., runtimes: _Optional[_Mapping[str, str]] = ..., font_families: _Optional[_Iterable[str]] = ..., fill: _Optional[str] = ..., lossless_pages: _Optional[bool] = ..., sound_effects: _Optional[str] = ..., sound_effects_model: _Optional[str] = ..., idle_unload_minutes: _Optional[int] = ..., watermarks: _Optional[str] = ..., watermarks_model: _Optional[str] = ..., censorship: _Optional[str] = ..., censor_detector: _Optional[str] = ..., decensor_model: _Optional[str] = ..., colorization: _Optional[str] = ..., colorization_model: _Optional[str] = ..., prompt_size: _Optional[str] = ..., lettering: _Optional[str] = ..., lettering_model: _Optional[str] = ..., styles_json: _Optional[str] = ..., default_styles_json: _Optional[str] = ...) -> None: ...
 
 class TranslationModel(_message.Message):
     __slots__ = ("provider", "provider_name", "model", "name", "quantizations", "vision", "reasoning")
@@ -271,7 +279,7 @@ class Gradient(_message.Message):
     def __init__(self, kind: _Optional[str] = ..., angle: _Optional[float] = ..., stops: _Optional[_Iterable[_Union[GradientStop, _Mapping]]] = ...) -> None: ...
 
 class Typography(_message.Message):
-    __slots__ = ("preferred_font", "font_weight", "font_style", "size", "auto_fit", "color", "stroke_color", "stroke_width", "alignment", "writing_mode", "authored", "fill_gradient", "stroke_gradient")
+    __slots__ = ("preferred_font", "font_weight", "font_style", "size", "auto_fit", "color", "stroke_color", "stroke_width", "alignment", "writing_mode", "authored", "fill_gradient", "stroke_gradient", "style")
     PREFERRED_FONT_FIELD_NUMBER: _ClassVar[int]
     FONT_WEIGHT_FIELD_NUMBER: _ClassVar[int]
     FONT_STYLE_FIELD_NUMBER: _ClassVar[int]
@@ -285,6 +293,7 @@ class Typography(_message.Message):
     AUTHORED_FIELD_NUMBER: _ClassVar[int]
     FILL_GRADIENT_FIELD_NUMBER: _ClassVar[int]
     STROKE_GRADIENT_FIELD_NUMBER: _ClassVar[int]
+    STYLE_FIELD_NUMBER: _ClassVar[int]
     preferred_font: str
     font_weight: int
     font_style: str
@@ -298,7 +307,8 @@ class Typography(_message.Message):
     authored: bool
     fill_gradient: Gradient
     stroke_gradient: Gradient
-    def __init__(self, preferred_font: _Optional[str] = ..., font_weight: _Optional[int] = ..., font_style: _Optional[str] = ..., size: _Optional[float] = ..., auto_fit: _Optional[bool] = ..., color: _Optional[str] = ..., stroke_color: _Optional[str] = ..., stroke_width: _Optional[float] = ..., alignment: _Optional[str] = ..., writing_mode: _Optional[str] = ..., authored: _Optional[bool] = ..., fill_gradient: _Optional[_Union[Gradient, _Mapping]] = ..., stroke_gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
+    style: str
+    def __init__(self, preferred_font: _Optional[str] = ..., font_weight: _Optional[int] = ..., font_style: _Optional[str] = ..., size: _Optional[float] = ..., auto_fit: _Optional[bool] = ..., color: _Optional[str] = ..., stroke_color: _Optional[str] = ..., stroke_width: _Optional[float] = ..., alignment: _Optional[str] = ..., writing_mode: _Optional[str] = ..., authored: _Optional[bool] = ..., fill_gradient: _Optional[_Union[Gradient, _Mapping]] = ..., stroke_gradient: _Optional[_Union[Gradient, _Mapping]] = ..., style: _Optional[str] = ...) -> None: ...
 
 class TextStyle(_message.Message):
     __slots__ = ("start", "end", "bold", "italic", "underline", "strikethrough", "color", "font", "scale", "gradient")
@@ -325,7 +335,7 @@ class TextStyle(_message.Message):
     def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., bold: _Optional[bool] = ..., italic: _Optional[bool] = ..., underline: _Optional[bool] = ..., strikethrough: _Optional[bool] = ..., color: _Optional[str] = ..., font: _Optional[str] = ..., scale: _Optional[float] = ..., gradient: _Optional[_Union[Gradient, _Mapping]] = ...) -> None: ...
 
 class TextBlock(_message.Message):
-    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles")
+    __slots__ = ("layer_id", "content_id", "region_id", "balloon_id", "layout_kind", "frame", "bounds", "angle", "source_text", "source_origin", "source_language", "translation", "translation_origin", "translation_language", "ocr_direction", "typography", "visible", "role", "opacity", "translation_styles", "lettering_style", "lettering_weight")
     LAYER_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_ID_FIELD_NUMBER: _ClassVar[int]
     REGION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -346,6 +356,8 @@ class TextBlock(_message.Message):
     ROLE_FIELD_NUMBER: _ClassVar[int]
     OPACITY_FIELD_NUMBER: _ClassVar[int]
     TRANSLATION_STYLES_FIELD_NUMBER: _ClassVar[int]
+    LETTERING_STYLE_FIELD_NUMBER: _ClassVar[int]
+    LETTERING_WEIGHT_FIELD_NUMBER: _ClassVar[int]
     layer_id: str
     content_id: str
     region_id: str
@@ -366,7 +378,9 @@ class TextBlock(_message.Message):
     role: str
     opacity: float
     translation_styles: _containers.RepeatedCompositeFieldContainer[TextStyle]
-    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ...) -> None: ...
+    lettering_style: str
+    lettering_weight: int
+    def __init__(self, layer_id: _Optional[str] = ..., content_id: _Optional[str] = ..., region_id: _Optional[str] = ..., balloon_id: _Optional[str] = ..., layout_kind: _Optional[str] = ..., frame: _Optional[_Iterable[_Union[Point, _Mapping]]] = ..., bounds: _Optional[_Union[Box, _Mapping]] = ..., angle: _Optional[float] = ..., source_text: _Optional[str] = ..., source_origin: _Optional[str] = ..., source_language: _Optional[str] = ..., translation: _Optional[str] = ..., translation_origin: _Optional[str] = ..., translation_language: _Optional[str] = ..., ocr_direction: _Optional[str] = ..., typography: _Optional[_Union[Typography, _Mapping]] = ..., visible: _Optional[bool] = ..., role: _Optional[str] = ..., opacity: _Optional[float] = ..., translation_styles: _Optional[_Iterable[_Union[TextStyle, _Mapping]]] = ..., lettering_style: _Optional[str] = ..., lettering_weight: _Optional[int] = ...) -> None: ...
 
 class Region(_message.Message):
     __slots__ = ("id", "kind", "label", "polygon", "bounds", "confidence")

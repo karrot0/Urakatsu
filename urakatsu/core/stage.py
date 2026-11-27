@@ -22,6 +22,11 @@ when asked for by itself. With ``off`` a run leaves both out.
 ``COLORIZATION`` is not in Koharu either (``pipeline/stages/colorization.py``). It runs after
 Decensor, over the cleaned page, and before sound effects, so a redraw sees the colors. With
 colorization ``off`` a run leaves it out.
+
+``LETTERING`` is not a stage in Koharu, which reads each line's face inside detection and picks
+its style inside translation (``pipeline/stages/lettering.py``). It runs after OCR, since which
+style a line takes depends on its text, and a run that reads or translates text gets it. With
+lettering ``off`` a run leaves it out.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ class Stage(str, Enum):
     CENSOR_DETECTION = "censor_detection"
     DETECTION = "detection"
     OCR = "ocr"
+    LETTERING = "lettering"
     TRANSLATION = "translation"
     INPAINTING = "inpainting"
     DECENSOR = "decensor"
@@ -43,7 +49,7 @@ class Stage(str, Enum):
 
     @classmethod
     def all(cls) -> list["Stage"]:
-        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.COLORIZATION, cls.SOUND_EFFECTS]
+        return [cls.WATERMARKS, cls.CENSOR_DETECTION, cls.DETECTION, cls.OCR, cls.LETTERING, cls.TRANSLATION, cls.INPAINTING, cls.DECENSOR, cls.COLORIZATION, cls.SOUND_EFFECTS]
 
     @classmethod
     def parse(cls, value: "str | Stage") -> "Stage":
@@ -63,6 +69,7 @@ PREREQUISITES: dict[Stage, tuple[Stage, ...]] = {
     Stage.CENSOR_DETECTION: (Stage.WATERMARKS,),
     Stage.DETECTION: (Stage.WATERMARKS, Stage.CENSOR_DETECTION),
     Stage.OCR: (Stage.DETECTION,),
+    Stage.LETTERING: (Stage.DETECTION, Stage.OCR),
     Stage.TRANSLATION: (Stage.OCR,),
     Stage.INPAINTING: (Stage.DETECTION,),
     Stage.DECENSOR: (Stage.CENSOR_DETECTION, Stage.INPAINTING),
@@ -106,6 +113,7 @@ class Operation:
                 Stage.CENSOR_DETECTION: [Stage.CENSOR_DETECTION],
                 Stage.DETECTION: [Stage.DETECTION],
                 Stage.OCR: [Stage.DETECTION, Stage.OCR],
+                Stage.LETTERING: [Stage.DETECTION, Stage.OCR, Stage.LETTERING],
                 Stage.TRANSLATION: [Stage.DETECTION, Stage.OCR, Stage.TRANSLATION],
                 Stage.INPAINTING: [Stage.DETECTION, Stage.INPAINTING],
                 Stage.DECENSOR: [Stage.CENSOR_DETECTION, Stage.DECENSOR],

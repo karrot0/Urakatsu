@@ -29,6 +29,7 @@ from urakatsu.core.progress import Progress, ProgressKind
 from urakatsu.core.registry import registry
 from urakatsu.core.stage import Operation, Stage
 from urakatsu.core.stop import StopToken
+from urakatsu.core.styles import STYLES
 from urakatsu.pipeline import (
     EntitiesScope,
     PagesScope,
@@ -1202,6 +1203,10 @@ def _typography(data: dict[str, Any], current: Optional[c.Typography]) -> c.Typo
             value[key] = data[key]
     if "auto_fit" in data:
         value["auto_fit"] = bool(data["auto_fit"])
+    if "style" in data:
+        if data["style"] and data["style"] not in STYLES:
+            raise ValueError(f"unknown lettering style {data['style']!r}; expected one of {list(STYLES)}")
+        value["style"] = data["style"] or None
     if "font_style" in data:
         value["font_style"] = c.FontStyle(data["font_style"]) if data["font_style"] else None
     if "alignment" in data:

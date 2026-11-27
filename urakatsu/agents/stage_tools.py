@@ -36,6 +36,7 @@ _MODES: dict[Stage, tuple[str, tuple[str, ...]]] = {
     Stage.CENSOR_DETECTION: ("censorship", ("off", "detect", "remove")),
     Stage.DECENSOR: ("censorship", ("off", "detect", "remove")),
     Stage.COLORIZATION: ("colorization", ("off", "colorize")),
+    Stage.LETTERING: ("lettering", ("off", "match")),
     Stage.SOUND_EFFECTS: ("sound_effects", ("off", "typeset", "redraw")),
 }
 _STAGE_NOTES = {
@@ -43,6 +44,7 @@ _STAGE_NOTES = {
     Stage.CENSOR_DETECTION: "maps censor bars into a mask (mode detect or remove); shares its mode with decensor",
     Stage.DETECTION: "finds text regions and balloons",
     Stage.OCR: "reads the source text",
+    Stage.LETTERING: "reads what kind of typeface each line is lettered in and gives its translation the matching style (mode match)",
     Stage.TRANSLATION: "translates the text",
     Stage.INPAINTING: "removes the original lettering",
     Stage.DECENSOR: "reconstructs the art under censor bars (mode remove); shares its mode with censor_detection",
@@ -209,7 +211,7 @@ async def list_stage_providers(context: ToolContext, args: dict[str, Any]) -> An
     "provider's runtimes, or 'default' for the first available. model: an installed model id from "
     "list_stage_providers (for translation also a hosted model id from list_translation_models). mode: for the "
     "optional stages (watermarks off/remove, censor_detection and decensor off/detect/remove, colorization "
-    "off/colorize, sound_effects off/typeset/redraw). settings: the provider's own settings to change (names from "
+    "off/colorize, lettering off/match, sound_effects off/typeset/redraw). settings: the provider's own settings to change (names from "
     "list_stage_providers; not for translation). The change applies to the next run; loaded models reload.",
     {
         "stage": {"type": "string", "enum": [*STAGES, FILL]},
