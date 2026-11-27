@@ -446,3 +446,36 @@ async def test_a_preset_uses_its_own_url_and_key(monkeypatch):
         ("http://box.test:8000/v1/models", None),
     ]
     assert [(m.provider, m.provider_name, m.model) for m in models] == [("openai-compatible:groq", "Groq", "llama-3.3-70b")]
+
+
+@pytest.mark.parametrize("cls", [OpenAiCompatibleTranslator, LmStudioTranslator])
+async def test_a_model_that_reads_no_images_gets_the_text_alone(cls):
+    # Ollama's answer for a text-only model: the request goes again without the page image,
+    # and later requests leave it out from the start.
+    bodies = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        bodies.append(body)
+        if isinstance(body["messages"][1]["content"], list):
+            return httpx.Response(400, json={"error": {"message": "Multimodal data provided, but model does not support multimodal requests."}})
+        return chat_reply("A", "B")
+
+    provider = make(cls, handler)
+    image = Image.new("RGB", (8, 8))
+    assert await provider.translate(request(image=image)) == ["A", "B"]
+    assert [isinstance(body["messages"][1]["content"], list) for body in bodies] == [True, False]
+    assert await provider.translate(request(image=image)) == ["A", "B"]
+    assert len(bodies) == 3 and isinstance(bodies[2]["messages"][1]["content"], str)
+
+
+async def test_another_refusal_is_not_retried_without_the_image():
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(400, json={"error": {"message": "context length exceeded"}})
+
+    with pytest.raises(ApiError):
+        await make(OpenAiCompatibleTranslator, handler).translate(request(image=Image.new("RGB", (8, 8))))
+    assert len(calls) == 1
